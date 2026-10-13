@@ -32,6 +32,7 @@ import {
 	ReasoningFormat,
 	StreamConnectionState
 } from '$lib/enums';
+import { buildLlmContext } from '$lib/services/context';
 import { modelsStore } from '$lib/stores/models/index.svelte';
 import { settingsStore } from '$lib/stores/settings/index.svelte';
 import type { DatabaseMessageExtraMcpPrompt, DatabaseMessageExtraMcpResource } from '$lib/types';
@@ -806,7 +807,7 @@ export class ChatService {
 	 * messages. Shared by sendMessage, preEncode and the agentic flow.
 	 */
 	static async normalizeMessagesForApi(
-		messages: ApiChatMessageData[] | (DatabaseMessage & { extra?: DatabaseMessageExtra[] })[]
+		messages: (ApiChatMessageData | (DatabaseMessage & { extra?: DatabaseMessageExtra[] }))[]
 	): Promise<ApiChatMessageData[]> {
 		return (
 			await Promise.all(
@@ -833,6 +834,38 @@ export class ChatService {
 	}
 
 	/**
+	 * Resolves the outgoing payload shared by sendMessage and preEncode.
+	 *
+	 * A root→leaf database path goes through `buildLlmContext` — the single
+	 * choke point that also applies compaction (context-enhance/03 §2), so the
+	 * inspector, the agentic flow and the wire all build from the same result
+	 * (WYSIWYG). Already-API-shaped messages keep the plain normalization path.
+	 *
+	 * The per-message test mirrors `normalizeMessagesForApi`; anything that is
+	 * not a full DB path (mixed arrays, plain API messages) falls back to that
+	 * same path, so non-compaction behavior is unchanged.
+	 */
+	static async resolveOutgoingMessages(
+		messages: (ApiChatMessageData | (DatabaseMessage & { extra?: DatabaseMessageExtra[] }))[],
+		excludeReasoning: boolean
+	): Promise<ApiChatMessageData[]> {
+		const isDbPath =
+			messages.length > 0 &&
+			messages.every((msg) => 'id' in msg && 'convId' in msg && 'timestamp' in msg);
+
+		if (!isDbPath) {
+			return ChatService.normalizeMessagesForApi(messages);
+		}
+
+		const { messages: normalizedMessages } = await buildLlmContext(
+			messages as DatabaseMessage[],
+			{ excludeReasoning }
+		);
+
+		return normalizedMessages;
+	}
+
+	/**
 	 * Fire-and-forget request to pre-encode the conversation in the server's KV cache.
 	 * Re-submits the full conversation with n_predict=0 so the server processes the prompt
 	 * without generating tokens, warming the cache for the next turn.
@@ -843,8 +876,10 @@ export class ChatService {
 		excludeReasoning?: boolean,
 		signal?: AbortSignal
 	): Promise<void> {
-		const normalizedMessages: ApiChatMessageData[] =
-			await ChatService.normalizeMessagesForApi(messages);
+		const normalizedMessages: ApiChatMessageData[] = await ChatService.resolveOutgoingMessages(
+			messages,
+			excludeReasoning === true
+		);
 		const requestBody: Record<string, unknown> = {
 			messages: normalizedMessages.map((msg: ApiChatMessageData) => {
 				const mapped: Record<string, unknown> = {
@@ -1071,8 +1106,10 @@ export class ChatService {
 			xtc_probability,
 			xtc_threshold
 		} = options;
-		const normalizedMessages: ApiChatMessageData[] =
-			await ChatService.normalizeMessagesForApi(messages);
+		const normalizedMessages: ApiChatMessageData[] = await ChatService.resolveOutgoingMessages(
+			messages,
+			excludeReasoningFromContext === true
+		);
 
 		// Filter out image attachments if the model doesn't support vision
 		if (options.model && !modelsStore.props.modelSupportsVision(options.model)) {

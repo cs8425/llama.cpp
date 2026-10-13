@@ -190,6 +190,76 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 				key: SETTINGS_KEYS.MAX_IMAGE_RESOLUTION,
 				label: 'Maximum image resolution (megapixels)',
 				type: SettingsFieldType.INPUT
+			},
+			{
+				defaultValue: false,
+				help: 'Automatically compact the conversation when it approaches the model context limit. Compaction happens between turns (never mid-stream): the oldest messages are replaced by a model-generated summary so the next prompt fits in n_ctx.',
+				key: SETTINGS_KEYS.CONTEXT_AUTO_COMPACTION,
+				label: 'Automatic context compaction',
+				type: SettingsFieldType.CHECKBOX
+			},
+			{
+				defaultValue: false,
+				dependsOn: SETTINGS_KEYS.CONTEXT_AUTO_COMPACTION,
+				help: 'Also compact between turns of a running agentic flow, not only between flows. Keeps long agentic tasks under the context limit at the cost of one summary call per compaction.',
+				key: SETTINGS_KEYS.CONTEXT_AUTO_COMPACTION_IN_LOOP,
+				label: 'Compact inside agentic loops',
+				type: SettingsFieldType.CHECKBOX
+			},
+			{
+				defaultValue: 80,
+				dependsOn: SETTINGS_KEYS.CONTEXT_AUTO_COMPACTION,
+				help: 'Compact once the last prompt reaches this percentage of the model context (n_ctx). The remainder is the keep budget for recent messages.',
+				isPositiveInteger: true,
+				key: SETTINGS_KEYS.CONTEXT_COMPACTION_THRESHOLD,
+				label: 'Compaction threshold (%)',
+				max: 100,
+				min: 1,
+				type: SettingsFieldType.INPUT
+			},
+			{
+				defaultValue: 4,
+				help: 'Minimum number of recent user messages to keep verbatim when compacting. Lower values compact more aggressively.',
+				isPositiveInteger: true,
+				key: SETTINGS_KEYS.CONTEXT_KEEP_MIN_USER_TURNS,
+				label: 'Keep minimum user turns',
+				max: 50,
+				min: 1,
+				type: SettingsFieldType.INPUT
+			},
+			{
+				defaultValue: 2,
+				help: 'Minimum total messages to keep when a single turn is too large to drop whole (the cut then lands inside the turn).',
+				isPositiveInteger: true,
+				key: SETTINGS_KEYS.CONTEXT_KEEP_MIN_MESSAGES,
+				label: 'Keep minimum messages',
+				max: 50,
+				min: 2,
+				type: SettingsFieldType.INPUT
+			},
+			{
+				defaultValue: 1024,
+				help: 'Maximum tokens for the generated conversation summary.',
+				isPositiveInteger: true,
+				key: SETTINGS_KEYS.CONTEXT_SUMMARY_MAX_TOKENS,
+				label: 'Summary max tokens',
+				max: 4096,
+				min: 128,
+				type: SettingsFieldType.INPUT
+			},
+			{
+				defaultValue: true,
+				help: 'Show compaction entries in the chat. When off they are hidden but still applied to what is sent to the model.',
+				key: SETTINGS_KEYS.CONTEXT_SHOW_COMPACTION_ENTRIES,
+				label: 'Show compaction entries',
+				type: SettingsFieldType.CHECKBOX
+			},
+			{
+				defaultValue: '',
+				help: 'Custom instruction for the summary model. Leave empty to use the built-in prompt (which has a separate variant for split turns).',
+				key: SETTINGS_KEYS.CONTEXT_SUMMARY_PROMPT,
+				label: 'Summary prompt',
+				type: SettingsFieldType.TEXTAREA
 			}
 		],
 		slug: SETTINGS_SECTION_SLUGS.GENERAL,

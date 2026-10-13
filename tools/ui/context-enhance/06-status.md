@@ -7,8 +7,8 @@
 
 | 階段 | 狀態 |
 | ---- | ---- |
-| Phase 0 — 純核心 | ✅ 程式碼完成，**等待使用者編譯/測試確認**（見 §4） |
-| Phase 1 — 送出路徑接 builder + 手動壓縮 | ⬜ 未開始（執行清單見 §5） |
+| Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
+| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1 / 5.2 / 5.3 完成，**等待使用者編譯確認**（見 §4）；5.4–5.7 未開始 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ⬜ |
 | Phase 3 — 可選後續 | ⬜ |
 
@@ -76,33 +76,45 @@ builder 保持 WYSIWYG（送出 = 節點存的 content）。Phase 1 的
 `(plan, model, signal?, options?: { maxTokens?, temperature?, prompt? })` —
 比規劃多一個 options（對接 `contextSummaryMaxTokens` / `contextSummaryPrompt`）。
 
+### 3.7 `resolveOutgoingMessages` 是公開 static（非 private）
+規劃原本建議寫成 `chat.service.ts` 內的私有 helper；因為 5.3 規定 agentic
+「直接呼叫該 helper，維持組裝只有一個入口」，所以公開為
+`ChatService.resolveOutgoingMessages(messages, excludeReasoning)`。
+
+### 3.8 `normalizeMessagesForApi` / `resolveOutgoingMessages` 參數放大為 per-element union
+原簽名 `ApiChatMessageData[] | (DatabaseMessage & { extra? })[]`（union of arrays）
+無法接受 `AgenticFlowParams.messages` 的 `(ApiChatMessageData | (DatabaseMessage & { extra? }))[]`
+（array of union；TS 不互推）。兩者都放大到 per-element union：所有既有呼叫點
+（`DatabaseMessage[]` / `ApiChatMessageData[]` / union 陣列）皆可指派，
+`normalizeMessagesForApi` 內部本来就是逐則判别，行為不變。
+`sendMessage` / `preEncode` 對外簽名維持原樣（plan 要求）。
+
+### 3.9 agentic 初始 normalize 傳 `excludeReasoning: false`
+`runAgenticFlow` 的初始 `normalizedMessages`（sessionMessages 基底）傳 `false`，
+與現行 `normalizeMessagesForApi`（從不 strip reasoning）行為一致；
+逐 turn 的 reasoning strip 仍在 `sendMessage` 的 request body mapping
+（`options.excludeReasoningFromContext`）發生，不動。
+
 ## 4. 驗證狀態（目前停在這）
 
-- **Round 1**（使用者跑 `npm run check` + unit）：5 type errors + 3 test failures。
-- **Round 2 已修正**：
-  1. `summarize.ts` `summarizeToolCalls` 讀 `call.function.name`
-     （原本讀 `call.name`；tool call 結構是 `{ id, type, function: { name, arguments } }`）。
-  2. `compaction-policy.test.ts` 兩個 boundary fixture 算術錯誤（kept 區 user 訊息數
-     數錯，policy 依 I5 正確拒絕）— fixture 已改（前兩 turn 400 tok、budget 1400、
-     切 u2；no-system 版 8 則、budget 400、切 u3），皆經 sandbox 驗證。
-  3. PDF fixture 補必填 `base64Data`（3 處）。
-  4. `conversation-export.test.ts` 修正 `esimatedTokensBefore` typo（2 處）+
-     `find((m: DatabaseMessage) => …)` 顯式型別。
-- **待使用者重跑**：
+- Phase 0：使用者已跑 `npm run check` + 4 支 unit，**全綠**。
+- **Phase 1 5.1/5.2/5.3 已寫完，待使用者重跑**：
   ```bash
   npm run check
   npm run test:unit -- --run tests/unit/context-builder.test.ts tests/unit/compaction-policy.test.ts tests/unit/summarize.test.ts tests/unit/conversation-export.test.ts
+  npm run test:client -- --run tests/client/settings-registry-invariants.svelte.test.ts
   ```
-  全綠即代表 Phase 0 完成，開始 §5。
+  （registry invariants 是 client project；新增 8 個 settings key 會被它自動涵蓋）
+  全綠後繼續 5.4+5.5。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
 > 原則：store 層不感知 compaction（除了觸發+建節點的協調邏輯）；
 > payload 組裝只動 service 層。簽名全部不變。
 
-### 5.1 Settings 8 個 key（先加，其他項依赖它）
+### 5.1 Settings 8 個 key（先加，其他項依赖它）✅
 `src/lib/constants/settings-keys.constants.ts` + `settings.constants.ts` 的
-`SETTINGS_REGISTRY`（放 General section）+ 必要時 `types/settings.d.ts`：
+`SETTINGS_REGISTRY`（放 General section 末尾）+ 必要時 `types/settings.d.ts`：
 
 | key | 型別 | 預設 |
 | ---- | ---- | ---- |
@@ -117,7 +129,12 @@ builder 保持 WYSIWYG（送出 = 節點存的 content）。Phase 1 的
 
 照既有 registry 條目的寫法抄（含 `SettingsChatFields.svelte` 的欄位呈現）。
 
-### 5.2 `ChatService.sendMessage`（chat.service.ts:1022）與 `preEncode`（:840）
+> 實做備註：`SettingsConfigType` 由 `SETTING_CONFIG_DEFAULT`（registry 派生）定義，
+> `SettingsChatFields.svelte` 通用渲染 registry — 兩處都**零改動**，只動兩個
+> constants 檔。4 個 numeric key 用 `isPositiveInteger` + `min`/`max`
+> （進 `POSITIVE_INTEGER_FIELDS` clamp）。
+
+### 5.2 `ChatService.sendMessage`（chat.service.ts:1022）與 `preEncode`（:840）✅
 - 兩處現在都直接 `normalizeMessagesForApi(messages)`（:1074-1075 / :846-847）。
 - 改法：用與 `normalizeMessagesForApi` 相同的判别式
   （`'id' in msg && 'convId' in msg && 'timestamp' in msg`）判斷入參是 DB path：
@@ -131,9 +148,9 @@ builder 保持 WYSIWYG（送出 = 節點存的 content）。Phase 1 的
   是安全的（`ChatService` 只在 call time 被引用），Phase 0 已註明。
 - 建議把「DB path vs API 訊息」的判别 + 分派寫成 `chat.service.ts` 內的私有
   helper（如 `resolveOutgoingMessages`），sendMessage / preEncode 共用，
-  避免兩份判斷式漂移。
+  避免兩份判斷式漂移。→ 已做（見 §3.7/§3.8：公開 static + per-element union）。
 
-### 5.3 `agenticStore.runAgenticFlow`（stores/agentic/index.svelte.ts:358）
+### 5.3 `agenticStore.runAgenticFlow`（stores/agentic/index.svelte.ts:358）✅
 - `AgenticFlowParams.messages` 是 `(ApiChatMessageData | DatabaseMessage)[]` union。
 - :358 `ChatService.normalizeMessagesForApi(messages)` → 改
   `buildLlmContext(messages)` 取 `.messages`（union 判别與 5.2 相同；

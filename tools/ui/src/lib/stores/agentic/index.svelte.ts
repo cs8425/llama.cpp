@@ -355,8 +355,14 @@ class AgenticStore {
 
 		console.log(`[AgenticStore] Starting agentic flow with ${tools.length} tools`);
 
-		const normalizedMessages: ApiChatMessageData[] =
-			await ChatService.normalizeMessagesForApi(messages);
+		// Same choke point as sendMessage/preEncode (WYSIWYG): a DB path is
+		// built through the context builder, which also applies compaction.
+		// Reasoning stripping for the turns happens in the per-turn request
+		// mapping (options.excludeReasoningFromContext), as before.
+		const normalizedMessages: ApiChatMessageData[] = await ChatService.resolveOutgoingMessages(
+			messages,
+			false
+		);
 
 		this.updateSession(conversationId, {
 			currentTurn: 0,
