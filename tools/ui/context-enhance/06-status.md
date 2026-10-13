@@ -8,7 +8,7 @@
 | 階段 | 狀態 |
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
-| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.6 ✅ 全部完成並確認（見 §4）；5.7 第一輪確認抓到 4 個問題、已全數修完（見 §2f）、待使用者重跑確認 |
+| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ⬜ |
 | Phase 3 — 可選後續 | ⬜ |
 
@@ -113,11 +113,11 @@
 >   進行中」三態）**未建**——只讀版行為已由 4 支 client 測試覆蓋；
 >   留到 Phase 2 編輯動作落地時一併補（屆時「進行中」態也有意義）。
 
-## 2f. 5.7 第一輪確認的修復（待使用者重跑確認）
+## 2f. 5.7 第一輪確認的修復（重跑已確認全綠）
 
 第一輪跑 `npm run check` + 2 支測試：unit 16/16 綠；check 抓到 2 型別錯 + 1 warning；
 client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compacted out」，顯示
-4 則而非 3 則）。全數已修：
+4 則而非 3 則）。全數已修、使用者重跑 4 條指令全綠：
 
 | 檔案 | 問題 | 修復 |
 | ---- | ---- | ---- |
@@ -231,8 +231,17 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（16/16 綠）+
   `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`（3/4）。
   check 抓到 2 型別錯 + 1 warning；client 掛的那支是 dropped 區把 in-effect entry
-  算進「Compacted out」（4 則 vs 3 則）。**已全數修完（§2f），待使用者重跑**：
-  `npm run check` + 同兩支測試；全綠後 Phase 1 只剩 5.8 手動驗收（05-§1 Phase 1 ✅ 列）。
+  算進「Compacted out」（4 則 vs 3 則）。已全數修完（§2f）。
+- Phase 1 5.7 重跑：使用者跑了 `npm run check`（0 錯 0 警告）+
+  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
+  `npx vitest --project=unit --run tests/unit/context-builder.test.ts` +
+  `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`（4/4），
+  **全綠**。5.7 完成。
+- **Phase 1 目前停在這：只剩 5.8 手動驗收**（05-§1 Phase 1 ✅ 列）：
+  1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
+  2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。
+  3. 無 cmp 對話行為與現行完全一致（context-builder.test.ts 的回归測試保證）。
+  驗收通過後 Phase 1 完成，可進 Phase 2（05-§1：自動觸發 + 人工介入 + flow 內再壓縮）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -357,7 +366,7 @@ static async createCompactionMessage(params: {
   確認 agentic grouping 的 while 不會把 cmp 之後的訊息併入同一組；補測試。
 - export：`components/app/chat/index.ts`。
 
-### 5.7 Inspector 只讀版 `DialogContextInspector.svelte` ✅（已實做、待編譯確認；交付明細見 §2e）
+### 5.7 Inspector 只讀版 `DialogContextInspector.svelte` ✅（已確認全綠；交付明細見 §2e、第一輪修復見 §2f）
 - 新檔：`src/lib/components/app/dialogs/DialogContextInspector.svelte`（+ export 到
   `components/app/dialogs/index.ts`）。
 - 資料：`buildLlmContext(conversationsStore.activeMessages)` →
