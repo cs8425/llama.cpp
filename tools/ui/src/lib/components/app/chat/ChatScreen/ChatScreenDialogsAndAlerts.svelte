@@ -3,10 +3,12 @@
 	import {
 		DialogChatError,
 		DialogConfirmation,
+		DialogContextInspector,
 		DialogEmptyFileAlert,
 		DialogFileUploadError
 	} from '$lib/components/app';
 	import { ErrorDialogType } from '$lib/enums';
+	import { chatStore } from '$lib/stores';
 
 	let {
 		activeErrorDialog,
@@ -53,3 +55,5 @@
 	open={Boolean(activeErrorDialog)}
 	type={activeErrorDialog?.type ?? ErrorDialogType.SERVER}
 />
+
+<DialogContextInspector bind:open={chatStore.showContextInspector} />

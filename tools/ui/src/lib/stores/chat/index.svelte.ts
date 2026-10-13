@@ -67,6 +67,9 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		{ response: string; messageId: string; model?: string | null }
 	>();
 	errorDialogState = $state<ErrorDialogState | null>(null);
+	// true while the context inspector dialog is open (Phase 1 read-only;
+	// entry point: the context gauge popup)
+	showContextInspector = $state(false);
 	// true while the active conversation has a local pipe (send, attach or resume-wait)
 	isLoading = $derived(this.activity.isLocal(conversationsStore.activeConversation?.id ?? ''));
 	// true while the active conversation streams reasoning content but no visible content yet

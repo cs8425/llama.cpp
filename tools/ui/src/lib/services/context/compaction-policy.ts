@@ -6,7 +6,8 @@
  * compaction entry to a payload is the builder's job (context-builder.ts).
  */
 
-import { AttachmentType, MessageRole } from '$lib/enums';
+import { AttachmentType, ContentPartType, MessageRole } from '$lib/enums';
+import type { ApiChatMessageContentPart, ApiChatMessageData } from '$lib/types/api';
 import type { DatabaseMessage, DatabaseMessageExtra } from '$lib/types/database';
 import type { CompactionBudget, CompactionPlan } from './types';
 
@@ -57,6 +58,45 @@ function estimateAttachmentTokens(extra: DatabaseMessageExtra): number {
 		default:
 			// TEXT / LEGACY_CONTEXT / MCP_PROMPT / MCP_RESOURCE
 			return textTokens(extra.content);
+	}
+}
+
+/**
+ * Estimated token cost of one converted API message. The inspector's payload
+ * rows are in API form (the builder's output), not DB form, so they price the
+ * content parts directly: text/4, one image part = 1000, audio/video parts =
+ * 3000, tool calls by serialized length — the same heuristics as
+ * {@link estimateTokens}.
+ */
+export function estimateApiMessageTokens(message: ApiChatMessageData): number {
+	let tokens = 0;
+
+	if (typeof message.content === 'string') {
+		tokens += textTokens(message.content);
+	} else {
+		for (const part of message.content) {
+			tokens += estimateContentPartTokens(part);
+		}
+	}
+
+	if (message.tool_calls) {
+		tokens += textTokens(JSON.stringify(message.tool_calls));
+	}
+
+	tokens += textTokens(message.reasoning_content);
+
+	return tokens;
+}
+
+function estimateContentPartTokens(part: ApiChatMessageContentPart): number {
+	switch (part.type) {
+		case ContentPartType.TEXT:
+			return textTokens(part.text);
+		case ContentPartType.IMAGE_URL:
+			return TOKENS_PER_IMAGE;
+		default:
+			// INPUT_AUDIO / INPUT_VIDEO
+			return TOKENS_PER_AUDIO_VIDEO;
 	}
 }
 

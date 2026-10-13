@@ -10,7 +10,7 @@
 	} from './gauge-popup.svelte';
 	import * as Drawer from '$lib/components/ui/drawer';
 	import { useContextGauge } from '$lib/hooks/use-context-gauge.svelte';
-	import { deviceStore } from '$lib/stores';
+	import { chatStore, deviceStore } from '$lib/stores';
 	import { formatParameters } from '$lib/utils/formatters';
 
 	const gauge = useContextGauge();
@@ -106,6 +106,24 @@
 			transientDetails={gauge.transientDetails}
 		/>
 	{/if}
+
+	<!-- Inspector entry (Phase 1: the only one; form action + shortcut land in Phase 2).
+		Disabled while the model responds: the dialog shows the NEXT send, and that
+		is not defined mid-stream (a pre-send snapshot replaces this in Phase 2). -->
+	<div class="border-border/50 border-t pt-2">
+		<button
+			class="text-foreground/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 text-left text-xs font-medium"
+			disabled={chatStore.isLoading}
+			onclick={() => (chatStore.showContextInspector = true)}
+			title={
+				chatStore.isLoading
+					? 'Unavailable while the model is responding'
+					: 'Show the exact payload sent to the LLM'
+			}
+		>
+			Inspect what the LLM sees →
+		</button>
+	</div>
 {/snippet}
 
 {#if deviceStore.isMobile}

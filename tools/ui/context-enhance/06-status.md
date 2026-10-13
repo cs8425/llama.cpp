@@ -8,7 +8,7 @@
 | 階段 | 狀態 |
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
-| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.6 ✅ 全部完成並確認（見 §4）；5.7 未開始 |
+| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.6 ✅ 全部完成並確認（見 §4）；5.7 ✅ 已實做、待使用者編譯確認 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ⬜ |
 | Phase 3 — 可選後續 | ⬜ |
 
@@ -83,6 +83,31 @@
 > `flows.svelte.ts` / `streams.svelte.ts` 的 user-role 搜尋（cmp.parent 永不為 root；stream
 > attach 的 lastUser fallback 只在「全對話無 assistant」時觸發，corner case 下 placeholder
 > 掛在 cmp 之下反而是正確樹形）。
+
+## 2e. Phase 1 已交付檔案（5.7，待編譯確認）
+
+| 檔案 | 改動 |
+| ---- | ---- |
+| `src/lib/components/app/dialogs/DialogContextInspector.svelte` | 新元件（只讀 inspector）：頂部 model / n_ctx / 估計送出 tokens + 百分比條（複用 `colorLevelFromPercent`）；payload 訊息列（role badge、單行截斷、點開全文、每則 `~N tok`，summary 行獨立 `summary` badge）；「Compacted out」灰階列（boundary 之前、非 head 的訊息 + 1-based 序號）；`boundaryValid === false` 時紅色 `role="alert"` 警告條；Copy JSON（base64 → `[image: ~N KB]` 佔位符、成功換「Copied」label、失敗 toast） |
+| `src/lib/components/app/dialogs/index.ts` | export `DialogContextInspector`（JSDoc 同既有格式） |
+| `src/lib/services/context/compaction-policy.ts` | `estimateApiMessageTokens(msg: ApiChatMessageData)`：string content/4 + content parts（TEXT/4、IMAGE 1000、AUDIO/VIDEO 3000）+ tool_calls JSON/4 + reasoning/4（與 `estimateTokens` 同 heuristic，API form 版） |
+| `src/lib/services/context/index.ts` | barrel 加 `estimateApiMessageTokens` |
+| `src/lib/stores/chat/index.svelte.ts` | `showContextInspector = $state(false)`（`errorDialogState` 旁） |
+| `src/lib/components/app/chat/ChatForm/ChatFormContextGauge/ContextGaugePopup.svelte` | body 底部「Inspect what the LLM sees →」文字連結（Phase 1 唯一入口；mobile drawer 與 desktop card 共用 body snippet 所以兩端都有）；`chatStore.isLoading` 時 `disabled` + title 提示（Phase 1 不做 streaming 快照，05-5.7 允許的 fallback） |
+| `src/lib/components/app/chat/ChatScreen/ChatScreenDialogsAndAlerts.svelte` | 掛 `<DialogContextInspector bind:open={chatStore.showContextInspector} />` |
+| `tests/unit/compaction-policy.test.ts` | +3 用例（`estimateApiMessageTokens`：string content + reasoning + tool_calls；content parts 各型別 flat 計價；image+text 組合） |
+| `tests/client/context-inspector.svelte.test.ts` | 4 用例：compaction payload 列（badge / 每則 token / dropped 3 則 / **列 token 總和 == header 估計**；tool result 不在 payload 列）；點開列顯示全文 + 再收合；fail-open（boundary 失效 → 紅條 + 全量 4 則 + 無 dropped 區）；Copy JSON（mock `navigator.clipboard`、summary 以 user role 送出且含 prefix、無 base64 漏出、「Copied」feedback） |
+
+> 5.7 設計細節：
+> - 資料在 open 時抓 `buildLlmContext(conversationsStore.activeMessages)`（與送出同源，WYSIWYG）；
+>   入口在 streaming 時 disabled，所以 dialog 開啟期間 path 穩定（Phase 2 改送出前快照）。
+> - summary 行 = system head 之後第一則（`boundaryValid` 時），`kind` 標成 `summary` 而非 `user`；
+>   cmp 節點本身不在 payload（builder 已排除）。
+> - 「Compacted out」= `path.slice(headLength, boundaryIndex)`（boundary 有效時）；失效時不顯示、改紅條。
+> - Copy JSON 的佔位符只換 `data:` 開頭的 image_url 與 input_audio/input_video 的 data；
+>   非 data: 的 URL 原樣保留。
+> - `n_ctx` / `model` 讀 `contextStatsStore.contextTotal` / `activeModelId`（canonical 在 modelsStore）；
+>   未知時顯示「—」、不畫百分比條。
 
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
@@ -184,8 +209,11 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   **全綠**。（第一輪 check 抓到 4 個型別錯：test fixture 的 `type` string literal 不能
   指派給 `MessageType` enum——已改 enum 成員，story 檔一併改；陷阱見 §6。）
   5.6 無新增 unit（純 UI 層；grouping 邏輯由 client 測試覆蓋）。
-- **下一步：5.7 Inspector 只讀版 `DialogContextInspector.svelte`**（規格見 §5.7），
-  完成後請使用者跑 `npm run check`（+ 5.7 的 client 測試一併跑）。
+- Phase 1 5.7：已實做（交付明細見 §2e），**尚未編譯確認**。
+  **下一步：請使用者跑** `npm run check` +
+  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
+  `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`；
+  全綠後 Phase 1 只剩 5.8 手動驗收（05-§1 Phase 1 ✅ 列）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -310,7 +338,7 @@ static async createCompactionMessage(params: {
   確認 agentic grouping 的 while 不會把 cmp 之後的訊息併入同一組；補測試。
 - export：`components/app/chat/index.ts`。
 
-### 5.7 Inspector 只讀版 `DialogContextInspector.svelte`
+### 5.7 Inspector 只讀版 `DialogContextInspector.svelte` ✅（已實做、待編譯確認；交付明細見 §2e）
 - 新檔：`src/lib/components/app/dialogs/DialogContextInspector.svelte`（+ export 到
   `components/app/dialogs/index.ts`）。
 - 資料：`buildLlmContext(conversationsStore.activeMessages)` →

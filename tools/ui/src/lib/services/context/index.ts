@@ -7,7 +7,7 @@
  */
 
 export { buildLlmContext, findLastCompactionEntry } from './context-builder';
-export { estimateTokens, planCompaction } from './compaction-policy';
+export { estimateApiMessageTokens, estimateTokens, planCompaction } from './compaction-policy';
 export {
 	buildSummaryTranscript,
 	DEFAULT_SUMMARY_PROMPT,

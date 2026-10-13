@@ -502,3 +502,34 @@ export { default as DialogMermaidPreview } from './DialogMermaidPreview.svelte';
 
 /** **DialogManageModels** - shell for the models manager. */
 export { default as DialogManageModels } from './DialogManageModels.svelte';
+
+/**
+ * **DialogContextInspector** - read-only view of the exact LLM payload
+ *
+ * Modal dialog showing what the next request sends to the LLM: the payload
+ * built by `buildLlmContext` (the same choke point as the send path, so the
+ * view is WYSIWYG), per-message token estimates, the compacted-out region
+ * and a Copy JSON action (base64 replaced by size placeholders).
+ *
+ * **Architecture:**
+ * - Builds the payload once per open through `buildLlmContext(activeMessages)`
+ * - Reuses the context-gauge color levels for the estimated-size bar
+ * - Fail-open boundary (compaction lost after branching) surfaces a warning
+ *
+ * **Features:**
+ * - Header: model, n_ctx, estimated send tokens + colored percentage bar
+ * - Payload rows: role badge (summary rows badged separately), single-line
+ *   truncated content (click to expand full text), per-message token estimate
+ * - "Compacted out" section listing the dropped messages in grayscale
+ * - Copy JSON: the exact `ApiChatMessageData[]` with base64 placeholders
+ *
+ * Phase 1 is read-only; editing (summary / breakpoint / compact / expand)
+ * lands in Phase 2. Entry point: the context gauge popup (disabled while the
+ * model responds).
+ *
+ * @example
+ * ```svelte
+ * <DialogContextInspector bind:open={chatStore.showContextInspector} />
+ * ```
+ */
+export { default as DialogContextInspector } from './DialogContextInspector.svelte';

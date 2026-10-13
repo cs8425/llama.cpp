@@ -2,9 +2,10 @@
 // (boundary-first, split user-message span as fallback). The cut must never
 // land on a tool result (I4) and the kept region must respect I5.
 
-import { AttachmentType, MessageRole, MessageType } from '$lib/enums';
-import { estimateTokens, planCompaction } from '$lib/services/context/compaction-policy';
+import { AttachmentType, ContentPartType, MessageRole, MessageType } from '$lib/enums';
+import { estimateApiMessageTokens, estimateTokens, planCompaction } from '$lib/services/context/compaction-policy';
 import type { CompactionBudget } from '$lib/services/context/types';
+import type { ApiChatMessageData } from '$lib/types/api';
 import type { DatabaseMessage, DatabaseMessageExtra } from '$lib/types/database';
 import { describe, expect, it } from 'vitest';
 
@@ -106,6 +107,59 @@ describe('estimateTokens', () => {
 		expect(estimateTokens(message('m', MessageRole.USER, '', { extra: [text] }))).toBe(100);
 		expect(estimateTokens(message('m', MessageRole.USER, '', { extra: [pdfImages] }))).toBe(3000);
 		expect(estimateTokens(message('m', MessageRole.USER, '', { extra: [pdfText] }))).toBe(100);
+	});
+});
+
+describe('estimateApiMessageTokens', () => {
+	it('estimates string content at chars/4 and adds reasoning and tool calls', () => {
+		const base: ApiChatMessageData = { content: T100, role: MessageRole.USER };
+
+		expect(estimateApiMessageTokens(base)).toBe(100);
+
+		const withExtras: ApiChatMessageData = {
+			content: '',
+			reasoning_content: T100,
+			role: MessageRole.ASSISTANT,
+			tool_calls: [{ function: { arguments: '{}', name: 'read_file' }, id: 'c1', type: 'function' }]
+		};
+
+		expect(estimateApiMessageTokens(withExtras)).toBeGreaterThan(100);
+	});
+
+	it('prices content parts: text/4, image flat 1000, audio/video flat 3000', () => {
+		const text: ApiChatMessageData = {
+			content: [{ text: T100, type: ContentPartType.TEXT }],
+			role: MessageRole.USER
+		};
+		const image: ApiChatMessageData = {
+			content: [{ image_url: { url: 'data:image/png;base64,xx' }, type: ContentPartType.IMAGE_URL }],
+			role: MessageRole.USER
+		};
+		const audio: ApiChatMessageData = {
+			content: [{ input_audio: { data: 'xx', format: 'wav' }, type: ContentPartType.INPUT_AUDIO }],
+			role: MessageRole.USER
+		};
+		const video: ApiChatMessageData = {
+			content: [{ input_video: { data: 'xx', format: 'mp4' }, type: ContentPartType.INPUT_VIDEO }],
+			role: MessageRole.USER
+		};
+
+		expect(estimateApiMessageTokens(text)).toBe(100);
+		expect(estimateApiMessageTokens(image)).toBe(1000);
+		expect(estimateApiMessageTokens(audio)).toBe(3000);
+		expect(estimateApiMessageTokens(video)).toBe(3000);
+	});
+
+	it('combines parts with the same heuristics as the DB-form estimator', () => {
+		const mixed: ApiChatMessageData = {
+			content: [
+				{ image_url: { url: 'data:image/png;base64,xx' }, type: ContentPartType.IMAGE_URL },
+				{ text: T100, type: ContentPartType.TEXT }
+			],
+			role: MessageRole.USER
+		};
+
+		expect(estimateApiMessageTokens(mixed)).toBe(1100);
 	});
 });
 
