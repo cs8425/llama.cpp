@@ -108,6 +108,9 @@
 >   非 data: 的 URL 原樣保留。
 > - `n_ctx` / `model` 讀 `contextStatsStore.contextTotal` / `activeModelId`（canonical 在 modelsStore）；
 >   未知時顯示「—」、不畫百分比條。
+> - **與 05-§3 測試計畫的偏差**：inspector 的 Storybook story（05 列的「正常 / 斷點失效 /
+>   進行中」三態）**未建**——只讀版行為已由 4 支 client 測試覆蓋；
+>   留到 Phase 2 編輯動作落地時一併補（屆時「進行中」態也有意義）。
 
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
