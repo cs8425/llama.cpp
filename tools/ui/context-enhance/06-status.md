@@ -8,7 +8,7 @@
 | 階段 | 狀態 |
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
-| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.5 ✅(5.1–5.3 已確認;5.4/5.5 待編譯確認,見 §4);5.6–5.7 未開始 |
+| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.5 ✅ 全部完成並確認（見 §4）；5.6–5.7 未開始 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ⬜ |
 | Phase 3 — 可選後續 | ⬜ |
 
@@ -60,7 +60,7 @@
 - agentic `executeAgenticLoop` 的 `sessionMessages` 續加邏輯（Phase 2 才動）
 - `conversationsStore` 路徑邏輯、`branching.ts`、import/export 服務、`convertDbMessageToApiChatMessageData`
 
-### 2c. Phase 1 已交付檔案（5.4–5.5，待確認）
+### 2c. Phase 1 已交付檔案（5.4–5.5，已確認）
 
 | 檔案 | 改動 |
 | ---- | ---- |
@@ -153,11 +153,7 @@ builder 保持 WYSIWYG（送出 = 節點存的 content）。Phase 1 的
 - Phase 0：使用者已跑 `npm run check` + 4 支 unit，**全綠**。
 - Phase 1 5.1/5.2/5.3：使用者已跑 3 條指令（`npm run check` + 4 支 unit +
   `tests/client/settings-registry-invariants.svelte.test.ts`），**全綠**。
-- Phase 1 5.4/5.5：**code 完成，待使用者編譯確認**。請跑：
-  ```bash
-  npm run check
-  npm run test:unit -- --run tests/unit/context-builder.test.ts tests/unit/compaction-policy.test.ts tests/unit/summarize.test.ts tests/unit/conversation-export.test.ts
-  ```
+- Phase 1 5.4/5.5：使用者已跑 `npm run check` + 4 支 unit，**全綠**。
   （5.4/5.5 無新增 unit：`DatabaseService` 是 Dexie 層、`compactConversation`
   是 store 協調邏輯，皆不在 unit project 範圍；依 05-§5 驗收標準 5，store 層
   diff 已控制在 `compactConversation` + 兩個 private helper + `compacting` 欄位）
@@ -216,7 +212,7 @@ builder 保持 WYSIWYG（送出 = 節點存的 content）。Phase 1 的
 - `executeAgenticLoop` 的 `sessionMessages` 續加邏輯不動（Phase 2 才在
   turn 之間插再壓縮）。
 
-### 5.4 `DatabaseService.createCompactionMessage()`（database.service.ts）
+### 5.4 `DatabaseService.createCompactionMessage()`（database.service.ts）✅
 照 `createSystemMessage`（:232）模式（transaction + 驗證 parent + addChildToParent，
 **不**動 currNode — currNode 由 store 層更新）：
 ```ts
@@ -235,7 +231,7 @@ static async createCompactionMessage(params: {
 > （transaction：子節點 parent 改指 cmp.parent、children 陣列搬移、刪 cmp、
 > currNode 更新）。Phase 1 先不做。
 
-### 5.5 `chatStore.compactConversation(convId, { auto })`（stores/chat/index.svelte.ts）
+### 5.5 `chatStore.compactConversation(convId, { auto })`（stores/chat/index.svelte.ts）✅
 流程（03-§4.2；auto=false 即手動「Compact now」）：
 1. I7 guard：`isChatLoading(convId)` 或 `agenticStore.isRunning(convId)` → 直接回。
 2. path：active conv 用 `conversationsStore.activeMessages`；非 active 用

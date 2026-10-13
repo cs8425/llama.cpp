@@ -18,16 +18,16 @@
 
 ### Phase 1 — 送出路徑接上 builder + 手動壓縮
 
-- [ ] `ChatService.sendMessage` / `preEncode`:DB path 入參改走 `buildLlmContext`
+- [x] `ChatService.sendMessage` / `preEncode`:DB path 入參改走 `buildLlmContext`
       (簽名不變;`ApiChatMessageData[]` 入參維持原路徑)
-- [ ] `agenticStore.runAgenticFlow`:`:358` normalize 改 builder
-- [ ] `DatabaseService.createCompactionMessage()`(照 `createSystemMessage` 模式)
-- [ ] `chatStore.compactConversation(convId, { auto: boolean })`
+- [x] `agenticStore.runAgenticFlow`:`:358` normalize 改 builder
+- [x] `DatabaseService.createCompactionMessage()`(照 `createSystemMessage` 模式)
+- [x] `chatStore.compactConversation(convId, { auto: boolean })`
       (plan → summarize → 建節點 → currNode → 選做 preEncode)
 - [ ] `ChatMessageCompaction.svelte` + `ChatMessage.svelte` 分派 +
       `ChatMessages.svelte` grouping 確認
 - [ ] Inspector 只讀版(`DialogContextInspector.svelte`)+ gauge popup 入口
-- [ ] Settings 8 個 key(先全部加好,自動壓縮預設 off)
+- [x] Settings 8 個 key(先全部加好,自動壓縮預設 off)
 
 ✅ 驗收:有 cmp 的對話,送出 payload = inspector 顯示 = 網路抓包;
 手動「Compact now」可產生 cmp;無 cmp 對話行為與現行完全一致。
