@@ -42,6 +42,13 @@ export enum MessageRole {
  * Message types for different content kinds.
  */
 export enum MessageType {
+	/**
+	 * Compaction entry: a tree node whose content is the summary of the messages
+	 * before the kept-region boundary stored in `compactionMeta.firstKeptMessageId`.
+	 * Sent to the API with `user` role (chat-template safe); the type is only read
+	 * by the renderer and the context builder.
+	 */
+	COMPACTION = 'compaction',
 	ROOT = 'root',
 	SYSTEM = 'system',
 	TEXT = 'text',

@@ -7,9 +7,22 @@ import type {
 	ChatFormCommandAction,
 	ErrorDialogType,
 	FileMentionEntryType,
-	MessageRole
+	MessageRole,
+	MessageType
 } from '$lib/enums';
 import type { Component } from 'svelte';
+
+/**
+ * Role of a message as persisted in the database and sent to the API.
+ * Mirrors the {@link MessageRole} enum.
+ */
+export type ChatRole = MessageRole;
+
+/**
+ * Kind of a message as persisted in the database.
+ * Mirrors the {@link MessageType} enum.
+ */
+export type ChatMessageType = MessageType;
 
 /**
  * A single item in the chat form attachment menu.

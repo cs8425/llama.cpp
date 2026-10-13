@@ -110,6 +110,19 @@ export type DatabaseMessageExtra =
 	| DatabaseMessageExtraMcpResource
 	| DatabaseMessageExtraLegacyContext;
 
+export interface CompactionMeta {
+	/** id of the first message of the kept region (send-window start; a user or assistant message) */
+	firstKeptMessageId: string;
+	/** number of summarized messages (excluding the system prompt), for UI display */
+	summarizedCount: number;
+	/** true = split user-message span (the cut landed on an assistant message inside a single span) */
+	isSplitTurn?: boolean;
+	/** model that produced the summary (optional, for UI display) */
+	model?: string;
+	/** estimated prompt size in tokens at summary time, for the UI "how much was saved" display */
+	estimatedTokensBefore?: number;
+}
+
 export interface DatabaseMessage {
 	id: string;
 	convId: string;
@@ -134,6 +147,8 @@ export interface DatabaseMessage {
 	toolCwd?: string;
 	/** Internal flag marking a UI-generated message (e.g. a cwd change). The row is sent to the model as a "user" turn so chat templates accept it; the flag is only read by the renderer. */
 	isSynthetic?: boolean;
+	/** Present only when `type` is `compaction`: kept-region boundary and display metadata. Never sent to the API. */
+	compactionMeta?: CompactionMeta;
 	children: string[];
 	extra?: DatabaseMessageExtra[];
 	timings?: ChatMessageTimings;

@@ -70,6 +70,8 @@ export type {
 	ChatMessageAgenticTimings,
 	ChatMessageAgenticTurnStats,
 	ChatMessageToolCallTiming,
+	ChatMessageType,
+	ChatRole,
 	ChatStreamCallbacks,
 	ErrorDialogState,
 	LiveProcessingStats,
@@ -85,6 +87,7 @@ export type {
 // Database types
 export type {
 	McpServerOverride,
+	CompactionMeta,
 	DatabaseConversation,
 	DatabaseMessageExtraAudioFile,
 	DatabaseMessageExtraVideoFile,

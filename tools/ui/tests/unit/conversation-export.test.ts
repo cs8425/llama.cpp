@@ -147,6 +147,46 @@ describe('conversation export source', () => {
 	});
 });
 
+describe('compaction entry export/import round-trip', () => {
+	it('preserves type, content and compactionMeta through serialize/parse', () => {
+		const cmp: DatabaseMessage = {
+			...message('cmp', 'a2b', 80, MessageRole.USER, MessageType.COMPACTION),
+			children: [],
+			content: 'Summary of earlier turns',
+			compactionMeta: {
+				esimatedTokensBefore: 1840,
+				firstKeptMessageId: 'u2b',
+				isSplitTurn: true,
+				model: 'qwen3-32b',
+				summarizedCount: 3
+			}
+		};
+
+		const jsonl = ConversationTransferService.serializeSessionToJsonl({
+			conv: conversation('cmp'),
+			messages: [...branchedMessages(), cmp]
+		});
+		const [imported] = ConversationTransferService.parseSessionsJsonl(jsonl);
+
+		const importedCmp = imported.messages.find((m) => m.id === 'cmp');
+
+		expect(importedCmp?.type).toBe(MessageType.COMPACTION);
+		expect(importedCmp?.role).toBe(MessageRole.USER);
+		expect(importedCmp?.content).toBe('Summary of earlier turns');
+		expect(importedCmp?.compactionMeta).toEqual({
+			esimatedTokensBefore: 1840,
+			firstKeptMessageId: 'u2b',
+			isSplitTurn: true,
+			model: 'qwen3-32b',
+			summarizedCount: 3
+		});
+
+		// the branch pointer lands on the compaction entry, so the displayed
+		// path ends at it and the builder applies it
+		expect(displayedIds(imported)).toEqual(['u1', 'a1', 'u2b', 'a2b', 'cmp']);
+	});
+});
+
 describe('exported conversation branch pointer', () => {
 	it('carries the database currNode, so the import restores the current branch', () => {
 		// The user regenerated to create a2b, then switched back to the a2a branch,
