@@ -8,7 +8,7 @@
 | 階段 | 狀態 |
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
-| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.5 ✅ 全部完成並確認（見 §4）；5.6–5.7 未開始 |
+| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.5 ✅ 全部完成並確認（見 §4）；5.6 ✅ 已交付（待編譯確認，見 §4）；5.7 未開始 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ⬜ |
 | Phase 3 — 可選後續 | ⬜ |
 
@@ -67,6 +67,22 @@
 | `src/lib/services/database.service.ts` | `createCompactionMessage({ convId, parentId, content, compactionMeta })`：照 `createSystemMessage` 模式（transaction + 驗證 parent + `addChildToParent`），role=USER / type=COMPACTION / children=[]；**不**動 currNode（store 層負責）；同路徑的兩筆 type import 合併為一筆 |
 | `src/lib/stores/chat/context-stats.svelte.ts` | `compacting = $state(false)`：summary 呼叫進行中狀態（gauge popup 的「Compacting context…」列在 Phase 2 讀它） |
 | `src/lib/stores/chat/index.svelte.ts` | `compactConversation(convId, { auto })`（流程見 §5.5；I7 guard → path 解析 → n_ctx → auto threshold gate → `planCompaction` → `summarizeMessages` → `createCompactionMessage` → active/non-active 分派 currNode → preEncode 預熱 → toast）；private `getContextSizeForConversation` / `resolveCompactionModel`；常數 `MIN_SUMMARIZE_TOKENS = 2000`；新 import：`$lib/services/context`（value + type 兩筆）、`contextStatsStore`、`filterByLeafNodeId`、`toast` |
+
+## 2d. Phase 1 已交付檔案（5.6，待編譯確認）
+
+| 檔案 | 改動 |
+| ---- | ---- |
+| `src/lib/components/app/chat/ChatMessages/ChatMessage/ChatMessageCompaction/ChatMessageCompaction.svelte` | 新元件：中央細條（`max-w-xl`、muted、`RefreshCw` icon、`role="status"`）、標題「Context compacted」+ 時間戳、split 時加「(mid-turn)」、第二行「Summarized N messages (~X → ~Y tokens)」（Y = `estimateTokens(cmp)`，與 policy 同一 estimator）、收合式（本地 `$state`，`aria-expanded`）。展開後：summary 全文（`SUMMARY_CONTENT_PREFIX` 剝掉、mono 可捲動）+「Kept from: #N (role: …)」邊界預覽（`conversationsStore.findMessageIndex` 對 `activeMessages` 解析；assistant 邊界顯示 `tool_calls name`；boundary 失效時 amber 警告「全量送出」）+ split 註記「此 turn 的使用者請求已含於摘要」。Phase 1 無 store 動作（編輯/重新摘要/還原 = Phase 2） |
+| `src/lib/components/app/chat/ChatMessages/ChatMessage/ChatMessage.svelte` | 分派鏈 SYSTEM 之後加 `{:else if message.type === MessageType.COMPACTION}` → `<ChatMessageCompaction class={className} {message} />`；import 加 `ChatMessageCompaction` + `MessageType` |
+| `src/lib/components/app/chat/ChatMessages/ChatMessages.svelte` | `displayMessages`：`filteredMessages` 追加 filter（`contextShowCompactionEntries=false` → 整列不顯示，送出邏輯不受影響）；grouping 確認零改動（cmp 是 user role：TOOL skip 不中、agentic `while` 只吃 TOOL/ASSISTANT 所以 cmp 會 break 迴圈成獨立 entry）；`isLastUserMessage` 與 `nextAssistantMessage` 兩個迴圈各加一句「cmp 不是 user turn」guard（props 對 cmp 無用，但保持語義正確） |
+| `src/lib/components/app/chat/index.ts` | export `ChatMessageCompaction`（JSDoc 同既有格式） |
+| `tests/client/chat-message-compaction.svelte.test.ts` | 4 用例（`ChatMessagesPerfWrapper` 掛真實 list + 真實 store）：cmp 獨立 row（6 rows、tool result 文字不洩入 cmp row）；展開/收合（summary 全文 + prefix 剝除 + 「Kept from: #6 (user: …)」）；`contextShowCompactionEntries=false` 整列消失（6→5 rows）；split-turn（「(mid-turn)」標題 + `assistant: tool_calls edit_file` 邊界預覽 + in-turn 註記） |
+| `tests/stories/ChatMessageCompaction.stories.svelte` | 4 stories：Collapsed / Expanded / BoundaryLost（amber 警告）/ SplitTurn；`play` 內設 `conversationsStore.activeMessages` 供邊界預覽解析 |
+
+> 零改動：`LazyChatMessage`（cmp row 走一般 lazy 掛載）、`ChatMessageActions`（cmp 無動作列）、
+> `flows.svelte.ts` / `streams.svelte.ts` 的 user-role 搜尋（cmp.parent 永不為 root；stream
+> attach 的 lastUser fallback 只在「全對話無 assistant」時觸發，corner case 下 placeholder
+> 掛在 cmp 之下反而是正確樹形）。
 
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
@@ -148,6 +164,12 @@ builder 保持 WYSIWYG（送出 = 節點存的 content）。Phase 1 的
   原本就 import chatStore）。兩邊都只在 call time / derived 求值時引用對方，
   模組評估期不碰 binding，安全。
 
+### 3.11 cmp row 的「Kept from」預覽解析
+`ChatMessageCompaction` 用 `conversationsStore.findMessageIndex(firstKeptMessageId)` 對
+`activeMessages` 解析邊界訊息（1-based 顯示 `#N`）。cmp 通常只出現在 active 對話的
+list 中（branch/regenerate 後的路徑），非 active 對話不渲染 list，故無跨路徑解析問題。
+boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的 fail-open 行為對應。
+
 ## 4. 驗證狀態（目前停在這）
 
 - Phase 0：使用者已跑 `npm run check` + 4 支 unit，**全綠**。
@@ -157,8 +179,12 @@ builder 保持 WYSIWYG（送出 = 節點存的 content）。Phase 1 的
   （5.4/5.5 無新增 unit：`DatabaseService` 是 Dexie 層、`compactConversation`
   是 store 協調邏輯，皆不在 unit project 範圍；依 05-§5 驗收標準 5，store 層
   diff 已控制在 `compactConversation` + 兩個 private helper + `compacting` 欄位）
-- **下一步：5.6 `ChatMessageCompaction.svelte` + 分派 + grouping**（規格見 §5.6），
-  完成後請使用者跑 `npm run check`（+ 5.6 若加 client 測試則一併跑）。
+- Phase 1 5.6：**已交付，待使用者編譯確認**。請跑：
+  1. `npm run check`
+  2. `npx vitest --project=client --run tests/client/chat-message-compaction.svelte.test.ts`
+  5.6 無新增 unit（純 UI 層；grouping 邏輯由 client 測試覆蓋）。
+- **下一步（5.6 確認後）：5.7 Inspector 只讀版 `DialogContextInspector.svelte`**（規格見 §5.7），
+  完成後請使用者跑 `npm run check`（+ 5.7 的 client 測試一併跑）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -267,7 +293,10 @@ static async createCompactionMessage(params: {
 11. toast「Context compacted: ~X → ~Y tokens」
     （X = plan.estimatedTokensBefore；Y = system + summary + kept 估計）。
 
-### 5.6 `ChatMessageCompaction.svelte` + 分派 + grouping
+### 5.6 `ChatMessageCompaction.svelte` + 分派 + grouping ✅
+> 交付明細見 §2d。規格要點全數落實：分派 branch、中央細條視覺、收合式
+> （Phase 1 只有「展開摘要」）、`contextShowCompactionEntries=false` 整列不顯示、
+> grouping 確認（零改動 + 兩個語義 guard）、client 測試、export。
 - 新檔：`src/lib/components/app/chat/ChatMessages/ChatMessage/ChatMessageCompaction/ChatMessageCompaction.svelte`。
 - `ChatMessage.svelte`（分派鏈 ~:407，與 isSynthetic 同位級）：
   `{:else if message.type === MessageType.COMPACTION}` → `<ChatMessageCompaction {message} />`。

@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import {
 		ChatMessageAssistant,
+		ChatMessageCompaction,
 		ChatMessageMcpPrompt,
 		ChatMessageSynthetic,
 		ChatMessageSystem,
@@ -14,7 +15,7 @@
 		SYSTEM_MESSAGE_PLACEHOLDER
 	} from '$lib/constants';
 	import { setChatMessageActionsContext, setChatMessageEditContext } from '$lib/contexts';
-	import { AgenticSectionType, AttachmentType, MessageRole } from '$lib/enums';
+	import { AgenticSectionType, AttachmentType, MessageRole, MessageType } from '$lib/enums';
 	import { DatabaseService } from '$lib/services/database.service';
 	import { chatStore, conversationsStore, deviceStore } from '$lib/stores';
 	import type {
@@ -407,6 +408,8 @@
 <div>
 	{#if message.role === MessageRole.SYSTEM}
 		<ChatMessageSystem bind:textareaElement class={className} {message} />
+	{:else if message.type === MessageType.COMPACTION}
+		<ChatMessageCompaction class={className} {message} />
 	{:else if mcpPromptExtra}
 		<ChatMessageMcpPrompt class={className} mcpPrompt={mcpPromptExtra} {message} />
 	{:else if isSynthetic}

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import LazyChatMessage from './LazyChatMessage.svelte';
 	import { ChatMessageUserPending } from '$lib/components/app';
-	import { MessageRole } from '$lib/enums';
+	import { MessageRole, MessageType } from '$lib/enums';
 	import { agenticStore, chatStore, conversationsStore, settingsStore } from '$lib/stores';
 	import type { ChatMessageActions } from '$lib/types';
 	import {
@@ -138,9 +138,13 @@
 			return [];
 		}
 
-		const filteredMessages = currentConfig.showSystemMessage
+		// Compaction entries are hidden entirely (not just re-styled) when the
+		// setting is off; the outgoing context is unaffected by this filter.
+		const filteredMessages = (currentConfig.showSystemMessage
 			? messages
-			: messages.filter((msg) => msg.type !== MessageRole.SYSTEM);
+			: messages.filter((msg) => msg.type !== MessageRole.SYSTEM)).filter(
+			(msg) => currentConfig.contextShowCompactionEntries || msg.type !== MessageType.COMPACTION
+		);
 		// Build display entries, grouping agentic sessions into single entries.
 		// An agentic session = assistant(with tool_calls) → tool → assistant → tool → ... → assistant(final)
 		const result: Array<{
@@ -217,12 +221,20 @@
 			}
 		}
 
-		if (lastAssistantIdx > 0 && result[lastAssistantIdx - 1].message.role === MessageRole.USER) {
+		if (
+			lastAssistantIdx > 0 &&
+			result[lastAssistantIdx - 1].message.role === MessageRole.USER &&
+			// A compaction entry is a user-role node, not a user turn
+			result[lastAssistantIdx - 1].message.type !== MessageType.COMPACTION
+		) {
 			result[lastAssistantIdx - 1].isLastUserMessage = true;
 		}
 
 		for (let i = 0; i < result.length; i++) {
 			if (result[i].message.role !== MessageRole.USER) continue;
+
+			// A compaction entry is a user-role node, not a user turn
+			if (result[i].message.type === MessageType.COMPACTION) continue;
 
 			for (let j = i + 1; j < result.length; j++) {
 				if (result[j].message.role === MessageRole.ASSISTANT) {

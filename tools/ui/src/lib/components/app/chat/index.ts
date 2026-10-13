@@ -542,6 +542,17 @@ export { default as ChatMessageMcpPrompt } from './ChatMessages/ChatMessage/Chat
 export { default as ChatMessageCwdChange } from './ChatMessages/ChatMessage/ChatMessageCwdChange.svelte';
 
 /**
+ * Compaction entry display. Renders a context-compaction node (type
+ * 'compaction') as a thin centered muted bar instead of a user bubble: title
+ * with timestamp, summarized message count, token savings, and a collapsible
+ * body with the summary text and the kept-region boundary preview. The node
+ * is sent to the model as a user turn; the type is only read by the renderer
+ * and the context builder. Hidden entirely when the
+ * `contextShowCompactionEntries` setting is off.
+ */
+export { default as ChatMessageCompaction } from './ChatMessages/ChatMessage/ChatMessageCompaction/ChatMessageCompaction.svelte';
+
+/**
  * Generic wrapper for UI-generated (synthetic) messages. Routes the
  * working-directory change to ChatMessageCwdChange and renders a muted
  * fallback for any other synthetic text, so no synthetic message ever
