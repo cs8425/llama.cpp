@@ -8,7 +8,7 @@
 | 階段 | 狀態 |
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
-| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1 / 5.2 / 5.3 ✅ 完成並確認（3 條指令全綠，見 §4）；5.4–5.7 未開始 |
+| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.5 ✅(5.1–5.3 已確認;5.4/5.5 待編譯確認,見 §4);5.6–5.7 未開始 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ⬜ |
 | Phase 3 — 可選後續 | ⬜ |
 
@@ -59,6 +59,14 @@
 - `sendMessage` / `preEncode` 對外簽名、後段 vision 過濾、request body reasoning 過濾
 - agentic `executeAgenticLoop` 的 `sessionMessages` 續加邏輯（Phase 2 才動）
 - `conversationsStore` 路徑邏輯、`branching.ts`、import/export 服務、`convertDbMessageToApiChatMessageData`
+
+### 2c. Phase 1 已交付檔案（5.4–5.5，待確認）
+
+| 檔案 | 改動 |
+| ---- | ---- |
+| `src/lib/services/database.service.ts` | `createCompactionMessage({ convId, parentId, content, compactionMeta })`：照 `createSystemMessage` 模式（transaction + 驗證 parent + `addChildToParent`），role=USER / type=COMPACTION / children=[]；**不**動 currNode（store 層負責）；同路徑的兩筆 type import 合併為一筆 |
+| `src/lib/stores/chat/context-stats.svelte.ts` | `compacting = $state(false)`：summary 呼叫進行中狀態（gauge popup 的「Compacting context…」列在 Phase 2 讀它） |
+| `src/lib/stores/chat/index.svelte.ts` | `compactConversation(convId, { auto })`（流程見 §5.5；I7 guard → path 解析 → n_ctx → auto threshold gate → `planCompaction` → `summarizeMessages` → `createCompactionMessage` → active/non-active 分派 currNode → preEncode 預熱 → toast）；private `getContextSizeForConversation` / `resolveCompactionModel`；常數 `MIN_SUMMARIZE_TOKENS = 2000`；新 import：`$lib/services/context`（value + type 兩筆）、`contextStatsStore`、`filterByLeafNodeId`、`toast` |
 
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
@@ -113,18 +121,48 @@ builder 保持 WYSIWYG（送出 = 節點存的 content）。Phase 1 的
 逐 turn 的 reasoning strip 仍在 `sendMessage` 的 request body mapping
 （`options.excludeReasoningFromContext`）發生，不動。
 
+### 3.10 `compactConversation` 實做細節（對規劃的補充）
+- **進行中雙重 guard**：I7（`isChatLoading` + `agenticStore.isRunning`）之外再加
+  `contextStatsStore.compacting`，避免兩個 summary 呼叫並行（手動連點）。
+- **n_ctx 解析**：active conv 用 `contextStatsStore.contextTotal`（canonical
+  resolution 在 `modelsStore.activeModelId`）；非 active conv 用
+  `getConversationModel(path) ?? modelsStore.activeModelId` →
+  `modelsStore.props.getModelContextSize`。未知時：auto 靜默回（02-§6 前置
+  「n_ctx 已知」）；**手動 toast「Model context size unknown」**（規劃未指定，
+  取「手動操作要有回饋」）。
+- **model 解析**（`resolveCompactionModel`）：ROUTER →
+  `selectedModelName ?? getConversationModel(path)`（mirror
+  `streamChatCompletion` 的 `modelOverride || selectedModelName || conversationModel`，
+  此處無 modelOverride）；single-model 模式 → `null`（server 只有一個模型）。
+- **preEncode 預熱**：`triggerPreEncode(preCompactionPath, cmp, cmp.content, model)`，
+  其中 `preCompactionPath` 是壓縮**前**的 path snapshot。原因：active conv 的
+  `path` 就是 `activeMessages` 陣列本身，`addMessageToActive(cmp)` 會 push 進同一
+  個陣列；若不 snapshot，pre-encode 的 payload 會變成 `[..., cmp, cmp]`，
+  builder 的 kept 區會把舊 cmp 當一般 user 訊息再送一次（summary 重覆）。
+  snapshot 後 payload = 舊 path + cmp = 新 DB path，buildLlmContext 產出
+  `[system, summary, kept…]` 正是新的前綴。
+- **第二次壓縮**：舊 cmp 節點在 path 上、在斷點之前時，policy 把它當一般
+  user 訊息（role=user）處理，自然進 summarize 區被新 summary 涵蓋（I2）；
+  斷點落在舊 cmp 之後時它留在新 kept 區按 user 送出（I2）— 皆零特殊處理。
+- **循環 import**：`chat/index.svelte.ts ↔ context-stats.svelte.ts` 雙向（context-stats
+  原本就 import chatStore）。兩邊都只在 call time / derived 求值時引用對方，
+  模組評估期不碰 binding，安全。
+
 ## 4. 驗證狀態（目前停在這）
 
 - Phase 0：使用者已跑 `npm run check` + 4 支 unit，**全綠**。
 - Phase 1 5.1/5.2/5.3：使用者已跑 3 條指令（`npm run check` + 4 支 unit +
   `tests/client/settings-registry-invariants.svelte.test.ts`），**全綠**。
-- **下一步：5.4 `DatabaseService.createCompactionMessage()` +
-  5.5 `chatStore.compactConversation(convId, { auto })`**（規格見 §5），
-  完成後請使用者跑：
+- Phase 1 5.4/5.5：**code 完成，待使用者編譯確認**。請跑：
   ```bash
   npm run check
   npm run test:unit -- --run tests/unit/context-builder.test.ts tests/unit/compaction-policy.test.ts tests/unit/summarize.test.ts tests/unit/conversation-export.test.ts
   ```
+  （5.4/5.5 無新增 unit：`DatabaseService` 是 Dexie 層、`compactConversation`
+  是 store 協調邏輯，皆不在 unit project 範圍；依 05-§5 驗收標準 5，store 層
+  diff 已控制在 `compactConversation` + 兩個 private helper + `compacting` 欄位）
+- **下一步：5.6 `ChatMessageCompaction.svelte` + 分派 + grouping**（規格見 §5.6），
+  完成後請使用者跑 `npm run check`（+ 5.6 若加 client 測試則一併跑）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 

@@ -86,6 +86,10 @@ function deriveLiveStats(state: ApiProcessingState | null): LiveStats | null {
 }
 
 class ContextStatsStore {
+	// True while a compaction summary call is in flight (manual or auto);
+	// the gauge popup reads it to show "Compacting context…".
+	compacting = $state(false);
+
 	// The canonical resolution lives in modelsStore.activeModelId.
 	activeModelId = $derived(modelsStore.activeModelId);
 

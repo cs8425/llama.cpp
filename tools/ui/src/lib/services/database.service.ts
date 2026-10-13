@@ -7,9 +7,8 @@
  */
 
 import { IDXDB_STORES, IDXDB_TABLES, STORAGE_APP_NAME } from '$lib/constants';
-import { MessageRole } from '$lib/enums';
-import type { McpServerOverride } from '$lib/types/database';
-import type { ExportedConversation } from '$lib/types/database';
+import { MessageRole, MessageType } from '$lib/enums';
+import type { CompactionMeta, ExportedConversation, McpServerOverride } from '$lib/types/database';
 import { filterByLeafNodeId, findDescendantMessages, uuid } from '$lib/utils';
 import Dexie, { type EntityTable } from 'dexie';
 
@@ -262,6 +261,59 @@ export class DatabaseService {
 			await this.addChildToParent(parentId, systemMessage.id);
 
 			return systemMessage;
+		});
+	}
+
+	/**
+	 * Creates a compaction entry for a conversation.
+	 *
+	 * The entry is a tree node (role: user, type: compaction) whose content is
+	 * the summary of the messages before the kept-region boundary stored in
+	 * `compactionMeta.firstKeptMessageId`. It is attached as a child of the
+	 * current leaf (I6); the caller owns moving `currNode` to the new node.
+	 *
+	 * @param params - convId, parentId (last message of the pre-compaction
+	 *   path), content (summary with prefix, assembled by the caller) and the
+	 *   compaction metadata.
+	 * @returns The created compaction message
+	 * @throws Error if content is empty or the parent message does not exist
+	 */
+	static async createCompactionMessage(params: {
+		compactionMeta: CompactionMeta;
+		content: string;
+		convId: string;
+		parentId: string
+	}): Promise<DatabaseMessage> {
+		const { compactionMeta, content, convId, parentId } = params;
+		const trimmedContent = content.trim();
+
+		if (!trimmedContent) {
+			throw new Error('Cannot create compaction message with empty content');
+		}
+
+		return await db.transaction('rw', db[IDXDB_TABLES.messages], async () => {
+			const parentMessage = await db[IDXDB_TABLES.messages].get(parentId);
+
+			if (!parentMessage) {
+				throw new Error(`Parent message ${parentId} not found`);
+			}
+
+			const compactionMessage: DatabaseMessage = {
+				children: [],
+				compactionMeta,
+				content: trimmedContent,
+				convId,
+				id: uuid(),
+				parent: parentId,
+				role: MessageRole.USER,
+				timestamp: Date.now(),
+				type: MessageType.COMPACTION
+			};
+
+			await db[IDXDB_TABLES.messages].add(compactionMessage);
+			await this.addChildToParent(parentId, compactionMessage.id);
+
+			return compactionMessage;
 		});
 	}
 

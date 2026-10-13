@@ -18,10 +18,13 @@ import {
 	StreamConnectionState
 } from '$lib/enums';
 import { ChatService } from '$lib/services/chat.service';
+import { SUMMARY_CONTENT_PREFIX, estimateTokens, planCompaction, summarizeMessages } from '$lib/services/context';
+import type { CompactionBudget } from '$lib/services/context';
 import { DatabaseService } from '$lib/services/database.service';
 // direct imports between stores, not via the barrel, to avoid circular deps
 import { agenticStore } from '$lib/stores/agentic/index.svelte';
 import { chatActivityStore } from '$lib/stores/chat/activity.svelte';
+import { contextStatsStore } from '$lib/stores/chat/context-stats.svelte';
 import { type ChatFlowsHost, ChatMessageFlows } from '$lib/stores/chat/flows.svelte';
 import { chatProcessingStore } from '$lib/stores/chat/processing.svelte';
 import { type ChatStreamHost, ChatStreamManager } from '$lib/stores/chat/streams.svelte';
@@ -41,6 +44,7 @@ import type {
 	ErrorDialogState
 } from '$lib/types';
 import {
+	filterByLeafNodeId,
 	findMessageById,
 	formatCwdMessage,
 	getConversationModel,
@@ -48,6 +52,13 @@ import {
 	normalizeModelName
 } from '$lib/utils';
 import { SvelteMap } from 'svelte/reactivity';
+import { toast } from 'svelte-sonner';
+
+/**
+ * Minimum estimated tokens in the summarize region for a compaction to be
+ * worth the summary round-trip (context-enhance/02 §3.3 example value).
+ */
+const MIN_SUMMARIZE_TOKENS = 2000;
 
 class ChatStore implements ChatStreamHost, ChatFlowsHost {
 	chatReasoningStates = new SvelteMap<string, boolean>();
@@ -514,6 +525,175 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 	/** True while the active conversation has a live streaming pipe. */
 	isStreaming(): boolean {
 		return this.chatStreamingStates.has(conversationsStore.activeConversation?.id ?? '');
+	}
+
+	/**
+	 * Compacts a conversation: replaces the messages before a safe boundary
+	 * with a model-generated summary stored as a compaction entry node
+	 * (context-enhance/02 §2, 06-status §5.5).
+	 *
+	 * `auto: true` (called between flows) additionally requires the last prompt
+	 * to have reached the configured threshold of n_ctx; `auto: false` is the
+	 * manual "Compact now" action and skips that check.
+	 *
+	 * Fail-open everywhere: a missing plan, an unknown n_ctx or a failed
+	 * summary call leaves the conversation untouched.
+	 */
+	async compactConversation(convId: string, options: { auto?: boolean } = {}): Promise<void> {
+		const auto = options.auto === true;
+
+		// I7: never compact while a stream or agentic flow owns the context,
+		// and never run two summary calls at once.
+		if (this.isChatLoading(convId) || agenticStore.isRunning(convId)) return;
+
+		if (contextStatsStore.compacting) return;
+
+		const conversation = conversationsStore.conversations.find((c) => c.id === convId);
+
+		if (!conversation) return;
+
+		// Root→leaf path: the live array for the active conversation, DB +
+		// leaf filter otherwise (same shape as loadConversation).
+		const isActive = conversationsStore.activeConversation?.id === convId;
+		let path: DatabaseMessage[];
+
+		if (isActive) {
+			path = conversationsStore.activeMessages;
+		} else {
+			const allMessages = await conversationsStore.getConversationMessages(convId);
+
+			path = conversation.currNode
+				? (filterByLeafNodeId(allMessages, conversation.currNode, false) as DatabaseMessage[])
+				: allMessages;
+		}
+
+		if (path.length === 0) return;
+
+		const config = settingsStore.config;
+		const nCtx = this.getContextSizeForConversation(convId, path);
+
+		if (nCtx === null || nCtx <= 0) {
+			if (!auto) toast.info('Model context size unknown');
+
+			return;
+		}
+
+		const threshold = config.contextCompactionThreshold;
+
+		// Auto compaction only kicks in once the last prompt reached the
+		// threshold; the manual action skips this gate.
+		if (auto) {
+			let lastPrompt: number | null = null;
+
+			for (let i = path.length - 1; i >= 0; i--) {
+				const message = path[i];
+
+				if (message.role === MessageRole.ASSISTANT && message.timings?.prompt_n != null) {
+					lastPrompt = message.timings.prompt_n;
+
+					break;
+				}
+			}
+
+			const effectiveLastPrompt =
+				lastPrompt ?? path.reduce((sum, message) => sum + estimateTokens(message), 0);
+
+			if (effectiveLastPrompt < nCtx * (threshold / 100)) return;
+		}
+
+		const summaryReserve = config.contextSummaryMaxTokens * 1.5;
+		const budget: CompactionBudget = {
+			keepBudgetTokens: Math.floor(nCtx * (1 - threshold / 100) - summaryReserve),
+			minKeptMessages: config.contextKeepMinMessages,
+			minKeptUserTurns: config.contextKeepMinUserTurns,
+			minSummarizeTokens: MIN_SUMMARIZE_TOKENS
+		};
+
+		const plan = planCompaction(path, budget);
+
+		if (!plan) {
+			if (!auto) toast.info('No range to compact');
+
+			return;
+		}
+
+		// Snapshot the pre-compaction path: the active array is mutated by
+		// addMessageToActive below, and the pre-encode must warm the new
+		// prefix (old path + cmp) without duplicating the entry.
+		const preCompactionPath = [...path];
+		const model = this.resolveCompactionModel(path);
+
+		contextStatsStore.compacting = true;
+
+		try {
+			const summary = await summarizeMessages(plan, model, undefined, {
+				maxTokens: config.contextSummaryMaxTokens,
+				prompt: config.contextSummaryPrompt.trim() || undefined
+			});
+
+			const cmp = await DatabaseService.createCompactionMessage({
+				compactionMeta: {
+					estimatedTokensBefore: plan.estimatedTokensBefore,
+					firstKeptMessageId: plan.firstKeptMessageId,
+					isSplitTurn: plan.isSplitTurn || undefined,
+					model: model ?? undefined,
+					summarizedCount: plan.toSummarize.length
+				},
+				content: `${SUMMARY_CONTENT_PREFIX} ${summary}`,
+				convId,
+				parentId: path[path.length - 1].id
+			});
+
+			if (isActive) {
+				conversationsStore.addMessageToActive(cmp);
+				await conversationsStore.updateCurrentNode(cmp.id);
+			} else {
+				await DatabaseService.updateCurrentNode(convId, cmp.id);
+				conversationsStore.applyConversationUpdate(convId, { currNode: cmp.id });
+			}
+
+			conversationsStore.updateConversationTimestamp(convId);
+
+			// Warm the KV cache with the NEW prefix so the next turn does not
+			// pay a full re-prompt on top of the summary call.
+			await this.triggerPreEncode(preCompactionPath, cmp, cmp.content, model);
+
+			const estimatedAfter = plan.estimatedTokensAfter + Math.ceil(cmp.content.length / 4);
+
+			toast.success(`Context compacted: ~${plan.estimatedTokensBefore} → ~${estimatedAfter} tokens`);
+		} catch (error) {
+			// Fail-open: no cmp node was created (or it was created but the
+			// state updates failed) — the conversation keeps its full context.
+			toast.error(`Compaction failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+		} finally {
+			contextStatsStore.compacting = false;
+		}
+	}
+
+	/**
+	 * n_ctx of the conversation being compacted: the active model's context
+	 * size for the active conversation, the conversation's own model (ROUTER)
+	 * or the single served model otherwise.
+	 */
+	private getContextSizeForConversation(convId: string, path: DatabaseMessage[]): number | null {
+		if (conversationsStore.activeConversation?.id === convId) {
+			return contextStatsStore.contextTotal;
+		}
+
+		const modelName = getConversationModel(path) ?? modelsStore.activeModelId;
+
+		return modelName ? modelsStore.props.getModelContextSize(modelName) : null;
+	}
+
+	/**
+	 * Model for the summary call: the ROUTER selection first (mirrors
+	 * streamChatCompletion), the conversation's own model as fallback; null in
+	 * single-model mode (the server has exactly one model).
+	 */
+	private resolveCompactionModel(path: DatabaseMessage[]): string | null {
+		if (!serverStore.isRouterMode) return null;
+
+		return modelsStore.selectedModelName ?? getConversationModel(path);
 	}
 
 	/**
