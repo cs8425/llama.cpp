@@ -4,7 +4,8 @@
 > 沒有做任何裁切或壓縮。本目錄分析如何加入**自動上下文管理**(compaction),
 > 並讓 user 能看到「壓縮後實際送出的資料」、允許進階 user 人工介入編輯。
 >
-> 本文件集是**設計分析與實施規劃**,尚未修改任何 src/ 程式碼。
+> 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
+> [06-status.md](./06-status.md)（Phase 0 已完成，Phase 1 待開始）。
 
 ## 目錄
 
@@ -15,6 +16,7 @@
 | [03-architecture.md](./03-architecture.md) | 架構:模組劃分、核心 API、整合點對照表、流程時序、替代方案比較、可維護性論點 |
 | [04-ui.md](./04-ui.md) | UI 改動:compaction entry 渲染、「LLM 實際看到什麼」inspector、人工介入(編輯/移動斷點/手動壓縮)、context gauge、settings |
 | [05-implementation-plan.md](./05-implementation-plan.md) | 分階段實施計畫、檔案清單(新增/修改)、測試計畫、風險與取捨、驗收標準 |
+| [06-status.md](./06-status.md) | **實做狀態(continuity doc)**:Phase 0 交付明細、設計決策、驗證狀態、Phase 1 執行清單 |
 
 ## TL;DR — 核心決策
 

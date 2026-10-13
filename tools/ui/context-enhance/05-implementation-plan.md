@@ -7,10 +7,14 @@
 新增 `src/lib/services/context/` + 型別 + 全套 unit tests。
 此階段**不改任何現有行為**(builder 還沒被接上),可先合入 review。
 
-- [ ] `MessageType.COMPACTION`(`enums/chat.enums.ts`)
-- [ ] `CompactionMeta`(`types/database.d.ts`,DatabaseMessage 加選用欄位)
-- [ ] `services/context/types.ts` / `context-builder.ts` / `compaction-policy.ts`(含 split span 兩階段選點)/ `summarize.ts`(含 split prompt 變體)/ `index.ts`
-- [ ] `tests/unit/context-builder.test.ts`、`tests/unit/compaction-policy.test.ts`
+> ✅ 已完成——交付明細、設計決策與驗證狀態見 `06-status.md`。
+> 額外交付:`tests/unit/summarize.test.ts`、export round-trip 測試、
+> 修復既有的 `ChatRole`/`ChatMessageType` 缺失型別。
+
+- [x] `MessageType.COMPACTION`(`enums/chat.enums.ts`)
+- [x] `CompactionMeta`(`types/database.d.ts`,DatabaseMessage 加選用欄位)
+- [x] `services/context/types.ts` / `context-builder.ts` / `compaction-policy.ts`(含 split span 兩階段選點)/ `summarize.ts`(含 split prompt 變體)/ `index.ts`
+- [x] `tests/unit/context-builder.test.ts`、`tests/unit/compaction-policy.test.ts`
 
 ### Phase 1 — 送出路徑接上 builder + 手動壓縮
 
