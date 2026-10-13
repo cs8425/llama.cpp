@@ -154,7 +154,7 @@ describe('compaction entry export/import round-trip', () => {
 			children: [],
 			content: 'Summary of earlier turns',
 			compactionMeta: {
-				esimatedTokensBefore: 1840,
+				estimatedTokensBefore: 1840,
 				firstKeptMessageId: 'u2b',
 				isSplitTurn: true,
 				model: 'qwen3-32b',
@@ -168,13 +168,13 @@ describe('compaction entry export/import round-trip', () => {
 		});
 		const [imported] = ConversationTransferService.parseSessionsJsonl(jsonl);
 
-		const importedCmp = imported.messages.find((m) => m.id === 'cmp');
+		const importedCmp = imported.messages.find((m: DatabaseMessage) => m.id === 'cmp');
 
 		expect(importedCmp?.type).toBe(MessageType.COMPACTION);
 		expect(importedCmp?.role).toBe(MessageRole.USER);
 		expect(importedCmp?.content).toBe('Summary of earlier turns');
 		expect(importedCmp?.compactionMeta).toEqual({
-			esimatedTokensBefore: 1840,
+			estimatedTokensBefore: 1840,
 			firstKeptMessageId: 'u2b',
 			isSplitTurn: true,
 			model: 'qwen3-32b',

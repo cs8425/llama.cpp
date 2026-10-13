@@ -39,6 +39,7 @@ function budget(keepBudgetTokens: number, overrides: Partial<CompactionBudget> =
 
 // 4 chars = 1 token, so 400-char content = 100 tokens.
 const T100 = 'x'.repeat(400);
+const T400 = 'x'.repeat(1600);
 
 describe('estimateTokens', () => {
 	it('estimates plain content at chars/4', () => {
@@ -87,6 +88,7 @@ describe('estimateTokens', () => {
 			type: AttachmentType.TEXT
 		};
 		const pdfImages: DatabaseMessageExtra = {
+			base64Data: 'data:application/pdf;base64,xx',
 			content: '',
 			images: ['data:image/png;base64,a', 'data:image/png;base64,b', 'data:image/png;base64,c'],
 			name: 'd.pdf',
@@ -94,6 +96,7 @@ describe('estimateTokens', () => {
 			type: AttachmentType.PDF
 		};
 		const pdfText: DatabaseMessageExtra = {
+			base64Data: 'data:application/pdf;base64,xx',
 			content: T100,
 			name: 'd.pdf',
 			processedAsImages: false,
@@ -120,12 +123,14 @@ describe('planCompaction', () => {
 	});
 
 	it('cuts at a user-message boundary, keeps within budget, and honors minKeptUserTurns', () => {
+		// the first two turns are oversized so the earliest user boundary that
+		// fits the budget is u2, leaving exactly 4 user messages in the kept region
 		const path = [
 			message('sys', MessageRole.SYSTEM, T100), // 100
-			message('u1', MessageRole.USER, T100), // 100
-			message('a1', MessageRole.ASSISTANT, T100),
-			message('u2', MessageRole.USER, T100),
-			message('a2', MessageRole.ASSISTANT, T100),
+			message('u1', MessageRole.USER, T400), // 400
+			message('a1', MessageRole.ASSISTANT, T400),
+			message('u2', MessageRole.USER, T400),
+			message('a2', MessageRole.ASSISTANT, T400),
 			message('u3', MessageRole.USER, T100),
 			message('a3', MessageRole.ASSISTANT, T100),
 			message('u4', MessageRole.USER, T100),
@@ -134,17 +139,17 @@ describe('planCompaction', () => {
 			message('a5', MessageRole.ASSISTANT, T100)
 		];
 
-		const plan = planCompaction(path, budget(500));
+		const plan = planCompaction(path, budget(1400));
 
 		expect(plan).not.toBeNull();
 		expect(plan?.isSplitTurn).toBe(false);
-		expect(plan?.firstKeptMessageId).toBe('u4');
-		// kept = u4, a4, u5, a5 → 400 tokens ≤ budget, 4 user messages
-		expect(plan?.kept.map((m) => m.id)).toEqual(['u4', 'a4', 'u5', 'a5']);
-		expect(plan?.kept.reduce((s, m) => s + estimateTokens(m), 0)).toBeLessThanOrEqual(500);
-		// summarize = u1..a3, system prompt excluded (I1)
-		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['u1', 'a1', 'u2', 'a2', 'u3', 'a3']);
-		expect(plan?.estimatedTokensBefore).toBe(1100);
+		expect(plan?.firstKeptMessageId).toBe('u2');
+		// kept = u2..a5 → 800 tokens ≤ budget, 4 user messages
+		expect(plan?.kept.map((m) => m.id)).toEqual(['u2', 'a2', 'u3', 'a3', 'u4', 'a4', 'u5', 'a5']);
+		expect(plan?.kept.reduce((s, m) => s + estimateTokens(m), 0)).toBeLessThanOrEqual(1400);
+		// summarize = u1..a1, system prompt excluded (I1)
+		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['u1', 'a1']);
+		expect(plan?.estimatedTokensBefore).toBe(2300);
 	});
 
 	it('refuses a boundary cut that would leave fewer than minKeptUserTurns user messages', () => {
@@ -258,10 +263,12 @@ describe('planCompaction', () => {
 			message('u2', MessageRole.USER, T100),
 			message('a2', MessageRole.ASSISTANT, T100),
 			message('u3', MessageRole.USER, T100),
-			message('a3', MessageRole.ASSISTANT, T100)
+			message('a3', MessageRole.ASSISTANT, T100),
+			message('u4', MessageRole.USER, T100),
+			message('a4', MessageRole.ASSISTANT, T100)
 		];
 
-		const plan = planCompaction(path, budget(300, { minKeptUserTurns: 2 }));
+		const plan = planCompaction(path, budget(400, { minKeptUserTurns: 2 }));
 
 		expect(plan).not.toBeNull();
 		expect(plan?.firstKeptMessageId).toBe('u3');

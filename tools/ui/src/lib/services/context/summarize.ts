@@ -104,9 +104,16 @@ function summarizeToolCalls(toolCallsJson: string): string {
 		const parsed: unknown = JSON.parse(toolCallsJson);
 
 		if (Array.isArray(parsed) && parsed.length > 0) {
+			// Tool calls are { id, type: 'function', function: { name, arguments } }
 			const names = parsed
-				.map((call) => (call && typeof call === 'object' ? (call as { name?: unknown }).name : undefined))
-				.filter((name): name is string => typeof name === 'string' && name.length > 0);
+				.map((call) => {
+					if (!call || typeof call !== 'object') return undefined;
+
+					const fn = (call as { function?: { name?: unknown } }).function;
+
+					return typeof fn?.name === 'string' ? fn.name : undefined;
+				})
+				.filter((name): name is string => name !== undefined);
 
 			if (names.length > 0) return names.join(', ');
 		}

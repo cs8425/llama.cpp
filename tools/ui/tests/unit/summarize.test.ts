@@ -68,6 +68,7 @@ describe('buildSummaryTranscript', () => {
 					{ base64Url: 'data:image/jpeg;base64,SECRET', name: 'shot.jpg', type: AttachmentType.IMAGE },
 					{ content: 'const a = 1;', name: 'x.ts', size: 1234, type: AttachmentType.TEXT },
 					{
+						base64Data: 'data:application/pdf;base64,xx',
 						content: 'pdf text',
 						images: ['data:image/png;base64,a', 'data:image/png;base64,b'],
 						name: 'doc.pdf',
