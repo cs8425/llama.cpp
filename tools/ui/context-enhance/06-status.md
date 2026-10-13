@@ -8,7 +8,7 @@
 | 階段 | 狀態 |
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
-| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1 / 5.2 / 5.3 完成，**等待使用者編譯確認**（見 §4）；5.4–5.7 未開始 |
+| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1 / 5.2 / 5.3 ✅ 完成並確認（3 條指令全綠，見 §4）；5.4–5.7 未開始 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ⬜ |
 | Phase 3 — 可選後續 | ⬜ |
 
@@ -41,6 +41,24 @@
 | `tests/unit/compaction-policy.test.ts` | 13 | estimate 各附件型別；不超 budget → null；boundary 切（kept 恰好 4 user 訊息）；minKeptUserTurns 拒絕；split 切（kept 以 ass(tool_calls)+tool 開頭）；純 ass/tool 交替絕不切 tool；巨幅 user 訊息 → split；連 split 都放不下 → null；minSummarizeTokens；無 system prompt 路徑 |
 | `tests/unit/summarize.test.ts` | 6 | transcript：`[role] content`、toolCalls→名稱、malformed→`unparsed`、附件佔位符（不帶 base64）、空訊息略過 |
 | `tests/unit/conversation-export.test.ts` | +1 | cmp 節點 export/import round-trip（type / content / compactionMeta 完整） |
+
+## 2b. Phase 1 已交付檔案（5.1–5.3，已確認）
+
+### 修改
+
+| 檔案 | 改動 |
+| ---- | ---- |
+| `src/lib/constants/settings-keys.constants.ts` | 8 個 `CONTEXT_*` key（字母序插在 `CONVERSATION_TABS` 前，帶 `// Context management` 註解） |
+| `src/lib/constants/settings.constants.ts` | General section 末尾 8 個 registry 條目（4 個 numeric 用 `isPositiveInteger` + `min`/`max`；in-loop 與 threshold 帶 `dependsOn: CONTEXT_AUTO_COMPACTION`） |
+| `src/lib/services/chat.service.ts` | import `buildLlmContext`（`$lib/services/context`，位置在 `$lib/enums` 後、`$lib/stores` 前）；新增公開 `static resolveOutgoingMessages(messages, excludeReasoning)`（DB path 判别 + 分派，見 §3.7/§3.8）；`sendMessage` / `preEncode` 改走它；`normalizeMessagesForApi` 參數放大為 per-element union |
+| `src/lib/stores/agentic/index.svelte.ts` | `runAgenticFlow` 初始 normalize 改 `ChatService.resolveOutgoingMessages(messages, false)` |
+
+### 零改動（重要）
+
+- `types/settings.d.ts`（`SettingsConfigType` 由 registry 派生）、`SettingsChatFields.svelte`（通用渲染）
+- `sendMessage` / `preEncode` 對外簽名、後段 vision 過濾、request body reasoning 過濾
+- agentic `executeAgenticLoop` 的 `sessionMessages` 續加邏輯（Phase 2 才動）
+- `conversationsStore` 路徑邏輯、`branching.ts`、import/export 服務、`convertDbMessageToApiChatMessageData`
 
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
@@ -98,14 +116,15 @@ builder 保持 WYSIWYG（送出 = 節點存的 content）。Phase 1 的
 ## 4. 驗證狀態（目前停在這）
 
 - Phase 0：使用者已跑 `npm run check` + 4 支 unit，**全綠**。
-- **Phase 1 5.1/5.2/5.3 已寫完，待使用者重跑**：
+- Phase 1 5.1/5.2/5.3：使用者已跑 3 條指令（`npm run check` + 4 支 unit +
+  `tests/client/settings-registry-invariants.svelte.test.ts`），**全綠**。
+- **下一步：5.4 `DatabaseService.createCompactionMessage()` +
+  5.5 `chatStore.compactConversation(convId, { auto })`**（規格見 §5），
+  完成後請使用者跑：
   ```bash
   npm run check
   npm run test:unit -- --run tests/unit/context-builder.test.ts tests/unit/compaction-policy.test.ts tests/unit/summarize.test.ts tests/unit/conversation-export.test.ts
-  npm run test:client -- --run tests/client/settings-registry-invariants.svelte.test.ts
   ```
-  （registry invariants 是 client project；新增 8 個 settings key 會被它自動涵蓋）
-  全綠後繼續 5.4+5.5。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
