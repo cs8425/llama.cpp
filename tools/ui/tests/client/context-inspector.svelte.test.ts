@@ -242,7 +242,7 @@ describe('DialogContextInspector (read-only, Phase 1)', () => {
 		await waitFor(() =>
 			[...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(
 				(button) => button.textContent?.includes('Copied')
-			)
+			) ?? null
 		);
 
 		expect(writeText).toHaveBeenCalledTimes(1);

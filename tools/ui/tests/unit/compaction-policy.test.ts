@@ -2,7 +2,7 @@
 // (boundary-first, split user-message span as fallback). The cut must never
 // land on a tool result (I4) and the kept region must respect I5.
 
-import { AttachmentType, ContentPartType, MessageRole, MessageType } from '$lib/enums';
+import { AttachmentType, ContentPartType, FileTypeAudio, MessageRole, MessageType } from '$lib/enums';
 import { estimateApiMessageTokens, estimateTokens, planCompaction } from '$lib/services/context/compaction-policy';
 import type { CompactionBudget } from '$lib/services/context/types';
 import type { ApiChatMessageData } from '$lib/types/api';
@@ -136,7 +136,7 @@ describe('estimateApiMessageTokens', () => {
 			role: MessageRole.USER
 		};
 		const audio: ApiChatMessageData = {
-			content: [{ input_audio: { data: 'xx', format: 'wav' }, type: ContentPartType.INPUT_AUDIO }],
+			content: [{ input_audio: { data: 'xx', format: FileTypeAudio.WAV }, type: ContentPartType.INPUT_AUDIO }],
 			role: MessageRole.USER
 		};
 		const video: ApiChatMessageData = {

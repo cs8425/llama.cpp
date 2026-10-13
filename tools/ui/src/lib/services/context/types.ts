@@ -58,7 +58,11 @@ export interface ContextCompactionInfo {
 	entryId: string;
 	/** The boundary id the entry claims. */
 	firstKeptMessageId: string;
-	/** Number of path messages (excluding the system prompt head) dropped from the payload. */
+	/**
+	 * Number of path messages (excluding the system prompt head) dropped from
+	 * the payload and covered by the summary. The in-effect entry itself is the
+	 * summary, not a dropped message, so it is not counted.
+	 */
 	droppedCount: number;
 	/**
 	 * false = the boundary id no longer exists on the path; the full path was

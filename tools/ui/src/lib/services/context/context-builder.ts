@@ -130,7 +130,9 @@ export async function buildLlmContext(
 	return {
 		compaction: {
 			boundaryValid: true,
-			droppedCount: keptIndex - head.length,
+			droppedCount: path
+				.slice(head.length, keptIndex)
+				.filter((message) => message.id !== entry.id).length,
 			entryId: entry.id,
 			firstKeptMessageId: boundaryId
 		},

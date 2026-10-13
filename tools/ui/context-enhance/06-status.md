@@ -8,7 +8,7 @@
 | 階段 | 狀態 |
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
-| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.6 ✅ 全部完成並確認（見 §4）；5.7 ✅ 已實做、待使用者編譯確認 |
+| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.6 ✅ 全部完成並確認（見 §4）；5.7 第一輪確認抓到 4 個問題、已全數修完（見 §2f）、待使用者重跑確認 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ⬜ |
 | Phase 3 — 可選後續 | ⬜ |
 
@@ -103,7 +103,8 @@
 >   入口在 streaming 時 disabled，所以 dialog 開啟期間 path 穩定（Phase 2 改送出前快照）。
 > - summary 行 = system head 之後第一則（`boundaryValid` 時），`kind` 標成 `summary` 而非 `user`；
 >   cmp 節點本身不在 payload（builder 已排除）。
-> - 「Compacted out」= `path.slice(headLength, boundaryIndex)`（boundary 有效時）；失效時不顯示、改紅條。
+> - 「Compacted out」= `path.slice(headLength, boundaryIndex)` 再排除 in-effect entry
+>   本身（它是 summary、不是被摘要涵蓋的訊息；見 §2f）；失效時不顯示、改紅條。
 > - Copy JSON 的佔位符只換 `data:` 開頭的 image_url 與 input_audio/input_video 的 data；
 >   非 data: 的 URL 原樣保留。
 > - `n_ctx` / `model` 讀 `contextStatsStore.contextTotal` / `activeModelId`（canonical 在 modelsStore）；
@@ -111,6 +112,20 @@
 > - **與 05-§3 測試計畫的偏差**：inspector 的 Storybook story（05 列的「正常 / 斷點失效 /
 >   進行中」三態）**未建**——只讀版行為已由 4 支 client 測試覆蓋；
 >   留到 Phase 2 編輯動作落地時一併補（屆時「進行中」態也有意義）。
+
+## 2f. 5.7 第一輪確認的修復（待使用者重跑確認）
+
+第一輪跑 `npm run check` + 2 支測試：unit 16/16 綠；check 抓到 2 型別錯 + 1 warning；
+client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compacted out」，顯示
+4 則而非 3 則）。全數已修：
+
+| 檔案 | 問題 | 修復 |
+| ---- | ---- | ---- |
+| `DialogContextInspector.svelte` | 「Compacted out」列把 in-effect cmp entry 自己也算進去（`path.slice(headLength, boundaryIndex)` 含 entry；entry 是 summary 本身、不是被涵蓋的訊息）→ fixture 顯示 4 則而非 3 則 | `droppedRows` 先 map 出 1-based index 再 `.filter((row) => row.message.id !== compaction.entryId)`（index 用 filter **前**的 offset 算，避免過濾後編號漂移） |
+| `context-builder.ts` + `types.ts` | `droppedCount = keptIndex - head.length` 在「entry 落在 head..boundary 之間」時會把 entry 數進去（與 inspector「covered by the summary」語義不一致；真實流程 entry 恆在 boundary 之後所以數值不變） | 改 `path.slice(head.length, keptIndex).filter((m) => m.id !== entry.id).length`；JSDoc 補註。既有 builder 測試期望值（2/0/2）不變 |
+| `DialogContextInspector.svelte:320` | svelte warning：非 void element 自我關閉 `<div />`（`element_invalid_self_closing_tag`） | 改 `<div …></div>` |
+| `tests/client/context-inspector.svelte.test.ts:243` | 型別錯：`.find()` 回 `HTMLButtonElement \| undefined`，自訂 `waitFor` 要 `Node \| null` | 箭尾加 `?? null` |
+| `tests/unit/compaction-policy.test.ts:139` | 型別錯：`format: 'wav'` 字面量不能指派給 `AudioInputFormat`（= `FileTypeAudio.WAV \| FileTypeAudio.MP3`） | 改 `FileTypeAudio.WAV`（import 加 `FileTypeAudio`） |
 
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
@@ -212,11 +227,12 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   **全綠**。（第一輪 check 抓到 4 個型別錯：test fixture 的 `type` string literal 不能
   指派給 `MessageType` enum——已改 enum 成員，story 檔一併改；陷阱見 §6。）
   5.6 無新增 unit（純 UI 層；grouping 邏輯由 client 測試覆蓋）。
-- Phase 1 5.7：已實做（交付明細見 §2e），**尚未編譯確認**。
-  **下一步：請使用者跑** `npm run check` +
-  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
-  `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`；
-  全綠後 Phase 1 只剩 5.8 手動驗收（05-§1 Phase 1 ✅ 列）。
+- Phase 1 5.7 第一輪：使用者跑了 `npm run check` +
+  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（16/16 綠）+
+  `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`（3/4）。
+  check 抓到 2 型別錯 + 1 warning；client 掛的那支是 dropped 區把 in-effect entry
+  算進「Compacted out」（4 則 vs 3 則）。**已全數修完（§2f），待使用者重跑**：
+  `npm run check` + 同兩支測試；全綠後 Phase 1 只剩 5.8 手動驗收（05-§1 Phase 1 ✅ 列）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -386,6 +402,12 @@ static async createCompactionMessage(params: {
   enum 成員，**不要**用 string literal。`{ ... } as DatabaseMessage` 的 cast 會吃掉
   literal 檢查（舊 test 因此帶病生存），但 `Partial<DatabaseMessage>` 型別的參數會
   直接 contextual check 炸掉（5.6 第一輪 check 的 4 個錯就是這個）。
+- **API 型別的 `input_audio.format` 是 enum 聯集**：`AudioInputFormat =
+  FileTypeAudio.WAV | FileTypeAudio.MP3`，test fixture 要用 `FileTypeAudio.WAV`
+  而非 `'wav'` 字面量；`input_video.format` 則是 `'mp4' | 'ogg' | 'auto'` 字面量聯集，
+  字串可以。（5.7 第一輪 check 的錯之一）
+- **自訂 `waitFor` helper 的 find 要回 `T | null`**：`Array.find()` 回 `undefined`，
+  要 `?? null` 才過型別。（5.7 第一輪 check 的錯之一）
 - **store 慣例**：`.svelte.ts` runes（$state/$derived）；`conversationsStore`
   的路徑邏輯（`filterByLeafNodeId`）對新 type 透明，**不要**改 `branching.ts`。
 - **不要 import/export 改動**：`conversationsStore` 路徑邏輯、`branching.ts`、

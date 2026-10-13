@@ -116,10 +116,16 @@
 
 		if (boundaryIndex <= headLength) return [];
 
-		return path.slice(headLength, boundaryIndex).map((message, offset) => ({
-			index: headLength + offset + 1,
-			message
-		}));
+		return path
+			.slice(headLength, boundaryIndex)
+			.map((message, offset) => ({
+				index: headLength + offset + 1,
+				message
+			}))
+			// The in-effect compaction entry is the summary itself, not a
+			// dropped message — exclude it so the region lists only what
+			// the summary covers.
+			.filter((row) => row.message.id !== compaction.entryId);
 	});
 
 	function handleOpenChange(nextOpen: boolean) {
@@ -320,7 +326,7 @@
 								<div
 									class="h-full rounded-full {colorLevelBgClass(colorLevel)}"
 									style="width: {percent}%"
-								/>
+								></div>
 							</div>
 						{/if}
 					</div>
