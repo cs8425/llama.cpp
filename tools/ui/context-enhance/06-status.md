@@ -8,7 +8,7 @@
 | 階段 | 狀態 |
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
-| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.5 ✅ 全部完成並確認（見 §4）；5.6 ✅ 已交付（待編譯確認，見 §4）；5.7 未開始 |
+| Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.6 ✅ 全部完成並確認（見 §4）；5.7 未開始 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ⬜ |
 | Phase 3 — 可選後續 | ⬜ |
 
@@ -68,7 +68,7 @@
 | `src/lib/stores/chat/context-stats.svelte.ts` | `compacting = $state(false)`：summary 呼叫進行中狀態（gauge popup 的「Compacting context…」列在 Phase 2 讀它） |
 | `src/lib/stores/chat/index.svelte.ts` | `compactConversation(convId, { auto })`（流程見 §5.5；I7 guard → path 解析 → n_ctx → auto threshold gate → `planCompaction` → `summarizeMessages` → `createCompactionMessage` → active/non-active 分派 currNode → preEncode 預熱 → toast）；private `getContextSizeForConversation` / `resolveCompactionModel`；常數 `MIN_SUMMARIZE_TOKENS = 2000`；新 import：`$lib/services/context`（value + type 兩筆）、`contextStatsStore`、`filterByLeafNodeId`、`toast` |
 
-## 2d. Phase 1 已交付檔案（5.6，待編譯確認）
+## 2d. Phase 1 已交付檔案（5.6，已確認）
 
 | 檔案 | 改動 |
 | ---- | ---- |
@@ -179,11 +179,12 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   （5.4/5.5 無新增 unit：`DatabaseService` 是 Dexie 層、`compactConversation`
   是 store 協調邏輯，皆不在 unit project 範圍；依 05-§5 驗收標準 5，store 層
   diff 已控制在 `compactConversation` + 兩個 private helper + `compacting` 欄位）
-- Phase 1 5.6：**已交付，待使用者編譯確認**。請跑：
-  1. `npm run check`
-  2. `npx vitest --project=client --run tests/client/chat-message-compaction.svelte.test.ts`
+- Phase 1 5.6：使用者已跑 `npm run check` +
+  `npx vitest --project=client --run tests/client/chat-message-compaction.svelte.test.ts`（4/4），
+  **全綠**。（第一輪 check 抓到 4 個型別錯：test fixture 的 `type` string literal 不能
+  指派給 `MessageType` enum——已改 enum 成員，story 檔一併改；陷阱見 §6。）
   5.6 無新增 unit（純 UI 層；grouping 邏輯由 client 測試覆蓋）。
-- **下一步（5.6 確認後）：5.7 Inspector 只讀版 `DialogContextInspector.svelte`**（規格見 §5.7），
+- **下一步：5.7 Inspector 只讀版 `DialogContextInspector.svelte`**（規格見 §5.7），
   完成後請使用者跑 `npm run check`（+ 5.7 的 client 測試一併跑）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
@@ -349,6 +350,11 @@ static async createCompactionMessage(params: {
     （見 context-builder.test.ts 的 ChatService 替身寫法）。
   - `DatabaseMessageExtraPdfFile.base64Data` 是**必填**（test fixture 別漏）。
   - tool call 結構：`{ id, type: 'function', function: { name, arguments } }`。
+- **`DatabaseMessage.type` / `role` 是 enum**（`ChatMessageType = MessageType`、
+  `ChatRole = MessageRole`）：test fixture / story 一律用 `MessageType.X` / `MessageRole.X`
+  enum 成員，**不要**用 string literal。`{ ... } as DatabaseMessage` 的 cast 會吃掉
+  literal 檢查（舊 test 因此帶病生存），但 `Partial<DatabaseMessage>` 型別的參數會
+  直接 contextual check 炸掉（5.6 第一輪 check 的 4 個錯就是這個）。
 - **store 慣例**：`.svelte.ts` runes（$state/$derived）；`conversationsStore`
   的路徑邏輯（`filterByLeafNodeId`）對新 type 透明，**不要**改 `branching.ts`。
 - **不要 import/export 改動**：`conversationsStore` 路徑邏輯、`branching.ts`、
