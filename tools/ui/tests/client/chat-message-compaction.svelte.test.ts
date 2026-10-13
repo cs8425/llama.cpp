@@ -7,7 +7,7 @@
 // Run: npx vitest --project=client --run tests/client/chat-message-compaction.svelte.test.ts
 
 import ChatMessagesPerfWrapper from './components/ChatMessagesPerfWrapper.svelte';
-import { MessageRole } from '$lib/enums';
+import { MessageRole, MessageType } from '$lib/enums';
 import { SUMMARY_CONTENT_PREFIX } from '$lib/services/context';
 import { conversationsStore } from '$lib/stores/conversations/index.svelte';
 import { settingsStore } from '$lib/stores/settings/index.svelte';
@@ -30,7 +30,7 @@ function makeMessage(overrides: Partial<DatabaseMessage>): DatabaseMessage {
 		parent: null,
 		role: MessageRole.USER,
 		timestamp: 1760314440000, // 2025-10-13 02:14
-		type: 'text',
+		type: MessageType.TEXT,
 		...overrides
 	} as DatabaseMessage;
 }
@@ -44,7 +44,7 @@ function makeCompaction(overrides: Partial<DatabaseMessage> = {}): DatabaseMessa
 			summarizedCount: 3
 		},
 		role: MessageRole.USER,
-		type: 'compaction',
+		type: MessageType.COMPACTION,
 		...overrides
 	});
 }
@@ -54,7 +54,7 @@ function makeCompaction(overrides: Partial<DatabaseMessage> = {}): DatabaseMessa
  * Returns the messages plus the kept-region start the cmp claims.
  */
 function buildFixture(): { kept: DatabaseMessage } {
-	const system = makeMessage({ content: 'You are helpful.', role: MessageRole.SYSTEM, type: 'system' });
+	const system = makeMessage({ content: 'You are helpful.', role: MessageRole.SYSTEM, type: MessageType.SYSTEM });
 	const user = makeMessage({ content: 'help me fix the bug' });
 	const assistant = makeMessage({
 		role: MessageRole.ASSISTANT,
@@ -99,7 +99,7 @@ async function waitFor<T extends Node>(find: () => T | null, timeoutMs = 5000): 
 }
 
 function cmpRow(): HTMLElement | null {
-	return [...document.querySelectorAll('.chat-message')].find((row) =>
+	return [...document.querySelectorAll<HTMLElement>('.chat-message')].find((row) =>
 		row.textContent?.includes('Context compacted')
 	) ?? null;
 }
@@ -125,7 +125,7 @@ describe('ChatMessages compaction entry rendering', () => {
 
 		// The entry row is a separate row, not absorbed into the assistant's
 		// agentic group (the tool result text must not leak into it)
-		const agenticRow = [...document.querySelectorAll('.chat-message')].find((r) =>
+		const agenticRow = [...document.querySelectorAll<HTMLElement>('.chat-message')].find((r) =>
 			r.textContent?.includes('file contents')
 		);
 
@@ -196,7 +196,7 @@ describe('ChatMessages compaction entry rendering', () => {
 	});
 
 	it('marks a split-turn entry and notes the in-turn user request', async () => {
-		const system = makeMessage({ content: 'You are helpful.', role: MessageRole.SYSTEM, type: 'system' });
+		const system = makeMessage({ content: 'You are helpful.', role: MessageRole.SYSTEM, type: MessageType.SYSTEM });
 		const user = makeMessage({ content: 'refactor the module' });
 		const assistant = makeMessage({
 			role: MessageRole.ASSISTANT,

@@ -1,6 +1,7 @@
 <script lang="ts" module>
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import ChatMessageCompaction from '$lib/components/app/chat/ChatMessages/ChatMessage/ChatMessageCompaction/ChatMessageCompaction.svelte';
+	import { MessageRole, MessageType } from '$lib/enums';
 	import { conversationsStore } from '$lib/stores/conversations/index.svelte';
 	import { SUMMARY_CONTENT_PREFIX } from '$lib/services/context';
 
@@ -18,9 +19,9 @@
 		convId: 'conv-1',
 		id: 'kept-1',
 		parent: 'cmp-1',
-		role: 'user',
+		role: MessageRole.USER,
 		timestamp: Date.now() - 1000 * 60,
-		type: 'message'
+		type: MessageType.TEXT
 	};
 
 	const compactionMessage: DatabaseMessage = {
@@ -34,9 +35,9 @@
 		convId: 'conv-1',
 		id: 'cmp-1',
 		parent: '3',
-		role: 'user',
+		role: MessageRole.USER,
 		timestamp: Date.now() - 1000 * 60 * 5,
-		type: 'compaction'
+		type: MessageType.COMPACTION
 	};
 
 	const splitKeptAssistant: DatabaseMessage = {
@@ -45,7 +46,7 @@
 		convId: 'conv-1',
 		id: 'asst-2',
 		parent: 'cmp-2',
-		role: 'assistant',
+		role: MessageRole.ASSISTANT,
 		toolCalls: JSON.stringify([
 			{
 				function: { arguments: '{}', name: 'read_file' },
@@ -54,7 +55,7 @@
 			}
 		]),
 		timestamp: Date.now() - 1000 * 30,
-		type: 'message'
+		type: MessageType.TEXT
 	};
 
 	const splitCompactionMessage: DatabaseMessage = {
@@ -69,9 +70,9 @@
 		convId: 'conv-1',
 		id: 'cmp-2',
 		parent: 'asst-1',
-		role: 'user',
+		role: MessageRole.USER,
 		timestamp: Date.now() - 1000 * 30,
-		type: 'compaction'
+		type: MessageType.COMPACTION
 	};
 
 	async function setPath(messages: DatabaseMessage[]) {
