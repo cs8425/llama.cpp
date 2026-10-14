@@ -3,15 +3,15 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**P2.5 ✅ 已交付、待使用者編譯確認**——cmp entry 動作
+> **恢復點（最新）**：**P2.5 ✅ 完成並確認**——cmp entry 動作
 > （`ChatMessageCompaction.svelte` 展開區動作列：[Edit]/[Re-summarize]/
 > [Restore all context]，皆走 P2.3 的 chatStore 方法、`compacting` /
 > `chatStore.isLoading` 時 disabled；boundary 失效時 Re-summarize disabled；
-> 變更見 §2o）。第一件要做的事：請使用者跑 `npm run check` +
-> `npx vitest --project=client --run tests/client/chat-message-compaction.svelte.test.ts`
-> （10 支 = 4 支既有 + 6 支 P2.5 新）+ `npx vitest --project=client --run
-> tests/client/context-inspector.svelte.test.ts`（10 支回歸，確認元件改動未破
-> inspector）。全綠 → P2.5 確認、進 P2.6（§5b）。
+> 變更見 §2o）。使用者已跑 3 條指令全綠：`npm run check` + compaction client
+> suite（**10/10** = 4 既有 + 6 支 P2.5 新）+ inspector client suite
+> （**10/10** 回歸，元件改動未破 inspector）。
+> 第一件要做的事：實做 **P2.6**——gauge 列 + 第三入口 + 快捷鍵（規格見 §5b
+> P2.6）。完成後照慣例請使用者跑 `npm run check` + 相關 client 測試。
 
 ## 1. 進度總覽
 
@@ -19,7 +19,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 ✅ 完成並確認（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅ 已交付、待使用者編譯確認（見 §2o）；**下一步 P2.6**（§5b） |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 ✅ 完成並確認（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅ 完成並確認（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**下一步 P2.6**（§5b） |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -392,7 +392,7 @@ boundary 候选集在兩端都排除 `index <= headLength`：
 
 - 重跑：整支 suite（10 支）+ `npm run check`。全綠 → P2.4 確認、進 P2.5。
 
-## 2o. Phase 2 已交付檔案（P2.5，待使用者編譯確認）
+## 2o. Phase 2 已交付檔案（P2.5，已確認）
 
 | 檔案 | 改動 |
 | ---- | ---- |
@@ -596,6 +596,12 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   動作列：[編輯]/[重新摘要]/[還原全部上下文]，皆走 P2.3 的 chatStore 方法、
   進行中 `compacting` disabled；client 測試
   `chat-message-compaction.svelte.test.ts` 擴編。規格見 §5b P2.5）。
+- **Phase 2 P2.5 ✅ 完成並確認**：使用者跑 3 條指令全綠——`npm run check` +
+  compaction client suite（**10/10**，4 既有 + 6 支 P2.5 新）+ inspector
+  client suite（**10/10** 回歸）。Phase 2 現剩 P2.6（§5b）。
+- **下一步（P2.6）**：gauge 列（compacting spinner / Compacted 節省列）+
+  `ChatFormActions` 第三入口（Eye icon 按鈕）+ `Shift+Ctrl/Cmd+I` 快捷鍵
+  （規格見 §5b P2.6）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -788,7 +794,7 @@ static async createCompactionMessage(params: {
   - 不做 in-loop preEncode（下一 turn 立刻 re-encode 新前綴）。
 - 無新純邏輯（policy/builder/summarize 皆既有）→ 無新 unit；store 層照慣例不 unit 測。
 
-### P2.3 expand + chatStore 人工介入動作（DB + store）✅（待使用者編譯確認）
+### P2.3 expand + chatStore 人工介入動作（DB + store）✅ 完成並確認（變更見 §2i）
 - `DatabaseService.expandCompactionMessage(convId, cmpId)`：transaction 內
   子節點 `parent` 改指 `cmp.parent`、`parent.children` 以子節點替換 cmp、
   刪 cmp 列、`conv.currNode === cmp.id` 時回 `cmp.parent`（同 transaction 直接
@@ -807,7 +813,7 @@ static async createCompactionMessage(params: {
   - recompact 與後移共用 private `summarizeRegion` helper。
 - unit：DB 層是 Dexie、store 協調層不 unit 測（同 5.4/5.5 先例）。
 
-### P2.4 Inspector 編輯 + 動作（04-§2.2 完整版）✅ 已交付、check 全綠；client 測試 10/10 timeout 根因已修、待重跑確認（變更見 §2j、第一輪修復見 §2k、診斷結案見 §2l/§2m）
+### P2.4 Inspector 編輯 + 動作（04-§2.2 完整版）✅ 完成並確認（client 10/10 + check 全綠；變更見 §2j、第一輪修復見 §2k、診斷結案見 §2l/§2m）
 - `DialogContextInspector.svelte`：
   - summary 列「編輯」→ 就地 textarea（prefix 剝除後預填）→ 存檔走
     `updateCompactionSummary` → 重新 buildLlmContext 刷新 WYSIWYG。
@@ -819,7 +825,7 @@ static async createCompactionMessage(params: {
     「open 時抓一次」前提不再成立）。
 - client 測試：`tests/client/context-inspector.svelte.test.ts` 擴編（store spy）。
 
-### P2.5 cmp entry 動作（04-§1.2）✅ 已交付、待使用者編譯確認（變更見 §2o）
+### P2.5 cmp entry 動作（04-§1.2）✅ 完成並確認（變更見 §2o）
 - `ChatMessageCompaction.svelte` 展開區加動作列：[編輯]（就地 textarea）/
   [重新摘要] / [還原全部上下文]（確認對話框）；皆走 P2.3 的 chatStore 方法
   （`message.convId` 可用）。進行中（`compacting`）disabled。

@@ -40,11 +40,13 @@
       plan → summarize → 建 cmp → 重建 `sessionMessages` → 續跑;
       fail-open;signal 綁 flow abort;`contextAutoCompactionInLoop` 開關
 - [x] Inspector 編輯:summary 文字 / 斷點選擇器(前移安全、後移強制重摘要)
-      （P2.4 已交付、check 全綠；client 測試根因已修、待重跑確認——
+      （P2.4 完成並確認:client 10/10 + check 全綠——
       見 06-status §2j/§2m）
 - [x] Inspector 動作:Compact now / Expand(確認對話框)/ 重新摘要 / Copy JSON
       （同左）
-- [ ] cmp entry 的「編輯 / 重新摘要 / 還原」動作
+- [x] cmp entry 的「編輯 / 重新摘要 / 還原」動作
+      （P2.5 完成並確認:client 10/10 + inspector 10/10 回歸 + check 全綠
+      ——見 06-status §2o）
 - [ ] gauge「Compacted: … saved」列 + 進行中狀態
 - [ ] 快捷鍵 `Shift+Ctrl/Cmd+I` + 快捷鍵說明表登記
 

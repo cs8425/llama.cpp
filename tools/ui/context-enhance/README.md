@@ -6,11 +6,9 @@
 >
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
 > [06-status.md](./06-status.md)（Phase 0 完成；Phase 1 5.1–5.7 完成並確認、
-> 剩 5.8 手動驗收（待 P2.6 UI 觸發入口；P2.4 的 inspector「Compact now」
-> 已可先行驗收項目 1–2）；Phase 2 P2.1–P2.3 完成並確認、
-> P2.4 已交付、`npm run check` 全綠；client 測試 10/10 timeout 根因已修
-> （selector 撞 Select trigger，非 runtime 問題；TEMP-DIAG 全移除，見
-> 06-status §2l/§2m）、**待重跑整支 suite 確認**；P2.5 起未開始）。
+> 剩 5.8 手動驗收（P2.4 的 inspector「Compact now」與 P2.5 的 cmp entry
+> 動作列皆可先行驗收）；Phase 2 P2.1–P2.5 全部完成並確認
+> （client suite 全綠 + `npm run check` 全綠）；P2.6 起未開始）。
 
 ## 目錄
 
