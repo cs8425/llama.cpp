@@ -3,19 +3,16 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：P2.4 client 測試 9/10 綠，唯一掛「moves the kept-from
-> boundary through the grouped select」——**根因已找到並修復**（見 §2n）：
-> 不是 bits-ui portal / 反應性問題。該用例原本要選的 `'help me fix the bug'`
-> 是 system head 之後第一則（idx 1），而 boundary 候选集（元件 `boundaryOptions`
-> 與 store `moveCompactionBoundary` 的 I4 + "Nothing to summarize" guard）都排除
-> `index <= headLength`——摘要若只涵蓋 head 會變 0 則，故**首則 user 永遠當不了
-> boundary**。該 option 從未渲染 → `waitFor` 5s timeout。修法：fixture 回傳
-> `assistant`，用例改選最早合法的 assistant `tool_calls` 邊界（idx 2，"Within a
-> turn" 組），期望 `moveCompactionBoundary('insp-conv', cmp.id, assistant.id)`；
-> 其餘 9 支（含 4 支 Phase 1）零改動。
-> 第一件要做的事：請使用者跑**整支 suite**（10 支）：
-> `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
-> 再跑 `npm run check`，把輸出貼回來。全綠 → P2.4 確認、進 P2.5。
+> **恢復點（最新）**：**P2.4 ✅ 完成並確認**——client suite 10/10 綠 + `npm run
+> check` 全綠（使用者已跑，兩條指令都過）。P2.4 兩層測試根因皆已修復：
+> ① selector 撞 Select trigger（§2m）；② boundary-select 用例選了不合法的
+> 首則 user（head 後第一則永遠當不了 boundary，§2n）——改選 assistant
+> `tool_calls` 邊界。Phase 2 現況：P2.1 / P2.2 / P2.3 / P2.4 全 ✅。
+> 第一件要做的事：實做 **P2.5**——cmp entry 動作（`ChatMessageCompaction.svelte`
+> 展開區動作列：[編輯]/[重新摘要]/[還原全部上下文]，皆走 P2.3 的 chatStore 方法，
+> 進行中 `compacting` disabled；規格見 §5b P2.5）。完成後照慣例請使用者跑
+> `npm run check` +
+> `npx vitest --project=client --run tests/client/chat-message-compaction.svelte.test.ts`。
 
 ## 1. 進度總覽
 
@@ -23,7 +20,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 已交付、check 全綠、client 測試兩層根因已修（selector 撞 Select trigger §2m/§2l；boundary-select 選了不合法首則 user §2n）、**待重跑確認** |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 ✅ 完成並確認（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；**下一步 P2.5**（§5b） |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -209,7 +206,7 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
 >   無法指派給 `CompactionMeta` 的 union 型別 → recompact / move 都以 `baseMeta`
 >   顯式 guard（同時防損毀節點；boundary 有效時 meta 恆在，guard 只跑型別收斂）。
 
-## 2j. Phase 2 已交付檔案（P2.4，第一輪 4 錯已修、待重跑確認）
+## 2j. Phase 2 已交付檔案（P2.4，已確認）
 
 | 檔案 | 改動 |
 | ---- | ---- |
@@ -361,7 +358,7 @@ npm run check
   DialogConfirmation、userEvent 互動）——selector 修好後若仍有掛，才是真問題。
 - 重跑：整支 suite（10 支）+ `npm run check`。全綠 → P2.4 確認、進 P2.5。
 
-## 2n. P2.4 boundary-select 用例根因與修復（9/10 → 待確認 10/10）
+## 2n. P2.4 boundary-select 用例根因與修復（9/10 → 10/10 已確認）
 
 重跑整支 suite 後 9/10 綠，唯一掛的是「moves the kept-from boundary through the
 grouped select」——`waitFor` 5s timeout 等 `[role="option"]` 含 `'help me fix the bug'`。
@@ -570,8 +567,22 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   在還掛著的元件上重跑 effect）。非 runtime 問題、非反應性 bug。已修：
   selector 改 `[role="dialog"] li button[aria-expanded]`；五層 TEMP-DIAG 全數
   移除（見 §2m）。待使用者重跑整支 suite（10 支）+ `npm run check` 確認。
-- **下一步（P2.4 確認後）**：P2.5 cmp entry 動作（ChatMessageCompaction 展開區
-  動作列，規格見 §5b P2.5）。
+- **Phase 2 P2.4 第六輪（selector 修復後重跑）**：使用者跑了整支 suite——
+  9/10 綠，唯一掛「moves the kept-from boundary through the grouped select」
+  （`waitFor` 等 `[role="option"]` 含 `'help me fix the bug'`，5s timeout）。
+  根因（§2n）：該 option 是 system head 後第一則（idx 1），被 boundary 候选集
+  兩端（元件 `boundaryOptions` + store `moveCompactionBoundary` 的
+  `index <= headLength` guard）排除、從未渲染——非 portal / 反應性問題。已修：
+  fixture 回傳 `assistant`、用例改選 assistant `tool_calls` 邊界（idx 2，
+  "Within a turn" 組）、期望 `moveCompactionBoundary('insp-conv', cmp.id,
+  assistant.id)`。
+- **Phase 2 P2.4 ✅ 完成並確認**：使用者跑了整支 suite（**10/10 綠**）+
+  `npm run check`（**全綠**）。P2.4 兩層測試根因（§2m selector、§2n
+  boundary-select）皆結案。Phase 2 現剩 P2.5 / P2.6（§5b）。
+- **下一步（P2.5）**：cmp entry 動作（`ChatMessageCompaction.svelte` 展開區
+  動作列：[編輯]/[重新摘要]/[還原全部上下文]，皆走 P2.3 的 chatStore 方法、
+  進行中 `compacting` disabled；client 測試
+  `chat-message-compaction.svelte.test.ts` 擴編。規格見 §5b P2.5）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
