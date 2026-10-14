@@ -3,15 +3,21 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**P2.5 ✅ 完成並確認**——cmp entry 動作
-> （`ChatMessageCompaction.svelte` 展開區動作列：[Edit]/[Re-summarize]/
-> [Restore all context]，皆走 P2.3 的 chatStore 方法、`compacting` /
-> `chatStore.isLoading` 時 disabled；boundary 失效時 Re-summarize disabled；
-> 變更見 §2o）。使用者已跑 3 條指令全綠：`npm run check` + compaction client
-> suite（**10/10** = 4 既有 + 6 支 P2.5 新）+ inspector client suite
-> （**10/10** 回歸，元件改動未破 inspector）。
-> 第一件要做的事：實做 **P2.6**——gauge 列 + 第三入口 + 快捷鍵（規格見 §5b
-> P2.6）。完成後照慣例請使用者跑 `npm run check` + 相關 client 測試。
+> **恢復點（最新）**：**P2.6 已實做、待使用者編譯確認**——gauge popup 的
+> compaction 狀態列（`compacting` spinner 列 / 生效 cmp 的
+> 「Compacted: N messages · ~X tokens saved」同步節省估算列，純函式
+> `estimateCompactionSavings` 進 policy + 6 支新 unit）、`ChatFormActions`
+> 的 Eye icon 第三入口（新 `ChatFormActionInspectContext` 元件，
+> `chatStore.isLoading` 時 disabled、tooltip 帶快捷鍵）、`Shift+Ctrl/Cmd+I`
+> 快捷鍵（hook 內直接動 store、loading/無 active conv 不動作；`KeyboardKey`
+> 加 `I_LOWER`/`I_UPPER`）；新 client suite
+> `tests/client/context-gauge-compaction.svelte.test.ts`（8 支）。變更見 §2p。
+> 要跑的指令：`npm run check` +
+> `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
+> `npx vitest --project=client --run tests/client/context-gauge-compaction.svelte.test.ts`
+> +（回歸）`npx vitest --project=client --run tests/client/context-panel-mobile.svelte.test.ts`
+> +（回歸）`npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`。
+> 全綠 → P2.6 確認、Phase 2 完成（剩 5.8 手動驗收 + Phase 3 可選後續）。
 
 ## 1. 進度總覽
 
@@ -19,7 +25,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 ✅ 完成並確認（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅ 完成並確認（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**下一步 P2.6**（§5b） |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 ✅ 完成並確認（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅ 完成並確認（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 已實做、待編譯確認**（見 §2p） |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -406,6 +412,37 @@ boundary 候选集在兩端都排除 `index <= headLength`：
 > - icon 全用本機 `@lucide/svelte` v1.46.0 確有者：`Check` / `Pencil` / `RefreshCw`（既有）/ `UnfoldVertical`（同 inspector P2.4 換名後的慣例，避免再踩 `Compress` 缺失的坑，見 §2k）。
 > - 故事檔 `ChatMessageCompaction.stories.svelte` 零改動（Expanded story 會自然顯示新動作列；動作只點才觸發）。
 
+## 2p. Phase 2 已交付檔案（P2.6，待編譯確認；規格見 §5b P2.6 / 04-§2.3 / 04-§3）
+
+| 檔案 | 改動 |
+| ---- | ---- |
+| `src/lib/services/context/compaction-policy.ts` | 新純函式 `estimateCompactionSavings(path, entry)`：`estimatedTokensBefore −` 當前 payload 同步估算（整條 path 減掉 dropped 區 `path[head..boundary)`、in-effect entry 不計入 dropped 因為它就是送出的 summary；與 builder 同 estimator、同 I3 fail-open 條件）；meta 缺 / `estimatedTokensBefore` 缺 / boundary 失效 / 無淨節省皆回 0（防 NaN 洩到 UI） |
+| `src/lib/services/context/index.ts` | barrel 加 `estimateCompactionSavings`（字母序） |
+| `src/lib/components/app/chat/ChatForm/ChatFormContextGauge/ContextGaugePopup.svelte` | body 的 inspector 區塊改為「compaction 狀態 + 入口」容器（`flex flex-col gap-1`）：`contextStatsStore.compacting` 時 spinner 列「Compacting context…」（`role="status"`、`Loader2 animate-spin`）；否則生效 cmp（`findLastCompactionEntry` + meta + `estimateCompactionSavings > 0`）時「Compacted: N messages · ~X tokens saved」（N = `summarizedCount`、X = `formatNumber`，與 cmp 行同格式）；inspector 連結原樣（`chatStore.isLoading` disabled 不變）；舊 Phase 1 註解更新；import 加 `Loader2`、`findLastCompactionEntry` / `estimateCompactionSavings`、`contextStatsStore` / `conversationsStore`、`formatNumber` |
+| `src/lib/components/app/chat/ChatForm/ChatFormActions/ChatFormActionInspectContext.svelte` | **新**：Eye icon 圓形 ghost 按鈕（照 `ChatFormActionAddButton` 外觀）→ `chatStore.showContextInspector = true`；`blocked = disabled \|\| chatStore.isLoading`（與 gauge 入口同一 gate）；tooltip 文字「Inspect what the LLM sees (Shift+Ctrl/⌘+I)」、disabled 時換「Unavailable while the model is responding」；sr-only label 同 tooltip |
+| `src/lib/components/app/chat/ChatForm/ChatFormActions/ChatFormActions.svelte` | 左側 `mr-auto` 容器改為常駐（不再綁 `showAddButton`）：add 按鈕（`{#if showAddButton}`）+ `<ChatFormActionInspectContext {disabled} />` 並列（「add 選單旁」） |
+| `src/lib/components/app/chat/index.ts` | export `ChatFormActionInspectContext`（JSDoc 同既有格式，插在 `ChatFormActionAddToolsSubmenu` 後） |
+| `src/lib/enums/keyboard.enums.ts` | `I_LOWER = 'i'` / `I_UPPER = 'I'`（字母序插 `ESCAPE` 後、`K_LOWER` 前） |
+| `src/lib/hooks/use-keyboard-shortcuts.svelte.ts` | `Shift+Ctrl/Cmd+I`（`I_LOWER \|\| I_UPPER`，照 new-chat 的 hook 內直接動 store 模式）→ `chatStore.showContextInspector = true`；`chatStore.isLoading` 或無 `activeConversation` 時靜默不動作（也不 preventDefault）；import 加 `chatStore` |
+| `tests/unit/compaction-policy.test.ts` | +6 用例（`estimateCompactionSavings`：正常 path 的節省值（450−400=50）；I2 舊 cmp 落 dropped 區不計入 payload（500−400=100）；boundary 消失 → 0；boundary 指 system head → 0；無 meta → 0；before < payload clamp 0） |
+| `tests/client/context-gauge-compaction.svelte.test.ts` | **新** client suite（8 支）：gauge 列 3 支（desktop viewport + `gaugePopup.open = true` 照 `context-panel-mobile` 模式：compacting spinner 列且無 compacted 列 / 生效 cmp 顯示「Compacted: 3 messages · ~1,794 tokens saved」+ inspector 入口仍在 / 無 cmp 無列）；form 入口 2 支（渲染 `ChatFormActions`、Eye 按鈕（sr-only name）click → `showContextInspector = true`；`isLoading` mock true 時 disabled——disabled 時 sr-only 文字切換，故用 disabled 文案查 role）；快捷鍵 3 支（直接呼叫 `useKeyboardShortcuts({})` 回傳的 `handleKeydown` + 合成 `KeyboardEvent`：active conv 時開 inspector + preventDefault；無 active conv 不動作；loading 中不動作） |
+
+> 要點：
+> - 「快捷鍵說明表登記」：本 app 無獨立快捷鍵說明 dialog（既有快捷鍵只在
+>   tooltip / `KeyboardShortcutInfo` 顯示），故登記 = Eye 按鈕 tooltip 帶快捷鍵
+>   + hook / barrel 的 JSDoc 註記。
+> - gauge 列的 saved 數字是**同步估算**（04-§3 明定「純顯示用途」）：不跑
+>   async `buildLlmContext`；估算式與 builder 的 payload 組成一緻
+>   （head + summary + kept），I2 舊 cmp 落 dropped 區時也正確。
+> - Eye 按鈕不受 `showAddButton` 控制（訊息編輯 form 隱藏 add 時 inspector 仍可開）；
+>   但 `ChatFormActions` 本身只在 chat form 出現，無跨場景問題。
+> - 快捷鍵 hook 在 3 處掛載（+layout / ChatScreen / SidebarNavigation）——同 new-chat
+>   先例，`showContextInspector = true` 冪等，多掛載無副作用。
+> - 無 store 改動（`showContextInspector` / `compacting` 皆既有）；UI 層走 client
+>   測試、純函式走 unit（同 P2.4/P2.5 先例）。
+> - Storybook：P2.6 無新 story（gauge 列狀態由 client 測試覆蓋；inspector story
+>   三態仍留待後續，同 5.7 的偏差記錄）。
+
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
 ### 3.1 既有 broken state：`ChatRole` / `ChatMessageType` 原本未定義
@@ -599,9 +636,16 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
 - **Phase 2 P2.5 ✅ 完成並確認**：使用者跑 3 條指令全綠——`npm run check` +
   compaction client suite（**10/10**，4 既有 + 6 支 P2.5 新）+ inspector
   client suite（**10/10** 回歸）。Phase 2 現剩 P2.6（§5b）。
-- **下一步（P2.6）**：gauge 列（compacting spinner / Compacted 節省列）+
-  `ChatFormActions` 第三入口（Eye icon 按鈕）+ `Shift+Ctrl/Cmd+I` 快捷鍵
-  （規格見 §5b P2.6）。
+- **Phase 2 P2.6 已實做、待編譯確認**（變更見 §2p）：gauge 列
+  （compacting spinner / Compacted 節省列，`estimateCompactionSavings` 純函式
+  + 6 支 unit）+ `ChatFormActions` 第三入口（`ChatFormActionInspectContext`
+  Eye icon 按鈕）+ `Shift+Ctrl/Cmd+I` 快捷鍵（`KeyboardKey.I_LOWER/I_UPPER`）
+  + 新 client suite `context-gauge-compaction.svelte.test.ts`（8 支）。
+  待使用者跑：`npm run check` +
+  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（24 支預期）+
+  `npx vitest --project=client --run tests/client/context-gauge-compaction.svelte.test.ts`（8 支）+
+  回歸 `context-panel-mobile`（2 支）+ `context-inspector`（10 支）。
+  全綠 → P2.6 確認、Phase 2 完成（剩 5.8 手動驗收 + Phase 3 可選後續）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 

@@ -14,6 +14,8 @@ export enum KeyboardKey {
 	E_UPPER = 'E',
 	ENTER = 'Enter',
 	ESCAPE = 'Escape',
+	I_LOWER = 'i',
+	I_UPPER = 'I',
 	K_LOWER = 'k',
 	O_LOWER = 'o',
 	O_UPPER = 'O',

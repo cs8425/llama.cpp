@@ -1,7 +1,7 @@
 import { page } from '$app/state';
 import { NEW_CHAT_TAB_ID } from '$lib/constants';
 import { KeyboardKey } from '$lib/enums';
-import { conversationsStore, settingsStore, tabsStore } from '$lib/stores';
+import { chatStore, conversationsStore, settingsStore, tabsStore } from '$lib/stores';
 
 interface KeyboardShortcutsCallbacks {
 	activateSearchMode?: () => void;
@@ -43,6 +43,19 @@ export function useKeyboardShortcuts(callbacks: KeyboardShortcutsCallbacks) {
 		if (event.shiftKey && isCmdOrCtrl && event.key === KeyboardKey.E_UPPER) {
 			event.preventDefault();
 			callbacks.editActiveConversation?.();
+		}
+
+		if (
+			isCmdOrCtrl &&
+			event.shiftKey &&
+			(event.key === KeyboardKey.I_LOWER || event.key === KeyboardKey.I_UPPER)
+		) {
+			// the inspector shows the NEXT send: unavailable mid-stream, and there
+			// is no payload without an active conversation
+			if (chatStore.isLoading || !conversationsStore.activeConversation) return;
+
+			event.preventDefault();
+			chatStore.showContextInspector = true;
 		}
 
 		if (

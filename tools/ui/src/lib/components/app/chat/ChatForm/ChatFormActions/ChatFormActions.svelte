@@ -2,6 +2,7 @@
 	import { SkipForward, Square } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import {
+		ChatFormActionInspectContext,
 		ChatFormActionReasoning,
 		ChatFormActionRecord,
 		ChatFormActionsAdd,
@@ -153,11 +154,13 @@
 	class="flex w-full items-center gap-3 {className} {showAddButton ? '' : 'justify-end'}"
 	style="container-type: inline-size"
 >
-	{#if showAddButton}
-		<div class="mr-auto flex items-center gap-2">
+	<div class="mr-auto flex items-center gap-2">
+		{#if showAddButton}
 			<ChatFormActionsAdd />
-		</div>
-	{/if}
+		{/if}
+
+		<ChatFormActionInspectContext {disabled} />
+	</div>
 
 	<div class="flex items-center gap-1.5">
 		{#if hasProcessedTokens}

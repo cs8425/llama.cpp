@@ -221,6 +221,14 @@ export { default as ChatFormActionReasoning } from './ChatForm/ChatFormActions/C
 export { default as ChatFormActionAddToolsSubmenu } from './ChatForm/ChatFormActions/ChatFormActionAdd/ChatFormActionAddToolsSubmenu.svelte';
 
 /**
+ * Context inspector entry for the chat form action bar (Eye icon, next to the
+ * add menu). Opens the DialogContextInspector showing the exact payload sent
+ * to the LLM; disabled while the model is responding (same gate as the gauge
+ * popup entry). The Shift+Ctrl/⌘+I keyboard shortcut opens the same dialog.
+ */
+export { default as ChatFormActionInspectContext } from './ChatForm/ChatFormActions/ChatFormActionInspectContext.svelte';
+
+/**
  * Compact context-usage gauge with per-turn and cumulative breakdown in the tooltip.
  */
 export { default as ChatFormContextGauge } from './ChatForm/ChatFormContextGauge/ChatFormContextGauge.svelte';

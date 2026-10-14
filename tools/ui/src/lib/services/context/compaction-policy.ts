@@ -105,6 +105,44 @@ function estimateContentPartTokens(part: ApiChatMessageContentPart): number {
 	}
 }
 
+/**
+ * Synchronous "tokens saved" figure for the gauge row (04-ui §3): the
+ * pre-compaction estimate minus what the compacted path currently sends.
+ * The current payload is priced with the same heuristic the builder uses —
+ * the whole path minus the dropped region `path[head..boundary)`, the
+ * in-effect entry excluded from that region because it IS sent (as the
+ * summary). Returns 0 when the entry has no meta, its boundary is lost
+ * (the builder fail-opens to the full path, so nothing is saved) or nothing
+ * is net saved.
+ */
+export function estimateCompactionSavings(path: DatabaseMessage[], entry: DatabaseMessage): number {
+	const meta = entry.compactionMeta;
+
+	// `estimatedTokensBefore` is optional (older imported entries may lack it):
+	// without it the savings figure is undefined, not NaN
+	if (!meta || !meta.estimatedTokensBefore) return 0;
+
+	const boundaryId = meta.firstKeptMessageId;
+	const boundaryIndex = boundaryId ? path.findIndex((message) => message.id === boundaryId) : -1;
+	const headLength = path[0]?.role === MessageRole.SYSTEM ? 1 : 0;
+
+	// mirror the builder's I3 fail-open exactly (missing boundary, or a
+	// boundary pointing at the system head)
+	if (boundaryIndex === -1 || (headLength > 0 && boundaryIndex === 0)) return 0;
+
+	let dropped = 0;
+
+	for (let i = headLength; i < boundaryIndex; i++) {
+		if (path[i].id === entry.id) continue;
+
+		dropped += estimateTokens(path[i]);
+	}
+
+	const payload = path.reduce((sum, message) => sum + estimateTokens(message), 0) - dropped;
+
+	return Math.max(0, meta.estimatedTokensBefore - payload);
+}
+
 /** A message is a legal cut point when the kept region can start on it (I4):
  * user or assistant — never a tool result (orphan tool results are rejected by the API). */
 function isCuttable(message: DatabaseMessage): boolean {

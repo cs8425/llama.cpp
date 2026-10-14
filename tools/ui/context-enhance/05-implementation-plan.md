@@ -47,8 +47,11 @@
 - [x] cmp entry 的「編輯 / 重新摘要 / 還原」動作
       （P2.5 完成並確認:client 10/10 + inspector 10/10 回歸 + check 全綠
       ——見 06-status §2o）
-- [ ] gauge「Compacted: … saved」列 + 進行中狀態
-- [ ] 快捷鍵 `Shift+Ctrl/Cmd+I` + 快捷鍵說明表登記
+- [x] gauge「Compacted: … saved」列 + 進行中狀態
+      （P2.6 已實做、待編譯確認——見 06-status §2p）
+- [x] 快捷鍵 `Shift+Ctrl/Cmd+I` + 快捷鍵說明表登記
+      （P2.6 已實做、待編譯確認——見 06-status §2p；本 app 無獨立快捷鍵
+      說明 dialog，登記 = Eye 按鈕 tooltip 帶快捷鍵）
 
 ✅ 驗收:長對話(或測試用低 threshold)自動壓縮發生一次且只發生一次;
 編輯 summary 後下一輪 payload 即變;Expand 後 context 完整還原。

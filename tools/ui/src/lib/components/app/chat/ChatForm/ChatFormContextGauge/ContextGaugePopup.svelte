@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Loader2 } from '@lucide/svelte';
 	import { colorLevelBgClass, colorLevelTextClass } from './context-gauge';
 	import ContextGaugeDetails from './ContextGaugeDetails.svelte';
 	import ContextGaugeLoadModel from './ContextGaugeLoadModel.svelte';
@@ -10,8 +11,9 @@
 	} from './gauge-popup.svelte';
 	import * as Drawer from '$lib/components/ui/drawer';
 	import { useContextGauge } from '$lib/hooks/use-context-gauge.svelte';
-	import { chatStore, deviceStore } from '$lib/stores';
-	import { formatParameters } from '$lib/utils/formatters';
+	import { findLastCompactionEntry, estimateCompactionSavings } from '$lib/services/context';
+	import { chatStore, contextStatsStore, conversationsStore, deviceStore } from '$lib/stores';
+	import { formatNumber, formatParameters } from '$lib/utils/formatters';
 
 	const gauge = useContextGauge();
 
@@ -53,6 +55,23 @@
 			gauge.contextTotal > 0 &&
 			(gauge.activeModelId !== null || gauge.isActiveModelLoaded)
 	);
+
+	// Compaction status row above the inspector entry: "Compacting context…"
+	// while a summary call runs, otherwise the in-effect entry's savings
+	// (synchronous estimate, same heuristic as the policy — 04-ui §3).
+	const activeCompaction = $derived(findLastCompactionEntry(conversationsStore.activeMessages));
+
+	const compactionRow = $derived.by(() => {
+		const entry = activeCompaction;
+
+		if (!entry?.compactionMeta) return null;
+
+		const saved = estimateCompactionSavings(conversationsStore.activeMessages, entry);
+
+		if (saved <= 0) return null;
+
+		return { count: entry.compactionMeta.summarizedCount, saved };
+	});
 </script>
 
 {#snippet usage()}
@@ -107,10 +126,22 @@
 		/>
 	{/if}
 
-	<!-- Inspector entry (Phase 1: the only one; form action + shortcut land in Phase 2).
+	<!-- Compaction status + inspector entry.
 		Disabled while the model responds: the dialog shows the NEXT send, and that
-		is not defined mid-stream (a pre-send snapshot replaces this in Phase 2). -->
-	<div class="border-border/50 border-t pt-2">
+		is not defined mid-stream. -->
+	<div class="flex flex-col gap-1 border-border/50 border-t pt-2">
+		{#if contextStatsStore.compacting}
+			<div class="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
+				<Loader2 class="h-3 w-3 animate-spin" />
+
+				<span>Compacting context…</span>
+			</div>
+		{:else if compactionRow}
+			<div class="text-xs text-muted-foreground">
+				Compacted: {compactionRow.count} messages · ~{formatNumber(compactionRow.saved)} tokens saved
+			</div>
+		{/if}
+
 		<button
 			class="text-foreground/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 text-left text-xs font-medium"
 			disabled={chatStore.isLoading}

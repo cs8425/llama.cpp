@@ -6,6 +6,7 @@ import { AttachmentType, ContentPartType, FileTypeAudio, MessageRole, MessageTyp
 import {
 	computeCompactionBudget,
 	estimateApiMessageTokens,
+	estimateCompactionSavings,
 	estimateTokens,
 	MIN_SUMMARIZE_TOKENS,
 	planCompaction
@@ -362,5 +363,100 @@ describe('planCompaction', () => {
 		expect(plan).not.toBeNull();
 		expect(plan?.firstKeptMessageId).toBe('u3');
 		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['u1', 'a1', 'u2', 'a2']);
+	});
+});
+
+describe('estimateCompactionSavings', () => {
+	function compaction(
+		id: string,
+		firstKeptMessageId: string,
+		estimatedTokensBefore: number,
+		extra?: Partial<DatabaseMessage>
+	): DatabaseMessage {
+		return message(id, MessageRole.USER, 'y'.repeat(800), {
+			compactionMeta: { estimatedTokensBefore, firstKeptMessageId, summarizedCount: 2 },
+			type: MessageType.COMPACTION,
+			...extra
+		});
+	}
+
+	it('subtracts the current payload (path minus dropped region) from the pre-compaction estimate', () => {
+		// sys 100, u1 100, a1 100, cmp 200, u2 100 → total 600, dropped 200, payload 400
+		const cmp = compaction('cmp', 'u2', 450);
+		const path = [
+			message('sys', MessageRole.SYSTEM, T100),
+			message('u1', MessageRole.USER, T100),
+			message('a1', MessageRole.ASSISTANT, T100),
+			cmp,
+			message('u2', MessageRole.USER, T100)
+		];
+
+		expect(estimateCompactionSavings(path, cmp)).toBe(50);
+	});
+
+	it('keeps an older compaction entry inside the dropped region out of the payload', () => {
+		// sys 100, u1 100, oldCmp 100, a1 100, newCmp 200, u2 100 → total 700,
+		// dropped = u1 + oldCmp + a1 = 300, payload = sys + newCmp + u2 = 400
+		const oldCmp = message('oldCmp', MessageRole.USER, 'z'.repeat(400), {
+			compactionMeta: { estimatedTokensBefore: 300, firstKeptMessageId: 'a1', summarizedCount: 1 },
+			type: MessageType.COMPACTION
+		});
+		const newCmp = compaction('newCmp', 'u2', 500);
+		const path = [
+			message('sys', MessageRole.SYSTEM, T100),
+			message('u1', MessageRole.USER, T100),
+			oldCmp,
+			message('a1', MessageRole.ASSISTANT, T100),
+			newCmp,
+			message('u2', MessageRole.USER, T100)
+		];
+
+		expect(estimateCompactionSavings(path, newCmp)).toBe(100);
+	});
+
+	it('returns 0 when the boundary no longer exists on the path (fail-open full send)', () => {
+		const cmp = compaction('cmp', 'missing-id', 450);
+		const path = [
+			message('sys', MessageRole.SYSTEM, T100),
+			message('u1', MessageRole.USER, T100),
+			cmp
+		];
+
+		expect(estimateCompactionSavings(path, cmp)).toBe(0);
+	});
+
+	it('returns 0 when the boundary points at the system prompt (corrupt data)', () => {
+		const cmp = compaction('cmp', 'sys', 450);
+		const path = [
+			message('sys', MessageRole.SYSTEM, T100),
+			message('u1', MessageRole.USER, T100),
+			cmp
+		];
+
+		expect(estimateCompactionSavings(path, cmp)).toBe(0);
+	});
+
+	it('returns 0 when the entry has no compactionMeta', () => {
+		const broken = message('cmp', MessageRole.USER, 'y'.repeat(800), { type: MessageType.COMPACTION });
+		const path = [
+			message('sys', MessageRole.SYSTEM, T100),
+			message('u1', MessageRole.USER, T100),
+			broken
+		];
+
+		expect(estimateCompactionSavings(path, broken)).toBe(0);
+	});
+
+	it('clamps to 0 when the pre-compaction estimate is below the current payload', () => {
+		const cmp = compaction('cmp', 'u2', 100);
+		const path = [
+			message('sys', MessageRole.SYSTEM, T100),
+			message('u1', MessageRole.USER, T100),
+			message('a1', MessageRole.ASSISTANT, T100),
+			cmp,
+			message('u2', MessageRole.USER, T100)
+		];
+
+		expect(estimateCompactionSavings(path, cmp)).toBe(0);
 	});
 });
