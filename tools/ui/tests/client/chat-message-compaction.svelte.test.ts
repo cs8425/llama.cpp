@@ -2,18 +2,24 @@
 // a `type: 'compaction'` node is a user-role tree node, so the list must give it
 // its OWN row (never merged into the preceding assistant's agentic group),
 // render it through ChatMessageCompaction (not a user bubble), and hide it
-// entirely when `contextShowCompactionEntries` is off.
+// entirely when `contextShowCompactionEntries` is off. P2.5 adds the
+// manual-intervention actions in the expanded region, all spied on the
+// chatStore: edit the summary in place (prefix stripped), re-summarize and
+// restore the full context (with a confirmation dialog); while
+// `contextStatsStore.compacting` every action is disabled.
 //
 // Run: npx vitest --project=client --run tests/client/chat-message-compaction.svelte.test.ts
 
 import ChatMessagesPerfWrapper from './components/ChatMessagesPerfWrapper.svelte';
 import { MessageRole, MessageType } from '$lib/enums';
 import { SUMMARY_CONTENT_PREFIX } from '$lib/services/context';
+import { contextStatsStore } from '$lib/stores/chat/context-stats.svelte';
+import { chatStore } from '$lib/stores/chat/index.svelte';
 import { conversationsStore } from '$lib/stores/conversations/index.svelte';
 import { settingsStore } from '$lib/stores/settings/index.svelte';
 import type { DatabaseMessage } from '$lib/types';
 import { tick } from 'svelte';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { userEvent } from 'vitest/browser';
 
@@ -51,9 +57,10 @@ function makeCompaction(overrides: Partial<DatabaseMessage> = {}): DatabaseMessa
 
 /**
  * Path: system, user, assistant(tool_calls) → tool, cmp, user, assistant.
- * Returns the messages plus the kept-region start the cmp claims.
+ * Returns the messages the tests address (cmp for the P2.5 action tests,
+ * kept for the boundary preview).
  */
-function buildFixture(): { kept: DatabaseMessage } {
+function buildFixture(): { cmp: DatabaseMessage; kept: DatabaseMessage } {
 	const system = makeMessage({ content: 'You are helpful.', role: MessageRole.SYSTEM, type: MessageType.SYSTEM });
 	const user = makeMessage({ content: 'help me fix the bug' });
 	const assistant = makeMessage({
@@ -79,7 +86,7 @@ function buildFixture(): { kept: DatabaseMessage } {
 
 	conversationsStore.activeMessages = [system, user, assistant, tool, cmp, kept, finalAssistant];
 
-	return { kept };
+	return { cmp, kept };
 }
 
 // --- helpers ---------------------------------------------------------------
@@ -107,6 +114,33 @@ function cmpRow(): HTMLElement | null {
 function rowCount(): number {
 	return document.querySelectorAll('.chat-message').length;
 }
+
+// The P2.5 actions live in the expanded summary region; expand it and hand
+// back the row (the store actions are spied, so the row never unmounts).
+async function openExpandedEntry() {
+	const { unmount } = render(ChatMessagesPerfWrapper);
+
+	await tick();
+	const row = await waitFor(cmpRow);
+
+	await userEvent.click(row.querySelector<HTMLButtonElement>('button[aria-expanded]')!);
+	await tick();
+	await waitFor(() => row.querySelector('pre'));
+
+	return { row, unmount };
+}
+
+function findRowButton(row: HTMLElement, label: string): HTMLButtonElement | null {
+	return [...row.querySelectorAll<HTMLButtonElement>('button')].find(
+		(button) => button.textContent?.trim() === label
+	) ?? null;
+}
+
+afterEach(() => {
+	vi.restoreAllMocks();
+	conversationsStore.activeMessages = [];
+	contextStatsStore.compacting = false;
+});
 
 // --- tests -----------------------------------------------------------------
 
@@ -236,5 +270,148 @@ describe('ChatMessages compaction entry rendering', () => {
 
 		unmount();
 		conversationsStore.activeMessages = [];
+	});
+});
+
+describe('ChatMessageCompaction entry actions (Phase 2 P2.5)', () => {
+	it('edits the summary in place and saves it through the store', async () => {
+		const { cmp } = buildFixture();
+		const updateSpy = vi.spyOn(chatStore, 'updateCompactionSummary').mockResolvedValue(undefined);
+
+		const { row, unmount } = await openExpandedEntry();
+
+		const editButton = findRowButton(row, 'Edit');
+		expect(editButton).not.toBeNull();
+		await userEvent.click(editButton!);
+
+		const textarea = await waitFor(() => row.querySelector<HTMLTextAreaElement>('textarea'));
+
+		// prefilled with the stored summary, the fixed prefix stripped
+		expect(textarea.value).toContain('The user asked to fix a bug');
+		expect(textarea.value).not.toContain('Conversation summary');
+
+		await userEvent.clear(textarea);
+		await userEvent.type(textarea, 'Edited summary text');
+
+		const saveButton = findRowButton(row, 'Save');
+		expect(saveButton).not.toBeNull();
+		await userEvent.click(saveButton!);
+
+		expect(updateSpy).toHaveBeenCalledWith('cmp-conv', cmp.id, 'Edited summary text');
+
+		unmount();
+	});
+
+	it('cancels the in-place edit without touching the store', async () => {
+		buildFixture();
+		const updateSpy = vi.spyOn(chatStore, 'updateCompactionSummary').mockResolvedValue(undefined);
+
+		const { row, unmount } = await openExpandedEntry();
+
+		await userEvent.click(findRowButton(row, 'Edit')!);
+
+		const textarea = await waitFor(() => row.querySelector<HTMLTextAreaElement>('textarea'));
+		await userEvent.clear(textarea);
+		await userEvent.type(textarea, 'throwaway text');
+
+		const cancelButton = findRowButton(row, 'Cancel');
+		expect(cancelButton).not.toBeNull();
+		await userEvent.click(cancelButton!);
+
+		// the summary preview is back, the store was never called
+		expect(row.querySelector('textarea')).toBeNull();
+		expect(row.querySelector('pre')?.textContent).toContain('The user asked to fix a bug');
+		expect(updateSpy).not.toHaveBeenCalled();
+
+		unmount();
+	});
+
+	it('re-summarizes through the store for the in-effect entry', async () => {
+		const { cmp } = buildFixture();
+		const recompactSpy = vi.spyOn(chatStore, 'recompactConversationEntry').mockResolvedValue(undefined);
+
+		const { row, unmount } = await openExpandedEntry();
+
+		const recompactButton = findRowButton(row, 'Re-summarize');
+		expect(recompactButton).not.toBeNull();
+		await userEvent.click(recompactButton!);
+
+		expect(recompactSpy).toHaveBeenCalledWith('cmp-conv', cmp.id);
+
+		unmount();
+	});
+
+	it('restores the full context after confirmation through the store', async () => {
+		const { cmp } = buildFixture();
+		const expandSpy = vi.spyOn(chatStore, 'expandCompactionEntry').mockResolvedValue(undefined);
+
+		const { row, unmount } = await openExpandedEntry();
+
+		const restoreButton = findRowButton(row, 'Restore all context');
+		expect(restoreButton).not.toBeNull();
+		await userEvent.click(restoreButton!);
+
+		// the confirmation dialog spells out what comes back
+		const confirm = await waitFor(() =>
+			[...document.querySelectorAll<HTMLElement>('[role="alertdialog"]')].find(
+				(el) => el.textContent?.includes('Restore the full context')
+			) ?? null
+		);
+
+		expect(confirm.textContent).toContain('3 compacted messages');
+		expect(confirm.textContent).toContain('tokens');
+
+		const confirmButton = [...confirm.querySelectorAll<HTMLButtonElement>('button')].find(
+			(button) => button.textContent?.trim() === 'Restore'
+		);
+
+		expect(confirmButton).not.toBeNull();
+		await userEvent.click(confirmButton!);
+
+		expect(expandSpy).toHaveBeenCalledWith('cmp-conv', cmp.id);
+
+		unmount();
+	});
+
+	it('disables the actions while compacting', async () => {
+		buildFixture();
+		contextStatsStore.compacting = true;
+
+		const { row, unmount } = await openExpandedEntry();
+
+		expect(findRowButton(row, 'Edit')?.disabled).toBe(true);
+		expect(findRowButton(row, 'Re-summarize')?.disabled).toBe(true);
+		expect(findRowButton(row, 'Restore all context')?.disabled).toBe(true);
+
+		unmount();
+	});
+
+	it('disables Re-summarize when the boundary no longer exists', async () => {
+		const system = makeMessage({ content: 'You are helpful.', role: MessageRole.SYSTEM, type: MessageType.SYSTEM });
+		const user = makeMessage({ content: 'early question' });
+		const assistant = makeMessage({ content: 'early answer', role: MessageRole.ASSISTANT });
+		const cmp = makeCompaction({
+			compactionMeta: {
+				estimatedTokensBefore: 500,
+				firstKeptMessageId: 'missing-id',
+				summarizedCount: 2
+			}
+		});
+
+		conversationsStore.activeMessages = [system, user, assistant, cmp];
+		const { unmount } = render(ChatMessagesPerfWrapper);
+
+		await tick();
+		const row = await waitFor(cmpRow);
+		await userEvent.click(row.querySelector<HTMLButtonElement>('button[aria-expanded]')!);
+		await tick();
+		await waitFor(() => row.querySelector('pre'));
+
+		expect(findRowButton(row, 'Re-summarize')?.disabled).toBe(true);
+		// editing and restoring stay available (the store handles the fail-open case)
+		expect(findRowButton(row, 'Edit')?.disabled).toBe(false);
+		expect(findRowButton(row, 'Restore all context')?.disabled).toBe(false);
+
+		unmount();
 	});
 });

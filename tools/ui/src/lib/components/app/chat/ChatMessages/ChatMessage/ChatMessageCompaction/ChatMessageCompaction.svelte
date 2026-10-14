@@ -1,8 +1,11 @@
 <script lang="ts">
-	import { RefreshCw } from '@lucide/svelte';
+	import { Check, Pencil, RefreshCw, UnfoldVertical } from '@lucide/svelte';
+	import DialogConfirmation from '$lib/components/app/dialogs/DialogConfirmation.svelte';
+	import { Button } from '$lib/components/ui/button';
+	import { Textarea } from '$lib/components/ui/textarea';
 	import { MessageRole } from '$lib/enums';
 	import { estimateTokens, SUMMARY_CONTENT_PREFIX } from '$lib/services/context';
-	import { conversationsStore } from '$lib/stores';
+	import { chatStore, contextStatsStore, conversationsStore } from '$lib/stores';
 	import type { DatabaseMessage } from '$lib/types';
 	import { formatNumber, formatTime } from '$lib/utils/formatters';
 
@@ -13,11 +16,20 @@
 
 	let { class: className = '', message }: Props = $props();
 
-	// Collapsed by default; expanding is purely local state (Phase 1 has no
-	// store-backed actions on the entry yet).
+	// Collapsed by default; expanding is local state. The expanded region also
+	// carries the manual-intervention actions (P2.5), all through chatStore.
 	let expanded = $state(false);
+	let draftSummary = $state('');
+	let editingSummary = $state(false);
+	let showExpandConfirm = $state(false);
 
 	let meta = $derived(message.compactionMeta);
+	let path = $derived(conversationsStore.activeMessages);
+	let headLength = $derived(path[0]?.role === MessageRole.SYSTEM ? 1 : 0);
+
+	// The store actions are I7-guarded anyway (isChatLoading / compacting);
+	// the UI just gives feedback while the context is busy.
+	let actionsBlocked = $derived(contextStatsStore.compacting || chatStore.isLoading);
 
 	// The stored content carries the fixed summary prefix (added at node
 	// creation); strip it so the body reads as the plain summary text.
@@ -46,8 +58,76 @@
 		keptMessageIndex >= 0 ? conversationsStore.activeMessages[keptMessageIndex] : null
 	);
 
+	// Same validity rule as the builder's boundaryValid (I1/I3): the boundary
+	// must exist on the path and must not point at the system-prompt head.
+	let boundaryValid = $derived(
+		keptMessageIndex !== -1 && !(headLength > 0 && keptMessageIndex === 0)
+	);
+
+	// What expand grows the context back to: the full path, and what the
+	// summary currently covers on it (the entry itself is the summary, not
+	// covered content — excluded). Display only, same estimator as the policy.
+	let fullPathTokens = $derived(path.reduce((sum, msg) => sum + estimateTokens(msg), 0));
+	let droppedCount = $derived.by(() => {
+		if (keptMessageIndex <= headLength) return 0;
+
+		return path.slice(headLength, keptMessageIndex).filter((msg) => msg.id !== message.id).length;
+	});
+	let droppedTokens = $derived.by(() => {
+		if (keptMessageIndex <= headLength) return 0;
+
+		return path
+			.slice(headLength, keptMessageIndex)
+			.reduce((sum, msg) => (msg.id === message.id ? sum : sum + estimateTokens(msg)), 0);
+	});
+
+	let expandDescription = $derived.by(() => {
+		if (boundaryValid) {
+			return `The summary is deleted and the ${droppedCount} compacted messages are restored. The estimated context grows from ~${formatNumber(
+				fullPathTokens - droppedTokens
+			)} back to ~${formatNumber(fullPathTokens)} tokens.`;
+		}
+
+		return 'The summary no longer matches this path (the full context is already being sent). Removing it restores the compacted messages as regular entries.';
+	});
+
 	function toggleExpanded() {
 		expanded = !expanded;
+	}
+
+	function startEditingSummary() {
+		draftSummary = summaryText;
+		editingSummary = true;
+	}
+
+	function cancelEditingSummary() {
+		draftSummary = '';
+		editingSummary = false;
+	}
+
+	async function saveSummary() {
+		const text = draftSummary;
+
+		draftSummary = '';
+		editingSummary = false;
+
+		if (!text.trim()) return;
+
+		await chatStore.updateCompactionSummary(message.convId, message.id, text);
+	}
+
+	async function handleRecompact() {
+		await chatStore.recompactConversationEntry(message.convId, message.id);
+	}
+
+	function requestExpand() {
+		showExpandConfirm = true;
+	}
+
+	async function handleExpandConfirmed() {
+		showExpandConfirm = false;
+
+		await chatStore.expandCompactionEntry(message.convId, message.id);
 	}
 
 	function keptPreview(message: DatabaseMessage): string {
@@ -117,8 +197,31 @@
 
 		{#if expanded}
 			<div class="border-border/60 flex flex-col gap-2 border-t px-3 py-2">
-				<pre
-					class="text-foreground/80 max-h-64 overflow-auto font-mono text-xs break-words whitespace-pre-wrap">{summaryText}</pre>
+				{#if editingSummary}
+					<div class="flex flex-col gap-2">
+						<Textarea bind:value={draftSummary} class="min-h-24 font-mono text-xs" />
+
+						<div class="flex gap-2">
+							<Button
+								class="h-7 gap-1 px-2 text-xs"
+								disabled={actionsBlocked || !draftSummary.trim()}
+								onclick={saveSummary}
+							>
+								<Check class="h-3.5 w-3.5" />
+
+								Save
+							</Button>
+
+							<Button class="h-7 px-2 text-xs" variant="outline" onclick={cancelEditingSummary}>
+								Cancel
+							</Button>
+						</div>
+					</div>
+				{:else}
+					<pre
+						class="text-foreground/80 max-h-64 overflow-auto font-mono text-xs break-words whitespace-pre-wrap">{summaryText}</pre
+					>
+				{/if}
 
 				<div class="text-muted-foreground flex flex-col gap-1">
 					{#if keptMessage}
@@ -134,7 +237,51 @@
 						<span>This turn's user request is included in the summary.</span>
 					{/if}
 				</div>
+
+				<div class="flex flex-wrap gap-2 border-t border-border/50 pt-2">
+					<Button
+						class="h-7 gap-1 px-2 text-xs"
+						disabled={actionsBlocked}
+						onclick={startEditingSummary}
+						variant="outline"
+					>
+						<Pencil class="h-3.5 w-3.5" />
+
+						Edit
+					</Button>
+
+					<Button
+						class="h-7 gap-1 px-2 text-xs"
+						disabled={actionsBlocked || !boundaryValid}
+						onclick={handleRecompact}
+						variant="outline"
+					>
+						<RefreshCw class="h-3.5 w-3.5" />
+
+						Re-summarize
+					</Button>
+
+					<Button
+						class="h-7 gap-1 px-2 text-xs"
+						disabled={actionsBlocked}
+						onclick={requestExpand}
+						variant="outline"
+					>
+						<UnfoldVertical class="h-3.5 w-3.5" />
+
+						Restore all context
+					</Button>
+				</div>
 			</div>
 		{/if}
 	</div>
+
+	<DialogConfirmation
+		bind:open={showExpandConfirm}
+		confirmText="Restore"
+		description={expandDescription}
+		onConfirm={handleExpandConfirmed}
+		onCancel={() => (showExpandConfirm = false)}
+		title="Restore the full context?"
+	/>
 </div>
