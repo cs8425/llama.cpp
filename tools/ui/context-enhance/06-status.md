@@ -3,18 +3,18 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：P2.4 第四輪診斷出爐：setter patch 運作正常（抓到我們自己的
-> `watchArrayMutations` 寫入 `SET (len=7)`），但 **無任何 `[diag] MUTATE`**——
-> 非 in-place mutation、非 reassign，effect 卻用 pathLen 0 重跑。查 runtime
-> `batch.capture`：`source.v = value` 是直接寫 signal 物件的 `v` 屬性（繞過
-> setter）。已加第五層 TEMP-DIAG：① `watchSignalValue()` 包 signal 的 `v`
-> getter/setter（抓所有值替換 + stack；含 shape 檢查 log）；② 元件 effect log
-> 加 `sameRef`（path 參考相等性）。決策樹：SIGNAL.v SET  firing = 抓到元兇；
-> sameRef=false 且無 SIGNAL.v SET = signal 物件本身被換；sameRef=true 且無
-> MUTATE = proxy 回傳不一致值。
-> 第一件要做的事：請使用者再跑
-> `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts -t "lists the compacted payload"`
-> ，把完整輸出貼回來。
+> **恢復點（最新）**：P2.4 client 測試 10/10 掛掉——**根因已找到並修復**（見 §2m）：
+> 不是 runtime 反應性問題。P2.4 新增的 bits-ui Select trigger 也是
+> `[role="dialog"]` 內的 `button[aria-expanded]`，讓測試的 `payloadRowButtons()`
+> 數到 5 支（4 支 payload 列 + trigger），`openInspector()` 等 `length === 4`
+> 永遠不成立 → 5s timeout。之前追蹤的「pathLen 0 重跑」是 **afterEach 紅鵝**：
+> 測試在 `openInspector()` 就掛、`unmount()` 沒跑到，`afterEach` 的
+> `activeMessages = []` 在還掛著的元件上重跑 effect。五層 TEMP-DIAG 全數移除；
+> selector 已改成 `[role="dialog"] li button[aria-expanded]`。
+> 第一件要做的事：請使用者跑**整支 suite**（10 支）：
+> `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
+> 再跑 `npm run check`，把輸出貼回來。若 6 支 P2.4 新用例（首次 runtime 執行）
+> 有掛，屬 bits-ui Select portal / DialogConfirmation 互動層問題，非 selector。
 
 ## 1. 進度總覽
 
@@ -22,7 +22,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 已交付、check 全綠、**client 測試 10/10 掛在 runtime 問題、診斷中**（見 §2j/§2k/§2l） |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 已交付、check 全綠、client 測試根因已修（selector 撞 Select trigger，見 §2m/§2l）、**待重跑確認** |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -242,11 +242,11 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
 > 掛，屬首次 runtime 驗證（bits-ui Select portal / DialogConfirmation 互動），
 > 非本次修復引入。
 
-## 2l. P2.4 診斷記錄（runtime 問題調查中；TEMP-DIAG 清單）
+## 2l. P2.4 診斷記錄（**已結案**；根因與修復見 §2m，TEMP-DIAG 已全數移除）
 
-> §4 有逐輪歷史；本節是**給下一個 session 的綜合狀態**：已確立的事實、
-> Svelte 5 機制（已查過、不必重查）、TEMP-DIAG 清單（全綠後必移除）、
-> 決策樹與候選假設。
+> §4 有逐輪歷史；本節保留診斷過程供日後查考。結論：**不是 runtime
+> 反應性問題**——selector 撞了 P2.4 新增的 Select trigger；「pathLen 0 重跑」
+> 是 afterEach 紅鵝（見 §2m）。
 
 ### 已確立的事實（四輪診斷）
 
@@ -286,46 +286,77 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
   store 的 signal 理論上只會走 `set()`（= patched setter）或直接
   `source.v = value`。
 
-### TEMP-DIAG 清單（**全綠後必移除**；兩檔搜 `TEMP-DIAG` 即可全數找到）
+### TEMP-DIAG 清單（✅ 已全數移除；兩檔搜 `TEMP-DIAG` 應零結果）
 
-| 檔案 | 內容 |
+| 檔案 | 內容（已移除） |
 | ---- | ---- |
-| `tests/client/context-inspector.svelte.test.ts` | ① `waitFor` timeout 加 `describeDom()`（`[diag]` DOM 摘要：dialog 數 / row 數 / dialog 文字 / body 長度）；② `patchActiveMessagesSetter()` / `unpatchActiveMessagesSetter()`（包 prototype setter，`[diag] activeMessages SET (len=N)` + stack）；③ `watchArrayMutations()`（logging proxy，`[diag] MUTATE set/delete [prop]` + stack）；④ `watchSignalValue()`（包 signal 的 `v` getter/setter，`[diag] SIGNAL.v SET (len=N)` + stack；shape 非 signal 時 log `[diag] own property is not a signal` + keys）；⑤ `openInspector()` 開頭呼叫 ②③④、`afterEach` 呼叫 `unpatchActiveMessagesSetter()` |
-| `src/lib/components/app/dialogs/DialogContextInspector.svelte` | module-scope `instanceCounter` / `instanceId` / `lastPathRef`；effect 開頭 log `[inspector-diag] effect {instanceId, pathLen, sameRef, tick}` + `lastPathRef = path`；`.then` log `[inspector-diag] built {messages, compaction}`；`.catch` log `[inspector-diag] build failed` |
+| `tests/client/context-inspector.svelte.test.ts` | ① `waitFor` timeout 的 `describeDom()`；② `patchActiveMessagesSetter()` / `unpatchActiveMessagesSetter()`；③ `watchArrayMutations()`；④ `watchSignalValue()`；⑤ `openInspector()` 開頭的 ②③④ 呼叫、`afterEach` 的 `unpatchActiveMessagesSetter()` |
+| `src/lib/components/app/dialogs/DialogContextInspector.svelte` | module-scope `instanceCounter` / `instanceId` / `lastPathRef`；effect 開頭 / `.then` / `.catch` 三筆 `[inspector-diag]` `console.log` |
 
-> 移除方式：兩檔搜 `TEMP-DIAG` 刪除所有標註區塊；`waitFor` 還原成
-> `throw new Error('Timed out waiting for element')`（連 `describeDom()` 一起刪）；
-> 元件還原 effect（刪 3 筆 `console.log` + `instanceCounter` / `instanceId` /
-> `lastPathRef` 三個宣告）。全部診斷皆唯讀 / 打 log，移除後預期零行為差異。
+> 移除日期：根因結案同日（見 §2m）。全部診斷皆唯讀 / 打 log，移除後零行為差異；
+> 唯一保留的測試改動是 `payloadRowButtons()` 的 selector 修正（非診斷代碼）。
 
-### 決策樹（對照第五輪輸出）
+### 結案對照（第五輪輸出 → 結論）
 
-| 輸出 | 結論 / 下一步 |
-| ---- | ---- |
-| `[diag] SIGNAL.v SET (len=0)` + stack | **抓到元兇**，依 stack 修 |
-| `sameRef: false` 且無 `SIGNAL.v SET` | signal 物件本身被換（own property 被 replace）→ 對 own property 加 `Object.defineProperty` 監視（data → accessor） |
-| `sameRef: true` 且無 `MUTATE` | proxy 鏈回傳不一致值 → 查 Svelte `proxy.js`（cache / 雙層 proxy 行為） |
-| `[diag] own property is not a signal` | 自己的 model 錯（own property 存的不是 signal）→ 先看 `Object.getOwnPropertyDescriptor(instance, 'activeMessages')` 實際回傳什麼再調整 |
+- 第五輪輸出（`SET (len=7)` 僅一筆 = 我們自己的 `watchArrayMutations` 寫入；
+  `own property is not a signal`；無 `SIGNAL.v SET`；effect 第二次 `pathLen: 0`）
+  當時對照決策樹會走向「signal 物件被換」——**全部錯誤導向**。
+- 真正解讀見 §2m：5 支 `aria-expanded` 按鈕（DOM dump 早就印出來了）才是 timeout
+  的直接原因；`pathLen 0` 是 `afterEach` 的合法重置打在還掛著的元件上。
 
-### 候選假設（目前優先序）
-
-1. **有程式碼直接寫 signal 的 `v`**（或經 Svelte 內部 `internal_set` 路徑如
-   `batch.capture`）——第五輪 `watchSignalValue` 會抓到。
-2. **`open` prop 被 bits-ui Dialog 切 false→true**（`open: false` 的 effect run
-   走 early return、**不會**打 log）：切換期間某處清掉 `activeMessages` →
-   下一次 `open: true` run 看到 pathLen 0。signal 監視同樣會抓到清空的寫入；
-   若確認是這個，再對 `open` 加 probe（`handleOpenChange` 打 log）。
-3. **兩個 module instance**（元件的 `$lib/stores` barrel vs test 的 direct import
-   解析到不同實例）——低機率：第一次 effect run 看到 pathLen 7，代表兩邊
-   共享同一 store。
-
-### 重跑指令（單支、~15s）
+### 重跑指令（整支 suite、~40s）
 
 ```bash
-npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts -t "lists the compacted payload"
+npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts
+npm run check
 ```
 
-把完整輸出（`[diag]` / `[inspector-diag]` 行 + stack trace）貼回來對照決策樹。
+把完整輸出貼回來。10/10 綠 + check 綠 → P2.4 確認、進 P2.5。
+
+## 2m. P2.4 根因與修復（client 測試 10/10 timeout）
+
+### 根因（一行）
+
+`payloadRowButtons()` 用 `[role="dialog"] button[aria-expanded]` 選 payload 列，
+但 P2.4 新增的 Advanced 區 bits-ui `Select.Trigger` 也是 dialog 內的
+`button[aria-expanded]` → 數到 **5** 支，`openInspector()` 的
+`waitFor(() => payloadRowButtons().length === 4)` 永遠不成立 → 5s timeout →
+10 支用例全掛在 `openInspector()`。DOM dump 的 `[diag] payload row buttons: 5`
+就是答案（第四輪已印出，當時被 pathLen 0 的煙霧彈帶走）。
+
+### 「pathLen 0 重跑」是紅鵝（afterEach 假象）
+
+- 測試在 `openInspector()` 的 `waitFor` 就 throw，**`unmount()` 沒跑到**，
+  元件仍掛在 DOM 上。
+- vitest 接著跑 `afterEach`：`conversationsStore.activeMessages = []`（合法重置）
+  → 還掛著的元件 effect 重跑 → `pathLen: 0` → `buildLlmContext([])` →
+  `built {messages: 0, compaction: null}`。
+- 這解釋了所有「異常」觀察：timeout DOM dump 在 afterEach **之前**拍 → 仍顯示
+  4 則狀態（不是 state-DOM desync）；`built {messages: 0}` log 出現在 FAIL 區塊前
+  （afterEach 的 console 仍歸屬該 test）；無 `SET` log（afterEach 先
+  `unpatchActiveMessagesSetter()` 才寫，走原始 setter）；`sameRef: false`
+  （`[]` 是新陣列）。
+- 五層 TEMP-DIAG（setter patch / mutation proxy / signal.v watch）全都在追一個
+  不存在的 bug：值變化是測試自己的 teardown，且發生在 patch 解除之後。
+
+### 修復（兩檔，零行為改動）
+
+| 檔案 | 改動 |
+| ---- | ---- |
+| `tests/client/context-inspector.svelte.test.ts` | ① `payloadRowButtons()` 改 `[role="dialog"] li button[aria-expanded]`（payload 列都在 `<li>` 內；Select trigger 不在——dropped 區 `ul` 無 button，不影響）；② 移除全部 TEMP-DIAG（`describeDom` / `patchActiveMessagesSetter` / `unpatchActiveMessagesSetter` / `watchArrayMutations` / `watchSignalValue` / `openInspector` 開頭三呼叫 / `afterEach` 的 unpatch）；`waitFor` 還原成 `throw new Error('Timed out waiting for element')` |
+| `src/lib/components/app/dialogs/DialogContextInspector.svelte` | 移除 TEMP-DIAG（`instanceCounter` / `instanceId` / `lastPathRef` + 3 筆 `[inspector-diag]` log）；保留「refresh 期間舊 result 不閃空白」設計註解（誤刪後已還原） |
+
+> 要點：元件零改動（selector 問題純在測試端）；診斷代碼全移除、兩檔搜
+> `TEMP-DIAG` 零結果。bits-ui 的 `DismissibleLayerState`「responsible layer」
+> 機制（topmost layer 才處理 outside interaction）已確認：巢狀 AlertDialog /
+> Select 互動不會誤關外層 inspector dialog（靜態查 `use-dismissable-layer.svelte.js`
+> `isResponsibleLayer` / `getTopMostDismissableLayer`）。
+
+### 風險與下一步
+
+- 6 支 P2.4 新用例是**首次 runtime 執行**（bits-ui Select portal、
+  DialogConfirmation、userEvent 互動）——selector 修好後若仍有掛，才是真問題。
+- 重跑：整支 suite（10 支）+ `npm run check`。全綠 → P2.4 確認、進 P2.5。
 
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
@@ -490,6 +521,17 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   全綠後依 §2l 清單移除。注意：P2.4 的 UI（inspector 的「Compact now」入口）
   落地後，Phase 1 的 5.8 手動驗收項目 1–2 可一併做（有 cmp 的對話
   payload = inspector = 抓包；手動 Compact now 可產生 cmp）。
+- **Phase 2 P2.4 第五輪 → 結案**：使用者貼回單支輸出——`SET (len=7)` 僅一筆
+  （自己的 `watchArrayMutations`）、`own property is not a signal`
+  （own property descriptor 為 `undefined`）、無 `SIGNAL.v SET`、無 `MUTATE`、
+  effect 第二次 `pathLen: 0`。**回頭看第四輪 DOM dump 早已印出答案**：
+  `[diag] payload row buttons: 5` = 4 支 payload 列 + P2.4 新增的 bits-ui
+  Select trigger（也是 `button[aria-expanded]`）→ `waitFor(length === 4)`
+  永遠不成立 → 5s timeout。`pathLen 0` 是 **afterEach 紅鵝**（測試掛在
+  `openInspector()`、`unmount()` 沒跑到，`afterEach` 的 `activeMessages = []`
+  在還掛著的元件上重跑 effect）。非 runtime 問題、非反應性 bug。已修：
+  selector 改 `[role="dialog"] li button[aria-expanded]`；五層 TEMP-DIAG 全數
+  移除（見 §2m）。待使用者重跑整支 suite（10 支）+ `npm run check` 確認。
 - **下一步（P2.4 確認後）**：P2.5 cmp entry 動作（ChatMessageCompaction 展開區
   動作列，規格見 §5b P2.5）。
 
@@ -703,7 +745,7 @@ static async createCompactionMessage(params: {
   - recompact 與後移共用 private `summarizeRegion` helper。
 - unit：DB 層是 Dexie、store 協調層不 unit 測（同 5.4/5.5 先例）。
 
-### P2.4 Inspector 編輯 + 動作（04-§2.2 完整版）✅ 已交付、check 全綠、client 測試診斷中（變更見 §2j、第一輪修復見 §2k、診斷記錄見 §2l）
+### P2.4 Inspector 編輯 + 動作（04-§2.2 完整版）✅ 已交付、check 全綠；client 測試 10/10 timeout 根因已修、待重跑確認（變更見 §2j、第一輪修復見 §2k、診斷結案見 §2l/§2m）
 - `DialogContextInspector.svelte`：
   - summary 列「編輯」→ 就地 textarea（prefix 剝除後預填）→ 存檔走
     `updateCompactionSummary` → 重新 buildLlmContext 刷新 WYSIWYG。

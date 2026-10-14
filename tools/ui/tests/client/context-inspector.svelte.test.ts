@@ -105,33 +105,18 @@ async function waitFor<T extends Node>(find: () => T | null, timeoutMs = 5000): 
 		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
 
-	throw new Error(`Timed out waiting for element${describeDom()}`);
-}
-
-// Dumps the DOM state on timeout so a failing run shows exactly what the
-// inspector rendered (no dialog at all / dialog stuck on "Building payload…" /
-// dialog with the wrong row count).
-function describeDom(): string {
-	const dialogs = document.querySelectorAll('[role="dialog"]');
-	const dialog = dialogs[0];
-	const rows = document.querySelectorAll('[role="dialog"] button[aria-expanded]');
-	const text = dialog ? (dialog.textContent ?? '').replace(/\s+/g, ' ').slice(0, 400) : 'NONE';
-
-	return [
-		'',
-		`[diag] [role=dialog] elements: ${dialogs.length}`,
-		`[diag] payload row buttons: ${rows.length}`,
-		`[diag] dialog text: ${text}`,
-		`[diag] body length: ${document.body.innerHTML.length}`
-	].join('\n');
+	throw new Error('Timed out waiting for element');
 }
 
 function dialogText(): string {
 	return document.querySelector('[role="dialog"]')?.textContent ?? '';
 }
 
+// Payload row expanders only — scoped to the payload list's <li> rows. The
+// Advanced section's bits-ui Select trigger is also a button[aria-expanded]
+// inside the dialog, so an unscoped selector would count it as a row.
 function payloadRowButtons(): HTMLButtonElement[] {
-	return [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button[aria-expanded]')];
+	return [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] li button[aria-expanded]')];
 }
 
 function dialogButtons(): HTMLButtonElement[] {
@@ -161,116 +146,7 @@ function setActiveConversation() {
 	} as unknown as DatabaseConversation;
 }
 
-// --- TEMP-DIAG: trace who reassigns conversationsStore.activeMessages -------
-// Svelte 5 compiles $state class fields to prototype accessors; wrapping the
-// setter captures a stack trace for every reassignment (the fixture write
-// happens before the patch, so only in-test writes are logged).
-
-let activeMessagesSetPatched = false;
-let originalActiveMessagesSet: ((value: DatabaseMessage[]) => void) | null = null;
-
-function patchActiveMessagesSetter() {
-	if (activeMessagesSetPatched) return;
-
-	const proto = Object.getPrototypeOf(conversationsStore);
-	const desc = Object.getOwnPropertyDescriptor(proto, 'activeMessages');
-
-	if (!desc?.set) {
-		console.log('[diag] no prototype setter found for activeMessages');
-
-		return;
-	}
-
-	originalActiveMessagesSet = desc.set;
-	activeMessagesSetPatched = true;
-
-	Object.defineProperty(proto, 'activeMessages', {
-		...desc,
-		set(value: DatabaseMessage[]) {
-			console.log(`[diag] activeMessages SET (len=${value.length})`, new Error('set-trace').stack);
-
-			return desc.set!.call(this, value);
-		}
-	});
-}
-
-function unpatchActiveMessagesSetter() {
-	if (!activeMessagesSetPatched || !originalActiveMessagesSet) return;
-
-	const proto = Object.getPrototypeOf(conversationsStore);
-	const desc = Object.getOwnPropertyDescriptor(proto, 'activeMessages');
-
-	if (desc) {
-		Object.defineProperty(proto, 'activeMessages', { ...desc, set: originalActiveMessagesSet });
-	}
-
-	originalActiveMessagesSet = null;
-	activeMessagesSetPatched = false;
-}
-
-// TEMP-DIAG: the setter never fired, so the change must be an IN-PLACE
-// mutation of the proxied array (Svelte tracks proxy property writes, which
-// re-runs the effect without touching the setter). Wrap the array in a
-// logging proxy to capture the mutation's stack trace. The afterEach reset
-// (activeMessages = []) replaces the source value, discarding the wrapper.
-function watchArrayMutations() {
-	const arr = conversationsStore.activeMessages;
-
-	const handler: ProxyHandler<DatabaseMessage[]> = {
-		set(target, prop, value) {
-			console.log(`[diag] MUTATE set [${String(prop)}]`, new Error('mutate-trace').stack);
-
-			return Reflect.set(target, prop, value);
-		},
-		deleteProperty(target, prop) {
-			console.log(`[diag] MUTATE delete [${String(prop)}]`, new Error('mutate-trace').stack);
-
-			return Reflect.deleteProperty(target, prop);
-		}
-	};
-
-	conversationsStore.activeMessages = new Proxy(arr, handler);
-}
-
-// TEMP-DIAG: wrap the state signal's `v` property — catches EVERY value
-// replacement, including direct `source.v = x` writes inside the Svelte
-// runtime (batch.capture) that bypass the prototype setter.
-function watchSignalValue() {
-	const desc = Object.getOwnPropertyDescriptor(conversationsStore, 'activeMessages');
-	const signal = desc?.value as { f?: number; v?: DatabaseMessage[] } | undefined;
-
-	if (!signal || typeof signal !== 'object' || !('f' in signal)) {
-		console.log('[diag] own property is not a signal', {
-			type: typeof signal,
-			keys: signal && typeof signal === 'object' ? Object.keys(signal) : String(signal)
-		});
-
-		return;
-	}
-
-	let current: unknown = signal.v;
-
-	Object.defineProperty(signal, 'v', {
-		configurable: true,
-		get() {
-			return current;
-		},
-		set(value: unknown) {
-			console.log(
-				`[diag] SIGNAL.v SET (len=${Array.isArray(value) ? value.length : '?'})`,
-				new Error('signal-trace').stack
-			);
-
-			current = value;
-		}
-	});
-}
-
 async function openInspector() {
-	patchActiveMessagesSetter();
-	watchArrayMutations();
-	watchSignalValue();
-
 	const { unmount } = render(DialogContextInspector, { open: true });
 
 	await waitFor(() => (payloadRowButtons().length === 4 ? document.querySelector('[role="dialog"]') : null));
@@ -279,7 +155,6 @@ async function openInspector() {
 }
 
 afterEach(() => {
-	unpatchActiveMessagesSetter();
 	vi.restoreAllMocks();
 	conversationsStore.activeMessages = [];
 	conversationsStore.activeConversation = null;
