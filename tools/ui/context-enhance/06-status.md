@@ -22,7 +22,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 已交付、第一輪 4 錯已修、待重跑確認（見 §2j/§2k） |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 已交付、check 全綠、**client 測試 10/10 掛在 runtime 問題、診斷中**（見 §2j/§2k/§2l） |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -242,6 +242,91 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
 > 掛，屬首次 runtime 驗證（bits-ui Select portal / DialogConfirmation 互動），
 > 非本次修復引入。
 
+## 2l. P2.4 診斷記錄（runtime 問題調查中；TEMP-DIAG 清單）
+
+> §4 有逐輪歷史；本節是**給下一個 session 的綜合狀態**：已確立的事實、
+> Svelte 5 機制（已查過、不必重查）、TEMP-DIAG 清單（全綠後必移除）、
+> 決策樹與候選假設。
+
+### 已確立的事實（四輪診斷）
+
+- `npm run check` ✅ 全綠（§2k 修復後）。
+- suite 可載入；10/10 全掛在 `openInspector()` 等 4 支 payload row（5s timeout）。
+- `[inspector-diag]`：**effect 跑兩次**、皆 `instanceId: 1`（無 double mount）：
+  1. `pathLen: 7` → `built {messages: 4, boundaryValid: true, droppedCount: 3}`；
+     DOM 確實渲染 4 行 + Advanced 區（`[diag]` 的 5 支 `aria-expanded` 按鈕
+     = 4 payload 行 + bits-ui Select trigger——trigger 帶 `aria-expanded`）。
+  2. `pathLen: 0` → `built {messages: 0, compaction: null}`；`result` 被覆蓋成
+     空 payload，但 **DOM 停在 4 則狀態**（次要症狀：state-DOM desync）。
+- 無 console error → `buildLlmContext` 沒 reject（catch 會 `console.error`）。
+- builder / policy / converter 純函式、已靜態驗證（fixture 無附件走最簡路徑）。
+- **非 reassign、非 in-place mutation**：
+  - prototype setter patch（包 `activeMessages`）只抓到我們自己的
+    `watchArrayMutations` 寫入（`SET (len=7)` + stack），無其他 SET log；
+  - array 外層 logging proxy（set/deleteProperty）：無任何 `[diag] MUTATE`；
+  - 全 repo `activeMessages` 寫入點皆顯式方法（delete/load/refresh/slice/create）；
+    `conversationsStore` 無 `$effect`/`$derived`；`vitest-browser-svelte` 的
+    `cleanup` 只跑 `beforeEach`；`vitest-setup-client.ts` 只 mock fetch。
+- → 值變化發生在 **state signal 層**（機制見下）；元兇待第五輪 `watchSignalValue`
+  的 stack trace 指認。
+
+### Svelte 5 機制（已讀 compiler + runtime 源碼確認，不必重查）
+
+- `$state` class 字段編譯（`svelte/src/compiler/phases/3-transform/client/visitors/ClassBody.js`）：
+  own property（field initializer，存 **signal 物件**）+ prototype getter/setter；
+  getter = `$.get(this.x)`、setter = `$.set(this.x, v, true)`。
+- runtime（`reactivity/sources.js` + `batch.js`）：`$.set` → `internal_set` →
+  `batch.capture` → **`source.v = value`**（直接寫 signal 物件的 `v` 屬性，
+  繞過 prototype setter）；值經 `proxy()` 包成深 proxy（`should_proxy = true`）。
+- effect 追蹤 proxy 的 `length`（讀 `path.length`）→ in-place mutation 會觸發
+  重跑（setter 不被呼叫）；值替換走 `source.v = value`。
+- `internal_set` 呼叫點（`svelte/src/internal/client` 全搜）：公開 `set()`
+  （sources.js:171）、`deriveds.js:227/244`（derived 寫自己的值）、`await.js`/
+  `boundary.js`/`each.js:314-315`（block 內部）、`legacy.js:44`（legacy 模式）。
+  store 的 signal 理論上只會走 `set()`（= patched setter）或直接
+  `source.v = value`。
+
+### TEMP-DIAG 清單（**全綠後必移除**；兩檔搜 `TEMP-DIAG` 即可全數找到）
+
+| 檔案 | 內容 |
+| ---- | ---- |
+| `tests/client/context-inspector.svelte.test.ts` | ① `waitFor` timeout 加 `describeDom()`（`[diag]` DOM 摘要：dialog 數 / row 數 / dialog 文字 / body 長度）；② `patchActiveMessagesSetter()` / `unpatchActiveMessagesSetter()`（包 prototype setter，`[diag] activeMessages SET (len=N)` + stack）；③ `watchArrayMutations()`（logging proxy，`[diag] MUTATE set/delete [prop]` + stack）；④ `watchSignalValue()`（包 signal 的 `v` getter/setter，`[diag] SIGNAL.v SET (len=N)` + stack；shape 非 signal 時 log `[diag] own property is not a signal` + keys）；⑤ `openInspector()` 開頭呼叫 ②③④、`afterEach` 呼叫 `unpatchActiveMessagesSetter()` |
+| `src/lib/components/app/dialogs/DialogContextInspector.svelte` | module-scope `instanceCounter` / `instanceId` / `lastPathRef`；effect 開頭 log `[inspector-diag] effect {instanceId, pathLen, sameRef, tick}` + `lastPathRef = path`；`.then` log `[inspector-diag] built {messages, compaction}`；`.catch` log `[inspector-diag] build failed` |
+
+> 移除方式：兩檔搜 `TEMP-DIAG` 刪除所有標註區塊；`waitFor` 還原成
+> `throw new Error('Timed out waiting for element')`（連 `describeDom()` 一起刪）；
+> 元件還原 effect（刪 3 筆 `console.log` + `instanceCounter` / `instanceId` /
+> `lastPathRef` 三個宣告）。全部診斷皆唯讀 / 打 log，移除後預期零行為差異。
+
+### 決策樹（對照第五輪輸出）
+
+| 輸出 | 結論 / 下一步 |
+| ---- | ---- |
+| `[diag] SIGNAL.v SET (len=0)` + stack | **抓到元兇**，依 stack 修 |
+| `sameRef: false` 且無 `SIGNAL.v SET` | signal 物件本身被換（own property 被 replace）→ 對 own property 加 `Object.defineProperty` 監視（data → accessor） |
+| `sameRef: true` 且無 `MUTATE` | proxy 鏈回傳不一致值 → 查 Svelte `proxy.js`（cache / 雙層 proxy 行為） |
+| `[diag] own property is not a signal` | 自己的 model 錯（own property 存的不是 signal）→ 先看 `Object.getOwnPropertyDescriptor(instance, 'activeMessages')` 實際回傳什麼再調整 |
+
+### 候選假設（目前優先序）
+
+1. **有程式碼直接寫 signal 的 `v`**（或經 Svelte 內部 `internal_set` 路徑如
+   `batch.capture`）——第五輪 `watchSignalValue` 會抓到。
+2. **`open` prop 被 bits-ui Dialog 切 false→true**（`open: false` 的 effect run
+   走 early return、**不會**打 log）：切換期間某處清掉 `activeMessages` →
+   下一次 `open: true` run 看到 pathLen 0。signal 監視同樣會抓到清空的寫入；
+   若確認是這個，再對 `open` 加 probe（`handleOpenChange` 打 log）。
+3. **兩個 module instance**（元件的 `$lib/stores` barrel vs test 的 direct import
+   解析到不同實例）——低機率：第一次 effect run 看到 pathLen 7，代表兩邊
+   共享同一 store。
+
+### 重跑指令（單支、~15s）
+
+```bash
+npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts -t "lists the compacted payload"
+```
+
+把完整輸出（`[diag]` / `[inspector-diag]` 行 + stack trace）貼回來對照決策樹。
+
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
 ### 3.1 既有 broken state：`ChatRole` / `ChatMessageType` 原本未定義
@@ -384,18 +469,27 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   （suite import 失敗、0 test）。4 錯：`@lucide/svelte` v1.46.0 無 `Compress`
   icon（vitest 的 module graph 因此整 suite 炸掉）+ test 檔 3 個型別錯
   （`trigger` 未收斂 null、2 處 `Element` 無 `disabled`）。已全數修完（§2k）。
-- **Phase 2 P2.4 第四輪**：使用者重跑單支。setter patch 運作正常（抓到
-  `watchArrayMutations` 自己的寫入 `SET (len=7)`），但 **無 `[diag] MUTATE`**——
-  非 in-place mutation、非 reassign，effect 卻用 pathLen 0 重跑。查 runtime
-  `batch.capture`：`source.v = value` 直接寫 signal 的 `v`（繞過 setter）。
-  已加 signal `v` wrapper + `sameRef` probe（TEMP-DIAG），待重跑。
-- **Phase 2 P2.4 待重跑確認**（變更見 §2j、修復見 §2k）：請跑
-  `npm run check` +
-  `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
-  （10 支：4 支 Phase 1 回歸 + 6 支 P2.4 新用例；6 支新用例為首次執行）。
-  注意：P2.4 的 UI（inspector 的「Compact now」入口）落地後，Phase 1 的 5.8
-  手動驗收項目 1–2 可一併做（有 cmp 的對話 payload = inspector = 抓包；
-  手動 Compact now 可產生 cmp）。
+- **Phase 2 P2.4 第二輪**：使用者跑了 `npm run check`（**全綠**）+ vitest
+  10/10 掛（全在 `openInspector()` 等 4 支 payload row，無 console error）。
+  加第一層 TEMP-DIAG（`waitFor` timeout 的 `[diag]` DOM 摘要 + 元件 effect 的
+  `[inspector-diag]` console trace）。
+- **Phase 2 P2.4 第三輪**：單支重跑。`[inspector-diag]` 顯示 **effect 跑兩次**：
+  pathLen 7 → built 4 messages（DOM 有 4 則 + 5 支 `aria-expanded` 按鈕 =
+  4 行 + Select trigger），**其後 `activeMessages` 被清成 `[]`** → 重跑
+  pathLen 0 → `result` 被 0 messages 覆蓋（DOM 停在 4 則）。加第二層
+  TEMP-DIAG（prototype setter patch + `instanceId` counter）。
+- **Phase 2 P2.4 第四輪**：單支重跑。`instanceId` 皆 1（無 double mount）；
+  setter patch 運作正常（抓到 `watchArrayMutations` 自己的寫入 `SET (len=7)`），
+  但 **無其他 SET**（非 reassign）；加第三層 logging proxy 也 **無
+  `[diag] MUTATE`**（非 in-place mutation）。查 Svelte runtime `batch.capture`：
+  `source.v = value` 直接寫 signal 的 `v`（繞過 setter）。加第四層 TEMP-DIAG
+  （signal `v` wrapper `watchSignalValue()` + `sameRef` probe）。
+- **Phase 2 P2.4 診斷中**（綜合狀態見 §2l）：待使用者跑
+  `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts -t "lists the compacted payload"`
+  （單支、~15s），依 §2l 決策樹對照輸出。全綠前**不移除** TEMP-DIAG；
+  全綠後依 §2l 清單移除。注意：P2.4 的 UI（inspector 的「Compact now」入口）
+  落地後，Phase 1 的 5.8 手動驗收項目 1–2 可一併做（有 cmp 的對話
+  payload = inspector = 抓包；手動 Compact now 可產生 cmp）。
 - **下一步（P2.4 確認後）**：P2.5 cmp entry 動作（ChatMessageCompaction 展開區
   動作列，規格見 §5b P2.5）。
 
@@ -609,7 +703,7 @@ static async createCompactionMessage(params: {
   - recompact 與後移共用 private `summarizeRegion` helper。
 - unit：DB 層是 Dexie、store 協調層不 unit 測（同 5.4/5.5 先例）。
 
-### P2.4 Inspector 編輯 + 動作（04-§2.2 完整版）✅ 已交付、第一輪 4 錯已修、待重跑確認（變更見 §2j、修復見 §2k）
+### P2.4 Inspector 編輯 + 動作（04-§2.2 完整版）✅ 已交付、check 全綠、client 測試診斷中（變更見 §2j、第一輪修復見 §2k、診斷記錄見 §2l）
 - `DialogContextInspector.svelte`：
   - summary 列「編輯」→ 就地 textarea（prefix 剝除後預填）→ 存檔走
     `updateCompactionSummary` → 重新 buildLlmContext 刷新 WYSIWYG。

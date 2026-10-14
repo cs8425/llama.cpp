@@ -8,7 +8,8 @@
 > [06-status.md](./06-status.md)（Phase 0 完成；Phase 1 5.1–5.7 完成並確認、
 > 剩 5.8 手動驗收（待 P2.6 UI 觸發入口；P2.4 的 inspector「Compact now」
 > 已可先行驗收項目 1–2）；Phase 2 P2.1–P2.3 完成並確認、
-> P2.4 已交付待編譯確認、P2.5 起未開始）。
+> P2.4 已交付、`npm run check` 全綠，但 client 測試 10/10 掛在 runtime 問題
+> 上、正以 TEMP-DIAG 逐層定位（診斷記錄見 06-status §2l）、P2.5 起未開始）。
 
 ## 目錄
 
