@@ -3,6 +3,13 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
+> **恢復點（最新）**：P2.4（Inspector 編輯 + 動作）已交付、**待使用者編譯確認**
+> （變更見 §2j）。第一件要做的事：請使用者跑 `npm run check` +
+> `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
+> （10 支：4 回歸 + 6 新）。全綠後把 §1/§4/§5b 的 P2.4 改「已確認」，
+> 接著做 P2.5（cmp entry 動作列，規格見 §5b）；Phase 1 的 5.8 手動驗收
+> 項目 1–2 也可一併做（inspector 已有「Compact now」入口）。
+
 ## 1. 進度總覽
 
 | 階段 | 狀態 |
@@ -323,8 +330,8 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
   2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。
   3. 無 cmp 對話行為與現行完全一致（context-builder.test.ts 的回归測試保證）。
-  > ⛔ **目前阻塞**：沒有 UI 能觸發手動壓縮（「Compact now」入口在 P2.4/P2.6），
-  > 5.8 項目 1–2 待 P2.4–P2.6 的 UI 落地後一併驗收；項目 3 已由 unit 回歸覆蓋。
+  > ⚠️ **5.8 項目 1–2 待 P2.4 編譯確認後即可驗收**：P2.4 已在 inspector 提供「Compact now」入口（§2j）；
+  > P2.6 再補其餘入口（表單 icon + 快捷鍵 + gauge 列）。項目 3 已由 unit 回歸覆蓋。
 - **Phase 2 P2.1 ✅ 完成**：變更見 §2g。
   - 第一輪：使用者跑了 `npm run check` +
     `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（18/18 綠）。
