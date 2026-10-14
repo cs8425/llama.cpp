@@ -404,7 +404,7 @@ describe('DialogContextInspector (actions, Phase 2 P2.4)', () => {
 			'[role="dialog"] [data-slot="select-trigger"]'
 		);
 		expect(trigger).not.toBeNull();
-		expect(trigger.textContent).toContain('thanks, that worked');
+		expect(trigger!.textContent).toContain('thanks, that worked');
 
 		await userEvent.click(trigger!);
 
@@ -435,10 +435,10 @@ describe('DialogContextInspector (actions, Phase 2 P2.4)', () => {
 		expect(findDialogButton('Expand')?.disabled).toBe(true);
 		expect(findDialogButton('Re-summarize')?.disabled).toBe(true);
 		expect(
-			document.querySelector('[role="dialog"] button[aria-label="Edit summary"]')?.disabled
+			document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="Edit summary"]')?.disabled
 		).toBe(true);
 		expect(
-			document.querySelector('[role="dialog"] [data-slot="select-trigger"]')?.disabled
+			document.querySelector<HTMLButtonElement>('[role="dialog"] [data-slot="select-trigger"]')?.disabled
 		).toBe(true);
 
 		unmount();

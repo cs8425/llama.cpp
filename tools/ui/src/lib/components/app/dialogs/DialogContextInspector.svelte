@@ -19,11 +19,11 @@
 		AlertTriangle,
 		Braces,
 		Check,
-		Compress,
 		Copy,
 		Loader2,
 		Pencil,
 		RefreshCw,
+		Shrink,
 		UnfoldVertical
 	} from '@lucide/svelte';
 	import {
@@ -575,7 +575,7 @@
 								disabled={actionsBlocked}
 								onclick={handleCompactNow}
 							>
-								<Compress class="h-3.5 w-3.5" />
+								<Shrink class="h-3.5 w-3.5" />
 
 								Compact now
 							</Button>
@@ -775,7 +775,7 @@
 
 					<div class="flex flex-wrap gap-2">
 						<Button class="h-7 gap-1 px-2 text-xs" disabled={actionsBlocked} onclick={handleCompactNow}>
-							<Compress class="h-3.5 w-3.5" />
+							<Shrink class="h-3.5 w-3.5" />
 
 							Compact now
 						</Button>
