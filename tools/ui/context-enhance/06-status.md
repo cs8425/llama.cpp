@@ -309,6 +309,8 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
   2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。
   3. 無 cmp 對話行為與現行完全一致（context-builder.test.ts 的回归測試保證）。
+  > ⛔ **目前阻塞**：沒有 UI 能觸發手動壓縮（「Compact now」入口在 P2.4/P2.6），
+  > 5.8 項目 1–2 待 P2.4–P2.6 的 UI 落地後一併驗收；項目 3 已由 unit 回歸覆蓋。
 - **Phase 2 P2.1 ✅ 完成**：變更見 §2g。
   - 第一輪：使用者跑了 `npm run check` +
     `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（18/18 綠）。
@@ -481,7 +483,7 @@ static async createCompactionMessage(params: {
 > 原則同 Phase 1：純邏輯進 `services/context/`（unit 可測）；store 層只做
 > 觸發 + 協調；UI 走既有元件慣例。每單位獨立可編譯、可回退。
 
-### P2.1 自動觸發（flow 之間）
+### P2.1 自動觸發（flow 之間）✅
 - `compaction-policy.ts`：新增純函式 `computeCompactionBudget(nCtx, settings)`
   （02-§3.3 公式：`floor(nCtx × (1 − threshold%) − summaryMaxTokens × 1.5)` +
   三個 min 欄位）+ `MIN_SUMMARIZE_TOKENS = 2000` 常數上移到 policy（原在
@@ -498,7 +500,7 @@ static async createCompactionMessage(params: {
      仍為 true，I7 guard 會擋掉。
 - unit：`computeCompactionBudget` 公式 + 欄位透傳。
 
-### P2.2 agentic 迴圈 turn 之間再壓縮（03-§4.4）
+### P2.2 agentic 迴圈 turn 之間再壓縮（03-§4.4）✅
 - `agenticStore` 新 private `compactBetweenTurns({ conversationId, lastPrompt,
   model, sessionMessages, signal })`：
   - gate：`contextAutoCompaction && contextAutoCompactionInLoop`、n_ctx 已知、
@@ -520,7 +522,7 @@ static async createCompactionMessage(params: {
   - 不做 in-loop preEncode（下一 turn 立刻 re-encode 新前綴）。
 - 無新純邏輯（policy/builder/summarize 皆既有）→ 無新 unit；store 層照慣例不 unit 測。
 
-### P2.3 expand + chatStore 人工介入動作（DB + store）
+### P2.3 expand + chatStore 人工介入動作（DB + store）✅（待使用者編譯確認）
 - `DatabaseService.expandCompactionMessage(convId, cmpId)`：transaction 內
   子節點 `parent` 改指 `cmp.parent`、`parent.children` 以子節點替換 cmp、
   刪 cmp 列、`conv.currNode === cmp.id` 時回 `cmp.parent`（同 transaction 直接
@@ -597,10 +599,20 @@ static async createCompactionMessage(params: {
   字串可以。（5.7 第一輪 check 的錯之一）
 - **自訂 `waitFor` helper 的 find 要回 `T | null`**：`Array.find()` 回 `undefined`，
   要 `?? null` 才過型別。（5.7 第一輪 check 的錯之一）
+- **`npm run check` 只有型別檢查**：`= svelte-kit sync && svelte-check`，**不含
+  eslint**（lint 是獨立的 `npm run lint`，本工作流未跑過）。所以 class 成員順序
+  （`perfectionist/sort-classes`，`useExperimentalDependencyDetection: true`）不會被
+  check 抓到——`chat/index.svelte.ts` 的 public/private 方法不是嚴格字母序
+  （如 `compactConversation` 在 `isStreaming` 之後；compaction 相關方法群聚在
+  `compactConversation` 旁、群內字母序）。新增方法照此群聚慣例即可，不必重排既有順序。
+  named import 成員順序 lint 也不檢查（`simple-import-sort` 只排 import 語句），
+  但新成員照 ASCII 字母序插（uppercase 在前，如 `type CompactionPlan` 在
+  `SUMMARY_CONTENT_PREFIX` 前）。
 - **store 慣例**：`.svelte.ts` runes（$state/$derived）；`conversationsStore`
   的路徑邏輯（`filterByLeafNodeId`）對新 type 透明，**不要**改 `branching.ts`。
 - **不要 import/export 改動**：`conversationsStore` 路徑邏輯、`branching.ts`、
   import/export service、`convertDbMessageToApiChatMessageData`（builder 複用它）。
-- **編譯/測試由使用者執行**：每完成一個可獨立驗證的單位（建議 5.1 / 5.2+5.3 /
-  5.4+5.5 / 5.6 / 5.7 各一段）就停下來請使用者跑 `npm run check` +
-  相關 `npm run test:unit -- --run <files>`，確認後再继续。
+- **編譯/測試由使用者執行**：每完成一個可獨立驗證的單位（Phase 1 建議
+  5.1 / 5.2+5.3 / 5.4+5.5 / 5.6 / 5.7 各一段；Phase 2 每 P2.x 一段）就停下來
+  請使用者跑 `npm run check` + 相關 `npm run test:unit -- --run <files>`，
+  確認後再继续。
