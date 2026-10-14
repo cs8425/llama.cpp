@@ -9,7 +9,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4） |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 已交付、待使用者編譯確認（見 §2j） |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -195,6 +195,20 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
 >   無法指派給 `CompactionMeta` 的 union 型別 → recompact / move 都以 `baseMeta`
 >   顯式 guard（同時防損毀節點；boundary 有效時 meta 恆在，guard 只跑型別收斂）。
 
+## 2j. Phase 2 已交付檔案（P2.4，待使用者編譯確認）
+
+| 檔案 | 改動 |
+| ---- | ---- |
+| `src/lib/components/app/dialogs/DialogContextInspector.svelte` | 只讀版 → 完整版（04-§2.2）：① summary 列加鉛筆「Edit」→ 就地 `Textarea`（`SUMMARY_CONTENT_PREFIX` 剝除後預填）+ [Save]/[Cancel]，存檔走 `chatStore.updateCompactionSummary`；② 新增「Advanced」區——斷點 `Select`（I4 候選 = 路徑上 `index > headLength` 的 user/assistant 訊息，分兩組「Turn boundaries (user)」「Within a turn (assistant)」，tool/system 不列；label 含 1-based 序號 + role + 預覽，assistant tool_calls 顯示名稱）→ `moveCompactionBoundary`；[Compact now]（`compactConversation auto:false`）/ [Expand]（`DialogConfirmation` 確認框，description 顯示「~X → ~Y tokens」增回估算，Y = 全路徑 `estimateTokens` 總和）/ [Re-summarize]（boundary 失效時 disabled）；③ `contextStatsStore.compacting` 時顯示 spinner 列「Compacting context…」（`role="status"`）且全部動作 disabled（`actionsBlocked = compacting || chatStore.isLoading || 無 active conv`；store 的 I7 guard 仍是最後防線）；④ boundary 失效紅條加 [Compact now] 按鈕（04-§2.2「建議重新壓縮 + 按鈕」）；⑤ **每次動作後重抓 payload**：`refreshTick` $state 進 `$effect` 依賴 + store 動作本來就 mirror 進 `activeMessages`（effect 已追蹤 `path`，tick 使重抓顯式化）；重抓期間保留舊 result 不閃空白（`{#if !result}` 才顯示 spinner），build 失敗改 toast（原本會永久卡 spinner）；⑥ row 結構重組：row `<button>` 外層包 `<div class="flex">` 放 Edit 按鈕（避免 button 巢狀 button）；⑦ import 加 `chatStore`（barrel）、`estimateTokens` / `SUMMARY_CONTENT_PREFIX`（context barrel）、`Select` / `Textarea` / `DialogConfirmation` UI 元件、`Compress` / `Pencil` / `RefreshCw` / `UnfoldVertical` icons |
+| `tests/client/context-inspector.svelte.test.ts` | 4 支既有用例保留（改走共用 `openInspector()` helper；fixture 回傳加 `cmp` / `user`）；新增 6 支（P2.4，chatStore store spy）：summary 就地編輯（prefix 剝除預填 → clear+type → Save → `updateCompactionSummary(convId, cmpId, text)`）；Compact now → `compactConversation(convId, { auto: false })`；Expand → 確認框（含「3 compacted messages」+ tokens 文案）→ `expandCompactionEntry(convId, cmpId)`；Re-summarize → `recompactConversationEntry(convId, cmpId)`；斷點 select（trigger 顯示現行 boundary 預覽 → 點開 portaled options → 選前段 user boundary → `moveCompactionBoundary(convId, cmpId, userId)`）；`compacting=true` 時 spinner 列 + 全部動作 disabled（Compact/Expand/Re-summarize/Edit/select trigger）；`afterEach` 加 `activeConversation = null` / `compacting = false` 重置；新增 `setActiveConversation()` helper（inspector 的 convId 來自 `activeConversation`） |
+
+> 要點：
+> - 無新純邏輯（builder / policy / summarize / store 方法皆 P2.3 既有）→ 無新 unit；UI 層走 client 測試（同 5.6/5.7 先例）。
+> - 斷點候選集 = store `moveCompactionBoundary` 的 I4 驗證集（user/assistant、index > head），UI 不另創新規則；cmp entry 本身（user role）也在候選內（boundary 指向自己 =「只留 summary」，builder 的 kept filter 自然處理）。
+> - `Select.Item` 只傳 `label` prop（不傳 children，同 ModelsManagerFilters 慣例）。
+> - inspector 只對 active conv 操作（`convId = activeConversation?.id`），非 active conv 無入口（同 Phase 1）。
+> - `DialogConfirmation` 掛在 `Dialog.Root` 內（Content 的 sibling）；其 `onConfirm` 不自動關框，由 `handleExpandConfirmed` 設 `showExpandConfirm = false`。
+
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
 ### 3.1 既有 broken state：`ChatRole` / `ChatMessageType` 原本未定義
@@ -332,8 +346,15 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   store 協調層照慣例不 unit 測，同 5.4/5.5 先例）
 - **Phase 2 P2.3 重跑**：使用者跑了 `npm run check`，**全綠**。P2.3 完成
   （變更見 §2i）。
-- **下一步：P2.4**（Inspector 編輯 + 動作，規格見 §5b P2.4；Phase 1 的 5.8
-  手動驗收在 P2.4/P2.6 UI 落地後可一併做，目前阻塞——沒有界面能觸發）。
+- **Phase 2 P2.4 已交付、待編譯確認**（變更見 §2j）：請跑
+  `npm run check` +
+  `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
+  （10 支：4 支 Phase 1 回歸 + 6 支 P2.4 新用例）。
+  注意：P2.4 的 UI（inspector 的「Compact now」入口）落地後，Phase 1 的 5.8
+  手動驗收項目 1–2 可一併做（有 cmp 的對話 payload = inspector = 抓包；
+  手動 Compact now 可產生 cmp）。
+- **下一步（P2.4 確認後）**：P2.5 cmp entry 動作（ChatMessageCompaction 展開區
+  動作列，規格見 §5b P2.5）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -545,7 +566,7 @@ static async createCompactionMessage(params: {
   - recompact 與後移共用 private `summarizeRegion` helper。
 - unit：DB 層是 Dexie、store 協調層不 unit 測（同 5.4/5.5 先例）。
 
-### P2.4 Inspector 編輯 + 動作（04-§2.2 完整版）
+### P2.4 Inspector 編輯 + 動作（04-§2.2 完整版）✅ 已交付、待編譯確認（變更見 §2j）
 - `DialogContextInspector.svelte`：
   - summary 列「編輯」→ 就地 textarea（prefix 剝除後預填）→ 存檔走
     `updateCompactionSummary` → 重新 buildLlmContext 刷新 WYSIWYG。

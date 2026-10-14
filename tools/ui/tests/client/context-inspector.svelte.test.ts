@@ -1,17 +1,24 @@
-// Pins the read-only context inspector (context-enhance Phase 1, 5.7): the
-// dialog must show the exact payload `buildLlmContext` produces for the active
-// path (WYSIWYG with the send path) — payload rows with role badges and token
-// estimates, the compacted-out region, the fail-open boundary warning and a
-// Copy JSON action that replaces base64 bodies with placeholders.
+// Pins the context inspector (context-enhance Phase 1 5.7 + Phase 2 P2.4):
+// the dialog must show the exact payload `buildLlmContext` produces for the
+// active path (WYSIWYG with the send path) — payload rows with role badges
+// and token estimates, the compacted-out region, the fail-open boundary
+// warning and a Copy JSON action that replaces base64 bodies with
+// placeholders. P2.4 adds the manual-intervention actions, all spied on the
+// chatStore: edit the summary in place (prefix stripped), move the kept-from
+// boundary through the grouped select, Compact now, Expand (with
+// confirmation) and Re-summarize; while `contextStatsStore.compacting` the
+// spinner row shows and every action is disabled.
 //
 // Run: npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts
 
 import DialogContextInspector from '$lib/components/app/dialogs/DialogContextInspector.svelte';
 import { MessageRole, MessageType } from '$lib/enums';
 import { SUMMARY_CONTENT_PREFIX } from '$lib/services/context';
-import { modelsStore } from '$lib/stores/models/index.svelte';
+import { contextStatsStore } from '$lib/stores/chat/context-stats.svelte';
+import { chatStore } from '$lib/stores/chat/index.svelte';
 import { conversationsStore } from '$lib/stores/conversations/index.svelte';
-import type { DatabaseMessage } from '$lib/types';
+import { modelsStore } from '$lib/stores/models/index.svelte';
+import type { DatabaseConversation, DatabaseMessage } from '$lib/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { userEvent } from 'vitest/browser';
@@ -50,9 +57,13 @@ function makeCompaction(overrides: Partial<DatabaseMessage> = {}): DatabaseMessa
 
 /**
  * Path: system, user, assistant(tool_calls) → tool, cmp, user, assistant.
- * Returns the messages plus the kept-region start the cmp claims.
+ * Returns the messages the action tests address.
  */
-function buildCompactedFixture(): { kept: DatabaseMessage } {
+function buildCompactedFixture(): {
+	cmp: DatabaseMessage;
+	kept: DatabaseMessage;
+	user: DatabaseMessage;
+} {
 	const system = makeMessage({ content: 'You are helpful.', role: MessageRole.SYSTEM, type: MessageType.SYSTEM });
 	const user = makeMessage({ content: 'help me fix the bug' });
 	const assistant = makeMessage({
@@ -78,7 +89,7 @@ function buildCompactedFixture(): { kept: DatabaseMessage } {
 
 	conversationsStore.activeMessages = [system, user, assistant, tool, cmp, kept, finalAssistant];
 
-	return { kept };
+	return { cmp, kept, user };
 }
 
 // --- helpers ---------------------------------------------------------------
@@ -105,6 +116,14 @@ function payloadRowButtons(): HTMLButtonElement[] {
 	return [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button[aria-expanded]')];
 }
 
+function dialogButtons(): HTMLButtonElement[] {
+	return [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')];
+}
+
+function findDialogButton(label: string): HTMLButtonElement | null {
+	return dialogButtons().find((button) => button.textContent?.trim().includes(label)) ?? null;
+}
+
 function mockClipboard(): { writeText: ReturnType<typeof vi.fn> } {
 	const writeText = vi.fn().mockResolvedValue(undefined);
 
@@ -113,9 +132,30 @@ function mockClipboard(): { writeText: ReturnType<typeof vi.fn> } {
 	return { writeText };
 }
 
+// The inspector acts on the ACTIVE conversation; the store methods resolve
+// convId from it.
+function setActiveConversation() {
+	conversationsStore.activeConversation = {
+		currNode: '',
+		id: 'insp-conv',
+		lastModified: 0,
+		name: 'Inspector conversation'
+	} as unknown as DatabaseConversation;
+}
+
+async function openInspector() {
+	const { unmount } = render(DialogContextInspector, { open: true });
+
+	await waitFor(() => (payloadRowButtons().length === 4 ? document.querySelector('[role="dialog"]') : null));
+
+	return { unmount };
+}
+
 afterEach(() => {
 	vi.restoreAllMocks();
 	conversationsStore.activeMessages = [];
+	conversationsStore.activeConversation = null;
+	contextStatsStore.compacting = false;
 });
 
 // --- tests -----------------------------------------------------------------
@@ -126,9 +166,7 @@ describe('DialogContextInspector (read-only, Phase 1)', () => {
 		vi.spyOn(modelsStore, 'activeModelId', 'get').mockReturnValue('test-model');
 		vi.spyOn(modelsStore.props, 'getModelContextSize').mockReturnValue(32768);
 
-		const { unmount } = render(DialogContextInspector, { open: true });
-
-		await waitFor(() => (payloadRowButtons().length === 4 ? document.querySelector('[role="dialog"]') : null));
+		const { unmount } = await openInspector();
 
 		const text = dialogText();
 
@@ -171,9 +209,7 @@ describe('DialogContextInspector (read-only, Phase 1)', () => {
 
 	it('expands a row to the full message text', async () => {
 		buildCompactedFixture();
-		const { unmount } = render(DialogContextInspector, { open: true });
-
-		await waitFor(() => (payloadRowButtons().length === 4 ? document.querySelector('[role="dialog"]') : null));
+		const { unmount } = await openInspector();
 
 		// row 3 is the kept user message
 		const row = payloadRowButtons()[2];
@@ -208,9 +244,7 @@ describe('DialogContextInspector (read-only, Phase 1)', () => {
 		});
 
 		conversationsStore.activeMessages = [system, user, assistant, cmp];
-		const { unmount } = render(DialogContextInspector, { open: true });
-
-		await waitFor(() => (payloadRowButtons().length === 4 ? document.querySelector('[role="dialog"]') : null));
+		const { unmount } = await openInspector();
 
 		const text = dialogText();
 
@@ -229,21 +263,13 @@ describe('DialogContextInspector (read-only, Phase 1)', () => {
 	it('copies the payload JSON with base64 bodies replaced by placeholders', async () => {
 		const { writeText } = mockClipboard();
 		buildCompactedFixture();
-		const { unmount } = render(DialogContextInspector, { open: true });
+		const { unmount } = await openInspector();
 
-		await waitFor(() => (payloadRowButtons().length === 4 ? document.querySelector('[role="dialog"]') : null));
-
-		const copyButton = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(
-			(button) => button.textContent?.includes('Copy JSON')
-		);
+		const copyButton = findDialogButton('Copy JSON');
 
 		expect(copyButton).not.toBeNull();
 		await userEvent.click(copyButton!);
-		await waitFor(() =>
-			[...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(
-				(button) => button.textContent?.includes('Copied')
-			) ?? null
-		);
+		await waitFor(() => findDialogButton('Copied'));
 
 		expect(writeText).toHaveBeenCalledTimes(1);
 		const payload = JSON.parse(writeText.mock.calls[0][0] as string) as Array<{
@@ -261,6 +287,159 @@ describe('DialogContextInspector (read-only, Phase 1)', () => {
 
 		// feedback swaps the label
 		expect(dialogText()).toContain('Copied');
+
+		unmount();
+	});
+});
+
+describe('DialogContextInspector (actions, Phase 2 P2.4)', () => {
+	it('edits the summary in place and saves it through the store', async () => {
+		const { cmp } = buildCompactedFixture();
+		setActiveConversation();
+		const updateSpy = vi.spyOn(chatStore, 'updateCompactionSummary').mockResolvedValue(undefined);
+
+		const { unmount } = await openInspector();
+
+		const editButton = document.querySelector<HTMLButtonElement>(
+			'[role="dialog"] button[aria-label="Edit summary"]'
+		);
+
+		expect(editButton).not.toBeNull();
+		await userEvent.click(editButton!);
+
+		const textarea = await waitFor(
+			() => document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')
+		);
+
+		// prefilled with the stored summary, the fixed prefix stripped
+		expect(textarea.value).toContain('The user asked to fix a bug');
+		expect(textarea.value).not.toContain('Conversation summary');
+
+		await userEvent.clear(textarea);
+		await userEvent.type(textarea, 'Edited summary text');
+
+		const saveButton = findDialogButton('Save');
+		expect(saveButton).not.toBeNull();
+		await userEvent.click(saveButton!);
+
+		expect(updateSpy).toHaveBeenCalledWith('insp-conv', cmp.id, 'Edited summary text');
+
+		unmount();
+	});
+
+	it('Compact now calls the store with auto: false', async () => {
+		buildCompactedFixture();
+		setActiveConversation();
+		const compactSpy = vi.spyOn(chatStore, 'compactConversation').mockResolvedValue(undefined);
+
+		const { unmount } = await openInspector();
+
+		const compactButton = findDialogButton('Compact now');
+		expect(compactButton).not.toBeNull();
+		await userEvent.click(compactButton!);
+
+		expect(compactSpy).toHaveBeenCalledWith('insp-conv', { auto: false });
+
+		unmount();
+	});
+
+	it('Expand asks for confirmation and restores through the store', async () => {
+		const { cmp } = buildCompactedFixture();
+		setActiveConversation();
+		const expandSpy = vi.spyOn(chatStore, 'expandCompactionEntry').mockResolvedValue(undefined);
+
+		const { unmount } = await openInspector();
+
+		const expandButton = findDialogButton('Expand');
+		expect(expandButton).not.toBeNull();
+		await userEvent.click(expandButton!);
+
+		// the confirmation dialog spells out what comes back
+		const confirm = await waitFor(() =>
+			[...document.querySelectorAll<HTMLElement>('[role="alertdialog"]')].find(
+				(el) => el.textContent?.includes('Restore the full context')
+			) ?? null
+		);
+
+		expect(confirm.textContent).toContain('3 compacted messages');
+		expect(confirm.textContent).toContain('tokens');
+
+		const confirmButton = [...confirm.querySelectorAll<HTMLButtonElement>('button')].find(
+			(button) => button.textContent?.trim() === 'Expand'
+		);
+
+		expect(confirmButton).not.toBeNull();
+		await userEvent.click(confirmButton!);
+
+		expect(expandSpy).toHaveBeenCalledWith('insp-conv', cmp.id);
+
+		unmount();
+	});
+
+	it('Re-summarize calls the store for the in-effect entry', async () => {
+		const { cmp } = buildCompactedFixture();
+		setActiveConversation();
+		const recompactSpy = vi.spyOn(chatStore, 'recompactConversationEntry').mockResolvedValue(undefined);
+
+		const { unmount } = await openInspector();
+
+		const recompactButton = findDialogButton('Re-summarize');
+		expect(recompactButton).not.toBeNull();
+		await userEvent.click(recompactButton!);
+
+		expect(recompactSpy).toHaveBeenCalledWith('insp-conv', cmp.id);
+
+		unmount();
+	});
+
+	it('moves the kept-from boundary through the grouped select', async () => {
+		const { cmp, user } = buildCompactedFixture();
+		setActiveConversation();
+		const moveSpy = vi.spyOn(chatStore, 'moveCompactionBoundary').mockResolvedValue(undefined);
+
+		const { unmount } = await openInspector();
+
+		// the trigger shows the current boundary
+		const trigger = document.querySelector<HTMLButtonElement>(
+			'[role="dialog"] [data-slot="select-trigger"]'
+		);
+		expect(trigger).not.toBeNull();
+		expect(trigger.textContent).toContain('thanks, that worked');
+
+		await userEvent.click(trigger!);
+
+		// the options are portaled; pick the earlier user boundary
+		const option = await waitFor(() =>
+			[...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+				(el) => el.textContent?.includes('help me fix the bug')
+			) ?? null
+		);
+
+		await userEvent.click(option);
+
+		expect(moveSpy).toHaveBeenCalledWith('insp-conv', cmp.id, user.id);
+
+		unmount();
+	});
+
+	it('disables the actions and shows a spinner row while compacting', async () => {
+		buildCompactedFixture();
+		setActiveConversation();
+		contextStatsStore.compacting = true;
+
+		const { unmount } = await openInspector();
+
+		expect(dialogText()).toContain('Compacting context…');
+
+		expect(findDialogButton('Compact now')?.disabled).toBe(true);
+		expect(findDialogButton('Expand')?.disabled).toBe(true);
+		expect(findDialogButton('Re-summarize')?.disabled).toBe(true);
+		expect(
+			document.querySelector('[role="dialog"] button[aria-label="Edit summary"]')?.disabled
+		).toBe(true);
+		expect(
+			document.querySelector('[role="dialog"] [data-slot="select-trigger"]')?.disabled
+		).toBe(true);
 
 		unmount();
 	});
