@@ -60,6 +60,7 @@ function makeCompaction(overrides: Partial<DatabaseMessage> = {}): DatabaseMessa
  * Returns the messages the action tests address.
  */
 function buildCompactedFixture(): {
+	assistant: DatabaseMessage;
 	cmp: DatabaseMessage;
 	kept: DatabaseMessage;
 	user: DatabaseMessage;
@@ -89,7 +90,7 @@ function buildCompactedFixture(): {
 
 	conversationsStore.activeMessages = [system, user, assistant, tool, cmp, kept, finalAssistant];
 
-	return { cmp, kept, user };
+	return { assistant, cmp, kept, user };
 }
 
 // --- helpers ---------------------------------------------------------------
@@ -396,7 +397,7 @@ describe('DialogContextInspector (actions, Phase 2 P2.4)', () => {
 	});
 
 	it('moves the kept-from boundary through the grouped select', async () => {
-		const { cmp, user } = buildCompactedFixture();
+		const { assistant, cmp } = buildCompactedFixture();
 		setActiveConversation();
 		const moveSpy = vi.spyOn(chatStore, 'moveCompactionBoundary').mockResolvedValue(undefined);
 
@@ -411,16 +412,20 @@ describe('DialogContextInspector (actions, Phase 2 P2.4)', () => {
 
 		await userEvent.click(trigger!);
 
-		// the options are portaled; pick the earlier user boundary
+		// the options are portaled. The first message after the system head can
+		// never be a boundary (the summary would cover nothing, so the store
+		// rejects it with "Nothing to summarize") — the earliest pickable one
+		// is the assistant tool_calls turn; select it from the "Within a turn
+		// (assistant)" group.
 		const option = await waitFor(() =>
 			[...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
-				(el) => el.textContent?.includes('help me fix the bug')
+				(el) => el.textContent?.includes('read_file')
 			) ?? null
 		);
 
 		await userEvent.click(option);
 
-		expect(moveSpy).toHaveBeenCalledWith('insp-conv', cmp.id, user.id);
+		expect(moveSpy).toHaveBeenCalledWith('insp-conv', cmp.id, assistant.id);
 
 		unmount();
 	});

@@ -3,18 +3,19 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：P2.4 client 測試 10/10 掛掉——**根因已找到並修復**（見 §2m）：
-> 不是 runtime 反應性問題。P2.4 新增的 bits-ui Select trigger 也是
-> `[role="dialog"]` 內的 `button[aria-expanded]`，讓測試的 `payloadRowButtons()`
-> 數到 5 支（4 支 payload 列 + trigger），`openInspector()` 等 `length === 4`
-> 永遠不成立 → 5s timeout。之前追蹤的「pathLen 0 重跑」是 **afterEach 紅鵝**：
-> 測試在 `openInspector()` 就掛、`unmount()` 沒跑到，`afterEach` 的
-> `activeMessages = []` 在還掛著的元件上重跑 effect。五層 TEMP-DIAG 全數移除；
-> selector 已改成 `[role="dialog"] li button[aria-expanded]`。
+> **恢復點（最新）**：P2.4 client 測試 9/10 綠，唯一掛「moves the kept-from
+> boundary through the grouped select」——**根因已找到並修復**（見 §2n）：
+> 不是 bits-ui portal / 反應性問題。該用例原本要選的 `'help me fix the bug'`
+> 是 system head 之後第一則（idx 1），而 boundary 候选集（元件 `boundaryOptions`
+> 與 store `moveCompactionBoundary` 的 I4 + "Nothing to summarize" guard）都排除
+> `index <= headLength`——摘要若只涵蓋 head 會變 0 則，故**首則 user 永遠當不了
+> boundary**。該 option 從未渲染 → `waitFor` 5s timeout。修法：fixture 回傳
+> `assistant`，用例改選最早合法的 assistant `tool_calls` 邊界（idx 2，"Within a
+> turn" 組），期望 `moveCompactionBoundary('insp-conv', cmp.id, assistant.id)`；
+> 其餘 9 支（含 4 支 Phase 1）零改動。
 > 第一件要做的事：請使用者跑**整支 suite**（10 支）：
 > `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
-> 再跑 `npm run check`，把輸出貼回來。若 6 支 P2.4 新用例（首次 runtime 執行）
-> 有掛，屬 bits-ui Select portal / DialogConfirmation 互動層問題，非 selector。
+> 再跑 `npm run check`，把輸出貼回來。全綠 → P2.4 確認、進 P2.5。
 
 ## 1. 進度總覽
 
@@ -22,7 +23,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 已交付、check 全綠、client 測試根因已修（selector 撞 Select trigger，見 §2m/§2l）、**待重跑確認** |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 已交付、check 全綠、client 測試兩層根因已修（selector 撞 Select trigger §2m/§2l；boundary-select 選了不合法首則 user §2n）、**待重跑確認** |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -358,6 +359,41 @@ npm run check
 
 - 6 支 P2.4 新用例是**首次 runtime 執行**（bits-ui Select portal、
   DialogConfirmation、userEvent 互動）——selector 修好後若仍有掛，才是真問題。
+- 重跑：整支 suite（10 支）+ `npm run check`。全綠 → P2.4 確認、進 P2.5。
+
+## 2n. P2.4 boundary-select 用例根因與修復（9/10 → 待確認 10/10）
+
+重跑整支 suite 後 9/10 綠，唯一掛的是「moves the kept-from boundary through the
+grouped select」——`waitFor` 5s timeout 等 `[role="option"]` 含 `'help me fix the bug'`。
+
+### 根因（一行）
+
+該用例要選的 `'help me fix the bug'` 是 **system head 之後第一則（idx 1）**，而
+boundary 候选集在兩端都排除 `index <= headLength`：
+
+- 元件 `boundaryOptions`：`if (index <= headLength) return;`
+- store `moveCompactionBoundary`：`if (newIndex <= this.headLengthOf(path))` →
+  toast "Nothing to summarize"
+
+語義正確：boundary 是 `firstKeptMessageId`（kept 起點），若放在 head 後首則，
+摘要涵蓋區 `path.slice(head, boundary)` = 0 則 → 無意義。故**首則 user 永遠當
+不了 boundary**。該 option 從未渲染 → `waitFor` timeout。非 portal / 反應性問題
+（同 describe 的 Expand 用例走 portaled AlertDialog 已綠）。
+
+### 修復（單檔，零元件/store 改動）
+
+| 檔案 | 改動 |
+| ---- | ---- |
+| `tests/client/context-inspector.svelte.test.ts` | ① `buildCompactedFixture()` 回傳加 `assistant`（tool_calls 那則，idx 2）；② 該用例改選**最早合法**的 assistant `tool_calls` 邊界（"Within a turn (assistant)" 組），搜尋文字 `'help me fix the bug'` → `'read_file'`，期望 `moveCompactionBoundary('insp-conv', cmp.id, assistant.id)`；補註解說明「head 後首則不可為 boundary」 |
+
+> 要點：元件與 store 的候选集本就一致（都排除 `index <= headLength`），錯在測試
+> 選了一個不存在的 option。改選 assistant 邊界同時驗證了「Within a turn」分組。
+> 其餘 9 支（含 4 支 Phase 1）零改動。bits-ui 受控 Select 已確認：點 item →
+> `toggleItem` → 設 value box → box setter 觸發 `onValueChange(v)`（`select.svelte`
+> 49–53 行），故 spy 必收到 `assistant.id`。
+
+### 風險與下一步
+
 - 重跑：整支 suite（10 支）+ `npm run check`。全綠 → P2.4 確認、進 P2.5。
 
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
