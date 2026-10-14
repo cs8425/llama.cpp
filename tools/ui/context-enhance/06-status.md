@@ -328,6 +328,12 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
     store 協調層照慣例不 unit 測，同 5.4/5.5 先例）。
   - 注意：`compactConversation` 的 path 解析被移入 `resolveConversationPath`
     （原樣搬移、行為不變）；若 check 有問題優先看這塊與新 import 區塊。
+- **Phase 2 P2.3 第一輪**：使用者跑了 `npm run check`，1 個型別錯：
+  `database.service.ts:373` `expandCompactionMessage` 的
+  `parent.children.flatMap((childId) => …)` 參數 `childId` implicit any
+  （Dexie `.get()` 結果的 `children` 對回調無 contextual typing；本檔既有
+  慣例是顯式註解，見 §6）。已修：改 `(childId: string)`，無行為改動。
+- **Phase 2 P2.3 重跑**：請再跑 `npm run check`（無新增 unit）；全綠即 P2.3 完成。
 - **下一步：P2.4**（Inspector 編輯 + 動作，規格見 §5b P2.4；Phase 1 的 5.8
   手動驗收在 P2.4/P2.6 UI 落地後可一併做，目前阻塞——沒有界面能觸發）。
 
@@ -599,6 +605,10 @@ static async createCompactionMessage(params: {
   字串可以。（5.7 第一輪 check 的錯之一）
 - **自訂 `waitFor` helper 的 find 要回 `T | null`**：`Array.find()` 回 `undefined`，
   要 `?? null` 才過型別。（5.7 第一輪 check 的錯之一）
+- **Dexie `.get()` 結果的 `children` 回調參數要顯式註解**：`database.service.ts`
+  內 `parent.children.filter/flatMap((childId) => …)` 的 `childId` 會 implicit any
+  ——一律寫 `(childId: string)`（既有 :534/:535/:769 皆如此；P2.3 第一輪 check
+  的錯就是漏註解）。
 - **`npm run check` 只有型別檢查**：`= svelte-kit sync && svelte-check`，**不含
   eslint**（lint 是獨立的 `npm run lint`，本工作流未跑過）。所以 class 成員順序
   （`perfectionist/sort-classes`，`useExperimentalDependencyDetection: true`）不會被

@@ -370,7 +370,7 @@ export class DatabaseService {
 				}
 
 				// Replace the entry in the parent's children with its children.
-				const rebuiltChildren = parent.children.flatMap((childId) =>
+				const rebuiltChildren = parent.children.flatMap((childId: string) =>
 					childId === cmpId ? entry.children : [childId]
 				);
 
