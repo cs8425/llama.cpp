@@ -9,7 +9,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；依 §5b 續做 P2.2 |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成待編譯確認（見 §2h）；P2.3 起未開始 |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -140,6 +140,32 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
 > I7（isChatLoading / isRunning / compacting）→ `contextAutoCompaction`
 > → threshold → plan。任一不過即靜默回，所以兩個觸發點可無條件 fire。
 
+## 2h. Phase 2 已交付檔案（P2.2，待編譯確認）
+
+| 檔案 | 改動 |
+| ---- | ---- |
+| `src/lib/stores/agentic/index.svelte.ts` | 新 private `compactBetweenTurns({ conversationId, lastPrompt, model, sessionMessages, signal })`（private 方法字母序放在 `buildFinalTimings` 與 `executeAgenticLoop` 之間）：gate `contextAutoCompaction && contextAutoCompactionInLoop` → path 解析（同 `compactConversation` 形狀：active → `activeMessages`；非 active → DB + `filterByLeafNodeId`）→ n_ctx（mirror `getContextSizeForConversation`：active → `contextStatsStore.contextTotal`；非 active → `getConversationModel(path) ?? modelsStore.activeModelId` → `getModelContextSize`，未知靜默回）→ threshold gate（`lastPrompt ?? Σ estimateApiMessageTokens(sessionMessages)` ≥ `nCtx × threshold%`）→ `planCompaction`（null 續跑）→ `preCompactionPath` snapshot（§3.10）→ `contextStatsStore.compacting` 包裹 → `summarizeMessages(plan, model \|\| null, signal, { maxTokens: contextSummaryMaxTokens, prompt: contextSummaryPrompt \|\| undefined })`（共享 flow model + abort signal）→ `createCompactionMessage`（parent = 路徑最後一則）→ active：`addMessageToActive` + `updateCurrentNode`；非 active：DB `updateCurrentNode` + `applyConversationUpdate` → `updateConversationTimestamp` → **重建 `sessionMessages`**：`buildLlmContext([...preCompactionPath, cmp], { excludeReasoning: false })`（§3.9：reasoning 不 strip）→ `toAgenticMessages(messages)` 原地 `splice` → toast「Context compacted: ~X → ~Y」；catch：abort 靜默、其餘 `toast.error`，舊 sessionMessages 續跑（fail-open）；finally：`compacting = false`。呼叫點：`executeAgenticLoop` loop body 最末（steering check 之後、`turn++` 之前），`lastPrompt: turnTimings?.prompt_n ?? null`、`model: effectiveModel`、`signal` 綁 flow abort。不做 in-loop preEncode（下一 turn 立刻 re-encode 新前綴） |
+| （同檔 imports） | `$lib/services/context`（`buildLlmContext` / `computeCompactionBudget` / `estimateApiMessageTokens` / `planCompaction` / `summarizeMessages` / `SUMMARY_CONTENT_PREFIX`）、`$lib/services/database.service`（`DatabaseService`）、`$lib/stores/chat/context-stats.svelte`（`contextStatsStore`，direct import 非 barrel）、`$lib/utils` 加 `filterByLeafNodeId` / `getConversationModel`、`svelte-sonner`（`toast`） |
+
+> 要點：
+> - 不能重用 `compactConversation`：其 I7 guard 查 `agenticStore.isRunning(convId)`，
+>   in-loop 時恆為 true 會被擋掉——所以獨立方法（規格 §5b P2.2）。
+> - summary 呼叫共享 flow 的 `effectiveModel`（03-§4.4「與 flow 共用同一 model」；
+>   single-model 模式即 `modelsStore.models[0]`）。
+> - `preCompactionPath` snapshot：active conv 的 `path` 就是 `activeMessages` 陣列本身，
+>   `addMessageToActive(cmp)` 會 push 進同一陣列（§3.10 陷阱）。builder 的 kept filter
+>   會按 id 濾掉重複 entry（結果正確），但 snapshot 與 `compactConversation` 一致、防漂移。
+> - 新循環 import `agentic ↔ context-stats`（context-stats 原本就 import agenticStore；
+>   agentic 新增 import contextStatsStore）——兩邊都只在 call time / derived 求值時引用，
+>   模組評估期不碰 binding，安全（同 §3.10 的 `chat ↔ context-stats`）。
+> - 非 active conv：`conversation.currNode` 是記憶體值（flow 期間只更新 DB、不更新記憶體），
+>   path 可能解析到舊 leaf——與 `compactConversation` 同行為（已知限制；要修則兩邊一起修）。
+> - 重建走 `toAgenticMessages`（規格明定）：其 TOOL 分支只保留 string content
+>   （array parts → `''`）。這與 flow 開頭 `toAgenticMessages(normalizedMessages)`
+>   的初始 session build 語義一致（兩邊都丟 tool image parts）；live push 的 parts
+>   （vision tool result）在 compaction 後會回到 mapper 語義——窄邊界情境，記錄在此。
+> - 無新純邏輯（policy / builder / summarize 皆既有）→ 無新 unit；store 層照慣例不 unit 測。
+
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
 ### 3.1 既有 broken state：`ChatRole` / `ChatMessageType` 原本未定義
@@ -264,7 +290,10 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   - 重跑：使用者跑了 `npm run check`（0 錯 0 警告）+
     `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（18/18 綠），
     **全綠**。P2.1 完成。
-- **下一步：P2.2**（agentic 迴圈 turn 之間再壓縮，規格見 §5b P2.2；
+- **Phase 2 P2.2 ✅ 已實做，待編譯確認**：變更見 §2h。
+  建議指令：`npm run check`（無新增 unit——P2.2 無新純邏輯，見 §5b P2.2 註；
+  store 層照慣例不 unit 測）。
+- **下一步：P2.3**（expand + chatStore 人工介入動作，規格見 §5b P2.3；
   Phase 1 的 5.8 手動驗收仍可並行，不阻塞）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）

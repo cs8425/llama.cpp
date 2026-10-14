@@ -29,11 +29,21 @@ import {
 	ToolCallType
 } from '$lib/enums';
 import { ChatService } from '$lib/services';
+import {
+	buildLlmContext,
+	computeCompactionBudget,
+	estimateApiMessageTokens,
+	planCompaction,
+	summarizeMessages,
+	SUMMARY_CONTENT_PREFIX
+} from '$lib/services/context';
+import { DatabaseService } from '$lib/services/database.service';
 import { ReadMediaService } from '$lib/services/read-media.service';
 import { SandboxService } from '$lib/services/sandbox.service';
 import { ToolsService } from '$lib/services/tools.service';
 // direct imports between stores, not via the barrel, to avoid circular deps
 import { AgenticGates } from '$lib/stores/agentic/gates.svelte';
+import { contextStatsStore } from '$lib/stores/chat/context-stats.svelte';
 import { conversationsStore } from '$lib/stores/conversations/index.svelte';
 import { mcpStore } from '$lib/stores/mcp/index.svelte';
 import { modelsStore } from '$lib/stores/models/index.svelte';
@@ -76,10 +86,13 @@ import type {
 import {
 	executeBrowserInfoTool,
 	executeGetDatetimeTool,
+	filterByLeafNodeId,
 	getAudioInputFormat,
+	getConversationModel,
 	isAbortError
 } from '$lib/utils';
 import { SvelteMap } from 'svelte/reactivity';
+import { toast } from 'svelte-sonner';
 
 function createDefaultSession(): AgenticSession {
 	return {
@@ -433,6 +446,135 @@ class AgenticStore {
 			prompt_ms: capturedTimings?.prompt_ms,
 			prompt_n: capturedTimings?.prompt_n
 		};
+	}
+
+	private async compactBetweenTurns(params: {
+		conversationId: string;
+		lastPrompt: number | null;
+		model: string;
+		sessionMessages: AgenticMessage[];
+		signal?: AbortSignal;
+	}): Promise<void> {
+		const { conversationId, lastPrompt, model, sessionMessages, signal } = params;
+		const config = settingsStore.config;
+
+		// Both switches: the master auto-compaction gate plus the in-loop
+		// opt-in (02-data-model §6).
+		if (!config.contextAutoCompaction || !config.contextAutoCompactionInLoop) return;
+
+		const conversation = conversationsStore.conversations.find((c) => c.id === conversationId);
+
+		if (!conversation) return;
+
+		// Root→leaf path: the live array for the active conversation, DB +
+		// leaf filter otherwise — the flow keeps running after the user
+		// navigates away (same shape as chatStore.compactConversation).
+		const isActive = conversationsStore.activeConversation?.id === conversationId;
+		let path: DatabaseMessage[];
+
+		if (isActive) {
+			path = conversationsStore.activeMessages;
+		} else {
+			const allMessages = await conversationsStore.getConversationMessages(conversationId);
+
+			path = conversation.currNode
+				? (filterByLeafNodeId(allMessages, conversation.currNode, false) as DatabaseMessage[])
+				: allMessages;
+		}
+
+		if (path.length === 0) return;
+
+		// n_ctx: the active model's context size for the active conversation,
+		// the conversation's own model (ROUTER) or the single served model
+		// otherwise (mirrors chatStore.getContextSizeForConversation).
+		let nCtx: number | null;
+
+		if (isActive) {
+			nCtx = contextStatsStore.contextTotal;
+		} else {
+			const modelName = getConversationModel(path) ?? modelsStore.activeModelId;
+
+			nCtx = modelName ? modelsStore.props.getModelContextSize(modelName) : null;
+		}
+
+		if (nCtx === null || nCtx <= 0) return;
+
+		// The turn's real prompt size when the server reported it, otherwise
+		// the same estimator the policy uses (03-architecture §4.4).
+		const effectiveLastPrompt =
+			lastPrompt ??
+			(sessionMessages as ApiChatMessageData[]).reduce(
+				(sum, message) => sum + estimateApiMessageTokens(message),
+				0
+			);
+
+		if (effectiveLastPrompt < nCtx * (config.contextCompactionThreshold / 100)) return;
+
+		const plan = planCompaction(path, computeCompactionBudget(nCtx, config));
+
+		if (!plan) return;
+
+		// Snapshot the pre-compaction path: for the active conversation `path`
+		// is the live activeMessages array, which addMessageToActive below
+		// mutates (context-enhance/06 §3.10).
+		const preCompactionPath = [...path];
+
+		contextStatsStore.compacting = true;
+
+		try {
+			// The summary call shares the flow's model and abort signal: stopping
+			// the flow aborts a running summary, which fails open below.
+			const summary = await summarizeMessages(plan, model || null, signal, {
+				maxTokens: config.contextSummaryMaxTokens,
+				prompt: config.contextSummaryPrompt.trim() || undefined
+			});
+
+			const cmp = await DatabaseService.createCompactionMessage({
+				compactionMeta: {
+					estimatedTokensBefore: plan.estimatedTokensBefore,
+					firstKeptMessageId: plan.firstKeptMessageId,
+					isSplitTurn: plan.isSplitTurn || undefined,
+					model: model || undefined,
+					summarizedCount: plan.toSummarize.length
+				},
+				content: `${SUMMARY_CONTENT_PREFIX} ${summary}`,
+				convId: conversationId,
+				parentId: path[path.length - 1].id
+			});
+
+			if (isActive) {
+				conversationsStore.addMessageToActive(cmp);
+				await conversationsStore.updateCurrentNode(cmp.id);
+			} else {
+				await DatabaseService.updateCurrentNode(conversationId, cmp.id);
+				conversationsStore.applyConversationUpdate(conversationId, { currNode: cmp.id });
+			}
+
+			conversationsStore.updateConversationTimestamp(conversationId);
+
+			// Rebuild the session history from the builder so the next turn sends
+			// [system, summary, kept…] (WYSIWYG). Reasoning is kept here; the
+			// per-turn strip stays in the request mapping (§3.9). In-place splice:
+			// the loop holds this reference.
+			const { messages } = await buildLlmContext([...preCompactionPath, cmp], {
+				excludeReasoning: false
+			});
+
+			sessionMessages.splice(0, sessionMessages.length, ...toAgenticMessages(messages));
+
+			const estimatedAfter = plan.estimatedTokensAfter + Math.ceil(cmp.content.length / 4);
+
+			toast.success(`Context compacted: ~${plan.estimatedTokensBefore} → ~${estimatedAfter} tokens`);
+		} catch (error) {
+			// Fail-open: no cmp (or cmp without the state updates) — the loop
+			// continues with the old sessionMessages. An abort is the user
+			// stopping the flow; no toast noise for that.
+			if (!signal?.aborted) {
+				toast.error(`Compaction failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+			}
+		} finally {
+			contextStatsStore.compacting = false;
+		}
 	}
 
 	private async executeAgenticLoop(params: {
@@ -994,6 +1136,18 @@ class AgenticStore {
 
 				return;
 			}
+
+			// Between turns: if this turn's prompt reached the threshold, compact
+			// the context so long flows do not outgrow the model window
+			// (context-enhance/03 §4.4). Fail-open: any issue keeps the old
+			// sessionMessages and the loop continues unchanged.
+			await this.compactBetweenTurns({
+				conversationId,
+				lastPrompt: turnTimings?.prompt_n ?? null,
+				model: effectiveModel,
+				sessionMessages,
+				signal
+			});
 
 			turn++;
 		}
