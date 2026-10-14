@@ -875,7 +875,7 @@ static async createCompactionMessage(params: {
   （`message.convId` 可用）。進行中（`compacting`）disabled。
 - client 測試：`tests/client/chat-message-compaction.svelte.test.ts` 擴編（4 → 10 支）。
 
-### P2.6 gauge 列 + 第三入口 + 快捷鍵（04-§2.3 / §3）
+### P2.6 gauge 列 + 第三入口 + 快捷鍵（04-§2.3 / §3）✅ 已實做、待編譯確認（變更見 §2p）
 - `ContextGaugePopup.svelte` body：inspector 連結上方加列——
   `compacting` 時「Compacting context…」（spinner）；有生效 cmp 時
   「Compacted: N messages · ~X tokens saved」（X = `estimatedTokensBefore −`
