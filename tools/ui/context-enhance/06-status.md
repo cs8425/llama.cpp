@@ -9,7 +9,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 起未開始 |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成（見 §2i，**待使用者編譯確認**） |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -166,6 +166,35 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
 >   （vision tool result）在 compaction 後會回到 mapper 語義——窄邊界情境，記錄在此。
 > - 無新純邏輯（policy / builder / summarize 皆既有）→ 無新 unit；store 層照慣例不 unit 測。
 
+## 2i. Phase 2 已交付檔案（P2.3，待使用者編譯確認）
+
+### 修改
+
+| 檔案 | 改動 |
+| ---- | ---- |
+| `src/lib/services/database.service.ts` | `expandCompactionMessage(convId, cmpId)`：transaction（conversations + messages）內驗證 convId 相符、`type === COMPACTION`、parent 存在（違反即 throw）→ 子節點 bulkGet 後逐則 re-attach 到 `cmp.parent`（順序保留、缺漏 id 略過）→ `parent.children` 以 flatMap 把 cmp 替換成它的子節點 → 刪 cmp 列 → `conv.currNode === cmpId` 時回 `cmp.parent`（同 transaction）→ 回新 currNode id；caller 負責 in-memory mirror |
+| `src/lib/stores/chat/index.svelte.ts` | 4 個新 public 方法（皆 I7 guard + active/non-active 雙路徑 mirror，明細見下表）＋ 5 個新 private helper：`resolveConversationPath(convId)`（從 `compactConversation` 提出的 path 解析：active → `activeMessages`、非 active → DB + `filterByLeafNodeId`、conv 不存在回 null；`compactConversation` 改走它，行為不變）、`findCompactionEntry(path, cmpId)`（id + `type === COMPACTION` 雙驗證，回 `{entry, index}`）、`boundaryIndexOf(path, entry)`（I3：失效回 -1）、`headLengthOf(path)`（I1 system head）、`summarizeRegion(path, boundaryIndex, isSplitTurn)`（recompact 與斷點後移共用：組 `CompactionPlan`（`toSummarize = path[head..boundary)`、I2 含舊 cmp；token 估計用同一 estimator）→ `summarizeMessages`（model 走 `resolveCompactionModel`、options 走 `contextSummaryMaxTokens` / `contextSummaryPrompt`）） |
+| （同檔 imports） | 移除 unused `MIN_SUMMARIZE_TOKENS`（P2.1 常數上移後的殘留 import，全檔無引用）；`$lib/services/context` import 加 `type CompactionPlan` |
+
+### 四個 public 方法（皆 fail-safe、無靜默資料遺失）
+
+| 方法 | 行為 |
+| ---- | ---- |
+| `updateCompactionSummary(convId, cmpId, plainText)` | `content = SUMMARY_CONTENT_PREFIX + ' ' + trimmed`（與建節點同一拼法）；`compactionMeta` 不動（02-§4）；空文字 no-op；DB `updateMessage` + active mirror `updateMessageAtIndex`；toast |
+| `recompactConversationEntry(convId, cmpId)` | 對**同一 summarize 區**（`path[head..boundary)`、I2 含舊 cmp）重跑 summary → **更新同一節點** content + meta（`model` / `estimatedTokensBefore` 重算；`firstKeptMessageId` / `summarizedCount` / `isSplitTurn` 保持）；boundary 失效 → toast 回；`compacting` 包裹；失敗 → toast、節點不變（fail-open） |
+| `expandCompactionEntry(convId, cmpId)` | 走 `DatabaseService.expandCompactionMessage`；active conv：`applyConversationUpdate({ currNode })` + `refreshActiveMessages()`（照 delete flow 的 mirror 模式重建 path）；非 active 只 mirror；toast |
+| `moveCompactionBoundary(convId, cmpId, newFirstKeptMessageId)` | I4 驗證（新路徑上須為 user/assistant；tool/system toast 拒）；同位置 no-op；**前移**（kept 變長）只改 meta（`firstKeptMessageId` / `summarizedCount` / `isSplitTurn` 跟隨新邊界 role；02-§4：舊 summary 多涵蓋一點、無害）；**後移**（kept 變短）走 `summarizeRegion` 對擴大區強制重摘要（防靜默遺失）＋更新 content + meta；`compacting` 包裹 |
+
+> 要點：
+> - 無 preEncode：P2.3 規格未要求（prefix 改變由下一輪自然 re-encode；一次性成本可接受）。
+> - 無新純邏輯（builder / policy / summarize 皆複用）→ 無新 unit；DB 層是 Dexie、
+>   store 協調層照慣例不 unit 測（同 5.4/5.5 先例）。
+> - `compactConversation` 的 path 解析 refactor：原樣移入 `resolveConversationPath`
+>   （行為不變；4 個新方法共用，防雙路徑 mirror 漂移）。
+> - 型別安全：`compactionMeta` 是 optional，spread `CompactionMeta | undefined` 會產出
+>   無法指派給 `CompactionMeta` 的 union 型別 → recompact / move 都以 `baseMeta`
+>   顯式 guard（同時防損毀節點；boundary 有效時 meta 恆在，guard 只跑型別收斂）。
+
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
 ### 3.1 既有 broken state：`ChatRole` / `ChatMessageType` 原本未定義
@@ -292,8 +321,13 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
     **全綠**。P2.1 完成。
 - **Phase 2 P2.2 ✅ 完成**：使用者跑了 `npm run check`，確認全綠
   （無新增 unit——P2.2 無新純邏輯，見 §5b P2.2 註；store 層照慣例不 unit 測）。
-- **下一步：P2.3**（expand + chatStore 人工介入動作，規格見 §5b P2.3；
-  Phase 1 的 5.8 手動驗收仍可並行，不阻塞）。
+- **Phase 2 P2.3 ✅ 完成（待使用者編譯確認）**：變更見 §2i。
+  - 請跑 `npm run check`（無新增 unit——P2.3 無新純邏輯，DB 層是 Dexie、
+    store 協調層照慣例不 unit 測，同 5.4/5.5 先例）。
+  - 注意：`compactConversation` 的 path 解析被移入 `resolveConversationPath`
+    （原樣搬移、行為不變）；若 check 有問題優先看這塊與新 import 區塊。
+- **下一步：P2.4**（Inspector 編輯 + 動作，規格見 §5b P2.4；Phase 1 的 5.8
+  手動驗收在 P2.4/P2.6 UI 落地後可一併做，目前阻塞——沒有界面能觸發）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 

@@ -318,6 +318,80 @@ export class DatabaseService {
 	}
 
 	/**
+	 * Expands a compaction entry: its children are re-attached to the entry's
+	 * parent (replacing the entry in the parent's children array) and the entry
+	 * row is deleted, restoring the full context on the path (context-enhance/02 §4).
+	 *
+	 * When the conversation's currNode is the entry itself it moves back to the
+	 * entry's parent (same transaction). The caller owns the in-memory mirror
+	 * (activeMessages / conversation rows).
+	 *
+	 * @param convId - Conversation ID (must match the entry's convId)
+	 * @param cmpId - ID of the compaction entry to expand
+	 * @returns The conversation's current node id after the expand
+	 * @throws Error when the entry does not exist, is not a compaction entry, or its parent no longer exists
+	 */
+	static async expandCompactionMessage(convId: string, cmpId: string): Promise<string> {
+		return await db.transaction(
+			'rw',
+			[db[IDXDB_TABLES.conversations], db[IDXDB_TABLES.messages]],
+			async () => {
+				const entry = await db[IDXDB_TABLES.messages].get(cmpId);
+
+				if (!entry || entry.convId !== convId) {
+					throw new Error(`Compaction message ${cmpId} not found in conversation ${convId}`);
+				}
+
+				if (entry.type !== MessageType.COMPACTION) {
+					throw new Error(`Message ${cmpId} is not a compaction entry`);
+				}
+
+				if (!entry.parent) {
+					throw new Error(`Compaction message ${cmpId} has no parent`);
+				}
+
+				const parent = await db[IDXDB_TABLES.messages].get(entry.parent);
+
+				if (!parent) {
+					throw new Error(`Parent message ${entry.parent} not found`);
+				}
+
+				// Re-attach each child to the grandparent, preserving order.
+				if (entry.children.length > 0) {
+					const children = await db[IDXDB_TABLES.messages].bulkGet(entry.children);
+
+					for (let i = 0; i < entry.children.length; i++) {
+						const child = children[i];
+
+						if (!child) continue;
+
+						await db[IDXDB_TABLES.messages].put({ ...child, parent: entry.parent });
+					}
+				}
+
+				// Replace the entry in the parent's children with its children.
+				const rebuiltChildren = parent.children.flatMap((childId) =>
+					childId === cmpId ? entry.children : [childId]
+				);
+
+				await db[IDXDB_TABLES.messages].put({ ...parent, children: rebuiltChildren });
+				await db[IDXDB_TABLES.messages].delete(cmpId);
+
+				const conversation = await db[IDXDB_TABLES.conversations].get(convId);
+				const currNode = conversation?.currNode ?? entry.parent;
+
+				if (currNode === cmpId) {
+					await db[IDXDB_TABLES.conversations].update(convId, { currNode: entry.parent });
+
+					return entry.parent;
+				}
+
+				return currNode;
+			}
+		);
+	}
+
+	/**
 	 * Deletes a conversation and all its messages.
 	 *
 	 * @param id - Conversation ID

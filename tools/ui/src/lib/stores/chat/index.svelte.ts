@@ -19,7 +19,7 @@ import {
 } from '$lib/enums';
 import { ChatService } from '$lib/services/chat.service';
 import {
-	MIN_SUMMARIZE_TOKENS,
+	type CompactionPlan,
 	SUMMARY_CONTENT_PREFIX,
 	computeCompactionBudget,
 	estimateTokens,
@@ -551,26 +551,10 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 
 		if (contextStatsStore.compacting) return;
 
-		const conversation = conversationsStore.conversations.find((c) => c.id === convId);
-
-		if (!conversation) return;
-
-		// Root→leaf path: the live array for the active conversation, DB +
-		// leaf filter otherwise (same shape as loadConversation).
 		const isActive = conversationsStore.activeConversation?.id === convId;
-		let path: DatabaseMessage[];
+		const path = await this.resolveConversationPath(convId);
 
-		if (isActive) {
-			path = conversationsStore.activeMessages;
-		} else {
-			const allMessages = await conversationsStore.getConversationMessages(convId);
-
-			path = conversation.currNode
-				? (filterByLeafNodeId(allMessages, conversation.currNode, false) as DatabaseMessage[])
-				: allMessages;
-		}
-
-		if (path.length === 0) return;
+		if (!path || path.length === 0) return;
 
 		const config = settingsStore.config;
 		const nCtx = this.getContextSizeForConversation(convId, path);
@@ -691,6 +675,351 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		if (!serverStore.isRouterMode) return null;
 
 		return modelsStore.selectedModelName ?? getConversationModel(path);
+	}
+
+	/**
+	 * Expands a compaction entry: the entry is deleted, its children are
+	 * re-attached to its parent and the full context is restored
+	 * (context-enhance/02 §4). The active conversation's message list is
+	 * re-derived from the new currNode.
+	 */
+	async expandCompactionEntry(convId: string, cmpId: string): Promise<void> {
+		if (this.isChatLoading(convId) || agenticStore.isRunning(convId)) return;
+
+		try {
+			const newCurrNode = await DatabaseService.expandCompactionMessage(convId, cmpId);
+
+			conversationsStore.applyConversationUpdate(convId, { currNode: newCurrNode });
+
+			if (conversationsStore.activeConversation?.id === convId) {
+				await conversationsStore.refreshActiveMessages();
+			}
+
+			conversationsStore.updateConversationTimestamp(convId);
+			toast.success('Full context restored');
+		} catch (error) {
+			console.error('Failed to expand compaction entry:', error);
+			toast.error(`Expand failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+		}
+	}
+
+	/**
+	 * Moves a compaction entry's kept-region boundary (context-enhance/02 §4):
+	 * forward (kept grows) only updates the metadata — the existing summary now
+	 * covers a bit more, which is harmless; backward (kept shrinks) re-summarizes
+	 * the enlarged region so no message is silently lost. The new boundary must
+	 * be a user or assistant message on the path (I4).
+	 */
+	async moveCompactionBoundary(
+		convId: string,
+		cmpId: string,
+		newFirstKeptMessageId: string
+	): Promise<void> {
+		if (this.isChatLoading(convId) || agenticStore.isRunning(convId)) return;
+
+		if (contextStatsStore.compacting) return;
+
+		const path = await this.resolveConversationPath(convId);
+
+		if (!path) return;
+
+		const found = this.findCompactionEntry(path, cmpId);
+
+		if (!found) {
+			toast.info('Compaction entry not found');
+
+			return;
+		}
+
+		const currentIndex = this.boundaryIndexOf(path, found.entry);
+
+		if (currentIndex === -1) {
+			toast.info('Compaction boundary no longer exists — compact again to recreate it');
+
+			return;
+		}
+
+		const newIndex = path.findIndex((message) => message.id === newFirstKeptMessageId);
+
+		if (newIndex === -1 || newIndex === currentIndex) return;
+
+		// I4: the kept region must start on a user or assistant message, never a
+		// tool result or the system prompt.
+		if (path[newIndex].role !== MessageRole.USER && path[newIndex].role !== MessageRole.ASSISTANT) {
+			toast.info('The boundary can only be placed before a user or assistant message');
+
+			return;
+		}
+
+		if (newIndex <= this.headLengthOf(path)) {
+			toast.info('Nothing to summarize');
+
+			return;
+		}
+
+		const baseMeta = found.entry.compactionMeta;
+
+		if (!baseMeta) {
+			toast.info('Compaction entry is missing metadata — compact again to recreate it');
+
+			return;
+		}
+
+		const headLength = this.headLengthOf(path);
+		const metaUpdates = {
+			firstKeptMessageId: newFirstKeptMessageId,
+			isSplitTurn: path[newIndex].role === MessageRole.ASSISTANT || undefined,
+			summarizedCount: path.slice(headLength, newIndex).length
+		};
+
+		if (newIndex < currentIndex) {
+			// Forward move: metadata only — the summary already covers the region.
+			const updates = {
+				compactionMeta: { ...baseMeta, ...metaUpdates }
+			};
+
+			try {
+				await DatabaseService.updateMessage(cmpId, updates);
+
+				if (conversationsStore.activeConversation?.id === convId) {
+					conversationsStore.updateMessageAtIndex(found.index, updates);
+				}
+
+				conversationsStore.updateConversationTimestamp(convId);
+				toast.success('Boundary moved');
+			} catch (error) {
+				console.error('Failed to move compaction boundary:', error);
+				toast.error('Failed to move boundary');
+			}
+
+			return;
+		}
+
+		// Backward move: the enlarged region must be re-summarized (02-§4).
+		contextStatsStore.compacting = true;
+
+		try {
+			const summary = await this.summarizeRegion(
+				path,
+				newIndex,
+				path[newIndex].role === MessageRole.ASSISTANT
+			);
+			const model = this.resolveCompactionModel(path);
+			const updates = {
+				compactionMeta: {
+					...baseMeta,
+					...metaUpdates,
+					estimatedTokensBefore: path.reduce((sum, message) => sum + estimateTokens(message), 0),
+					model: model ?? undefined
+				},
+				content: `${SUMMARY_CONTENT_PREFIX} ${summary}`
+			};
+
+			await DatabaseService.updateMessage(cmpId, updates);
+
+			if (conversationsStore.activeConversation?.id === convId) {
+				conversationsStore.updateMessageAtIndex(found.index, updates);
+			}
+
+			conversationsStore.updateConversationTimestamp(convId);
+			toast.success('Boundary moved — summary regenerated');
+		} catch (error) {
+			toast.error(`Boundary move failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+		} finally {
+			contextStatsStore.compacting = false;
+		}
+	}
+
+	/**
+	 * Re-summarizes the same region a compaction entry covers
+	 * (path[head..boundary), including older entries per I2) and updates the
+	 * entry's content and metadata in place (context-enhance/02 §4). A missing
+	 * boundary (deletion/branching) is surfaced, not repaired.
+	 */
+	async recompactConversationEntry(convId: string, cmpId: string): Promise<void> {
+		if (this.isChatLoading(convId) || agenticStore.isRunning(convId)) return;
+
+		if (contextStatsStore.compacting) return;
+
+		const path = await this.resolveConversationPath(convId);
+
+		if (!path) return;
+
+		const found = this.findCompactionEntry(path, cmpId);
+
+		if (!found) {
+			toast.info('Compaction entry not found');
+
+			return;
+		}
+
+		const boundaryIndex = this.boundaryIndexOf(path, found.entry);
+
+		if (boundaryIndex === -1) {
+			toast.info('Compaction boundary no longer exists — compact again to recreate it');
+
+			return;
+		}
+
+		const baseMeta = found.entry.compactionMeta;
+
+		if (!baseMeta) {
+			toast.info('Compaction entry is missing metadata — compact again to recreate it');
+
+			return;
+		}
+
+		if (boundaryIndex <= this.headLengthOf(path)) {
+			toast.info('Nothing to summarize');
+
+			return;
+		}
+
+		contextStatsStore.compacting = true;
+
+		try {
+			const summary = await this.summarizeRegion(
+				path,
+				boundaryIndex,
+				baseMeta.isSplitTurn === true
+			);
+			const model = this.resolveCompactionModel(path);
+			const updates = {
+				compactionMeta: {
+					...baseMeta,
+					estimatedTokensBefore: path.reduce((sum, message) => sum + estimateTokens(message), 0),
+					model: model ?? undefined
+				},
+				content: `${SUMMARY_CONTENT_PREFIX} ${summary}`
+			};
+
+			await DatabaseService.updateMessage(cmpId, updates);
+
+			if (conversationsStore.activeConversation?.id === convId) {
+				conversationsStore.updateMessageAtIndex(found.index, updates);
+			}
+
+			conversationsStore.updateConversationTimestamp(convId);
+			toast.success('Summary regenerated');
+		} catch (error) {
+			toast.error(`Re-summarization failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+		} finally {
+			contextStatsStore.compacting = false;
+		}
+	}
+
+	/**
+	 * Edits a compaction entry's summary text in place (manual intervention,
+	 * context-enhance/02 §4): the content is rewritten with the same prefix the
+	 * node was created with; the metadata is untouched. Takes effect on the next
+	 * turn's payload (the builder is WYSIWYG with the stored content).
+	 */
+	async updateCompactionSummary(convId: string, cmpId: string, plainText: string): Promise<void> {
+		const trimmed = plainText.trim();
+
+		if (!trimmed) return;
+
+		if (this.isChatLoading(convId) || agenticStore.isRunning(convId)) return;
+
+		const path = await this.resolveConversationPath(convId);
+
+		if (!path) return;
+
+		const found = this.findCompactionEntry(path, cmpId);
+
+		if (!found) return;
+
+		const content = `${SUMMARY_CONTENT_PREFIX} ${trimmed}`;
+
+		try {
+			await DatabaseService.updateMessage(cmpId, { content });
+
+			if (conversationsStore.activeConversation?.id === convId) {
+				conversationsStore.updateMessageAtIndex(found.index, { content });
+			}
+
+			conversationsStore.updateConversationTimestamp(convId);
+			toast.success('Summary updated');
+		} catch (error) {
+			console.error('Failed to update compaction summary:', error);
+			toast.error('Failed to update summary');
+		}
+	}
+
+	/** Index of the entry's boundary message on the path, or -1 when invalid (I3). */
+	private boundaryIndexOf(path: DatabaseMessage[], entry: DatabaseMessage): number {
+		const boundaryId = entry.compactionMeta?.firstKeptMessageId ?? '';
+
+		return boundaryId ? path.findIndex((message) => message.id === boundaryId) : -1;
+	}
+
+	/** The compaction entry at `cmpId` on the path (with its index), or null. */
+	private findCompactionEntry(
+		path: DatabaseMessage[],
+		cmpId: string
+	): { entry: DatabaseMessage; index: number } | null {
+		const index = path.findIndex((message) => message.id === cmpId);
+
+		if (index === -1 || path[index].type !== MessageType.COMPACTION) return null;
+
+		return { entry: path[index], index };
+	}
+
+	/** Length of the system-prompt head of a path (the head is never summarized, I1). */
+	private headLengthOf(path: DatabaseMessage[]): number {
+		return path[0]?.role === MessageRole.SYSTEM ? 1 : 0;
+	}
+
+	/**
+	 * Root→leaf path of a conversation: the live array for the active
+	 * conversation, DB + leaf filter otherwise (same shape as loadConversation).
+	 * null when the conversation does not exist.
+	 */
+	private async resolveConversationPath(convId: string): Promise<DatabaseMessage[] | null> {
+		const conversation = conversationsStore.conversations.find((c) => c.id === convId);
+
+		if (!conversation) return null;
+
+		if (conversationsStore.activeConversation?.id === convId) {
+			return conversationsStore.activeMessages;
+		}
+
+		const allMessages = await conversationsStore.getConversationMessages(convId);
+
+		return conversation.currNode
+			? (filterByLeafNodeId(allMessages, conversation.currNode, false) as DatabaseMessage[])
+			: allMessages;
+	}
+
+	/**
+	 * Shared summary call for the manual re-summarizations (recompact, backward
+	 * boundary move): resolves the model like compactConversation, applies the
+	 * configured summary options and summarizes the region before
+	 * `boundaryIndex` (the system-prompt head excluded).
+	 */
+	private async summarizeRegion(
+		path: DatabaseMessage[],
+		boundaryIndex: number,
+		isSplitTurn: boolean
+	): Promise<string> {
+		const headLength = this.headLengthOf(path);
+		const config = settingsStore.config;
+		const plan: CompactionPlan = {
+			cutIndex: boundaryIndex,
+			estimatedTokensAfter: path
+				.slice(boundaryIndex)
+				.reduce((sum, message) => sum + estimateTokens(message), 0),
+			estimatedTokensBefore: path.reduce((sum, message) => sum + estimateTokens(message), 0),
+			firstKeptMessageId: path[boundaryIndex].id,
+			isSplitTurn,
+			kept: path.slice(boundaryIndex),
+			toSummarize: path.slice(headLength, boundaryIndex)
+		};
+
+		return await summarizeMessages(plan, this.resolveCompactionModel(path), undefined, {
+			maxTokens: config.contextSummaryMaxTokens,
+			prompt: config.contextSummaryPrompt.trim() || undefined
+		});
 	}
 
 	/**
