@@ -9,7 +9,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成待編譯確認（見 §2h）；P2.3 起未開始 |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 起未開始 |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -140,7 +140,7 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
 > I7（isChatLoading / isRunning / compacting）→ `contextAutoCompaction`
 > → threshold → plan。任一不過即靜默回，所以兩個觸發點可無條件 fire。
 
-## 2h. Phase 2 已交付檔案（P2.2，待編譯確認）
+## 2h. Phase 2 已交付檔案（P2.2，已確認）
 
 | 檔案 | 改動 |
 | ---- | ---- |
@@ -290,9 +290,8 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   - 重跑：使用者跑了 `npm run check`（0 錯 0 警告）+
     `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（18/18 綠），
     **全綠**。P2.1 完成。
-- **Phase 2 P2.2 ✅ 已實做，待編譯確認**：變更見 §2h。
-  建議指令：`npm run check`（無新增 unit——P2.2 無新純邏輯，見 §5b P2.2 註；
-  store 層照慣例不 unit 測）。
+- **Phase 2 P2.2 ✅ 完成**：使用者跑了 `npm run check`，確認全綠
+  （無新增 unit——P2.2 無新純邏輯，見 §5b P2.2 註；store 層照慣例不 unit 測）。
 - **下一步：P2.3**（expand + chatStore 人工介入動作，規格見 §5b P2.3；
   Phase 1 的 5.8 手動驗收仍可並行，不阻塞）。
 

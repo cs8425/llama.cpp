@@ -35,8 +35,8 @@
 
 ### Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮
 
-- [ ] `onFlowComplete` 自動壓縮檢查(02-§6 條件)
-- [ ] agentic `executeAgenticLoop` turn 之間再壓縮(03-§4.4):
+- [x] `onFlowComplete` 自動壓縮檢查(02-§6 條件)
+- [x] agentic `executeAgenticLoop` turn 之間再壓縮(03-§4.4):
       plan → summarize → 建 cmp → 重建 `sessionMessages` → 續跑;
       fail-open;signal 綁 flow abort;`contextAutoCompactionInLoop` 開關
 - [ ] Inspector 編輯:summary 文字 / 斷點選擇器(前移安全、後移強制重摘要)
