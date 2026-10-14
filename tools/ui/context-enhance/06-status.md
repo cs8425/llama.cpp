@@ -9,7 +9,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成（待編譯確認，見 §4）；依 §5b 繼續 |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；依 §5b 續做 P2.2 |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -127,14 +127,14 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
 | `tests/client/context-inspector.svelte.test.ts:243` | 型別錯：`.find()` 回 `HTMLButtonElement \| undefined`，自訂 `waitFor` 要 `Node \| null` | 箭尾加 `?? null` |
 | `tests/unit/compaction-policy.test.ts:139` | 型別錯：`format: 'wav'` 字面量不能指派給 `AudioInputFormat`（= `FileTypeAudio.WAV \| FileTypeAudio.MP3`） | 改 `FileTypeAudio.WAV`（import 加 `FileTypeAudio`） |
 
-## 2g. Phase 2 已交付檔案（P2.1，待編譯確認）
+## 2g. Phase 2 已交付檔案（P2.1，已確認；第一輪修復見 §4）
 
 | 檔案 | 改動 |
 | ---- | ---- |
 | `src/lib/services/context/compaction-policy.ts` | `MIN_SUMMARIZE_TOKENS = 2000` 常數（原在 chat store，上移為 policy 擁有）；`CompactionSettings`（structural pick，policy 不 import settings 型別）；`computeCompactionBudget(nCtx, settings)`（02-§3.3 公式） |
 | `src/lib/services/context/index.ts` | barrel 加 `computeCompactionBudget` / `MIN_SUMMARIZE_TOKENS` / `CompactionSettings` |
 | `src/lib/stores/chat/index.svelte.ts` | `compactConversation` auto gate 加 `contextAutoCompaction` 總開關（auto 時先查；手動照樣跳過開關與 threshold）；budget 改走 `computeCompactionBudget`（刪本機 `MIN_SUMMARIZE_TOKENS` 常數與 `CompactionBudget` import）；`streamChatCompletion` 兩個觸發點（fire-and-forget + catch）：①非 agentic `onComplete` 最末（pending 重送之後）②agentic `agenticResult.handled` 區塊末（pending steering 之後）——不在 `onFlowComplete` 回調內，因該時點 `isRunning` 仍 true 會被 I7 guard 擋 |
-| `tests/unit/compaction-policy.test.ts` | +2 用例（`computeCompactionBudget`：keep budget 公式 floor(32768×0.2)−1536；min 欄位透傳 + `minSummarizeTokens` pin 到常數） |
+| `tests/unit/compaction-policy.test.ts` | +2 用例（`computeCompactionBudget`：keep budget 公式 floor(32768×0.2)−1536；min 欄位透傳 + `minSummarizeTokens` pin 到常數）；`CompactionSettings` import 改自 `$lib/services/context/compaction-policy`（見 §4 第一輪修復） |
 
 > 觸發語義：`compactConversation(convId, { auto: true })` 內部依序查
 > I7（isChatLoading / isRunning / compacting）→ `contextAutoCompaction`
@@ -254,9 +254,18 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
   2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。
   3. 無 cmp 對話行為與現行完全一致（context-builder.test.ts 的回归測試保證）。
-- **Phase 2 P2.1（目前停在這）**：變更完成（§2g），等使用者跑 `npm run check` +
-  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（18 用例，含 2 新）確認。
-  全綠後續做 P2.2（agentic 迴圈 turn 之間再壓縮，規格見 §5b）。
+- **Phase 2 P2.1 ✅ 完成**：變更見 §2g。
+  - 第一輪：使用者跑了 `npm run check` +
+    `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（18/18 綠）。
+    check 抓到 2 型別錯：`CompactionSettings` 在 `compaction-policy.ts` 定義
+    （structural pick 決策，§2g），但 barrel `index.ts` 與 test 檔都從
+    `./types` import → 已修（barrel 改 `export type { CompactionSettings } from
+    './compaction-policy'`；test 改自 `compaction-policy` import）。無行為改動。
+  - 重跑：使用者跑了 `npm run check`（0 錯 0 警告）+
+    `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（18/18 綠），
+    **全綠**。P2.1 完成。
+- **下一步：P2.2**（agentic 迴圈 turn 之間再壓縮，規格見 §5b P2.2；
+  Phase 1 的 5.8 手動驗收仍可並行，不阻塞）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 

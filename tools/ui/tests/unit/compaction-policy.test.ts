@@ -10,7 +10,8 @@ import {
 	MIN_SUMMARIZE_TOKENS,
 	planCompaction
 } from '$lib/services/context/compaction-policy';
-import type { CompactionBudget, CompactionSettings } from '$lib/services/context/types';
+import type { CompactionSettings } from '$lib/services/context/compaction-policy';
+import type { CompactionBudget } from '$lib/services/context/types';
 import type { ApiChatMessageData } from '$lib/types/api';
 import type { DatabaseMessage, DatabaseMessageExtra } from '$lib/types/database';
 import { describe, expect, it } from 'vitest';

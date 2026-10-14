@@ -14,6 +14,7 @@ export {
 	MIN_SUMMARIZE_TOKENS,
 	planCompaction
 } from './compaction-policy';
+export type { CompactionSettings } from './compaction-policy';
 export {
 	buildSummaryTranscript,
 	DEFAULT_SUMMARY_PROMPT,
@@ -25,7 +26,6 @@ export type { SummarizeOptions } from './summarize';
 export type {
 	CompactionBudget,
 	CompactionPlan,
-	CompactionSettings,
 	ContextBuildOptions,
 	ContextBuildResult,
 	ContextCompactionInfo
