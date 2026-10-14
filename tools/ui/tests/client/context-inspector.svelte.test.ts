@@ -208,8 +208,33 @@ function unpatchActiveMessagesSetter() {
 	activeMessagesSetPatched = false;
 }
 
+// TEMP-DIAG: the setter never fired, so the change must be an IN-PLACE
+// mutation of the proxied array (Svelte tracks proxy property writes, which
+// re-runs the effect without touching the setter). Wrap the array in a
+// logging proxy to capture the mutation's stack trace. The afterEach reset
+// (activeMessages = []) replaces the source value, discarding the wrapper.
+function watchArrayMutations() {
+	const arr = conversationsStore.activeMessages;
+
+	const handler: ProxyHandler<DatabaseMessage[]> = {
+		set(target, prop, value) {
+			console.log(`[diag] MUTATE set [${String(prop)}]`, new Error('mutate-trace').stack);
+
+			return Reflect.set(target, prop, value);
+		},
+		deleteProperty(target, prop) {
+			console.log(`[diag] MUTATE delete [${String(prop)}]`, new Error('mutate-trace').stack);
+
+			return Reflect.deleteProperty(target, prop);
+		}
+	};
+
+	conversationsStore.activeMessages = new Proxy(arr, handler);
+}
+
 async function openInspector() {
 	patchActiveMessagesSetter();
+	watchArrayMutations();
 
 	const { unmount } = render(DialogContextInspector, { open: true });
 
