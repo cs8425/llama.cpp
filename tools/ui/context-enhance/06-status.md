@@ -3,15 +3,17 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**P2.6 已實做、待使用者編譯確認**——gauge popup 的
-> compaction 狀態列（`compacting` spinner 列 / 生效 cmp 的
-> 「Compacted: N messages · ~X tokens saved」同步節省估算列，純函式
-> `estimateCompactionSavings` 進 policy + 6 支新 unit）、`ChatFormActions`
-> 的 Eye icon 第三入口（新 `ChatFormActionInspectContext` 元件，
-> `chatStore.isLoading` 時 disabled、tooltip 帶快捷鍵）、`Shift+Ctrl/Cmd+I`
-> 快捷鍵（hook 內直接動 store、loading/無 active conv 不動作；`KeyboardKey`
-> 加 `I_LOWER`/`I_UPPER`）；新 client suite
-> `tests/client/context-gauge-compaction.svelte.test.ts`（8 支）。變更見 §2p。
+> **恢復點（最新）**：**P2.6 第一輪編譯/測試確認的錯誤已全數修復（見 §2q）、
+> 待使用者重跑確認**——第一輪 `npm run check` 9 型別錯 + client suite 5/8 掛：
+> 3 支 gauge 列用了 `vitest-browser-svelte` `RenderResult` 不存在的
+> testing-library API（`queryByText` / `findByText` / `Locator.parentElement` /
+> `getByText(fn)`）、2 支 form 入口因 `ChatFormActions` 獨立渲染缺
+> `Tooltip.Provider` 炸掉（`ChatFormActionAddDropdown` 的 `Tooltip.Root`）。
+> 修復全在測試端（元件/store 零改動）：gauge 3 支改 `document.querySelector` +
+> 新 `waitFor`/`bodyText()` helper（同 `context-inspector` 慣例）、form 2 支改
+> 渲染新 `ChatFormActionsWrapper`（`Tooltip.Provider` 包 `ChatFormActions`，同
+> `ChatFormTestWrapper` 先例）、順手修 2 支 latent `expect(locator)` →
+> `await expect.element(locator)`。P2.6 交付明細見 §2p。
 > 要跑的指令：`npm run check` +
 > `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
 > `npx vitest --project=client --run tests/client/context-gauge-compaction.svelte.test.ts`
@@ -442,6 +444,61 @@ boundary 候选集在兩端都排除 `index <= headLength`：
 >   測試、純函式走 unit（同 P2.4/P2.5 先例）。
 > - Storybook：P2.6 無新 story（gauge 列狀態由 client 測試覆蓋；inspector story
 >   三態仍留待後續，同 5.7 的偏差記錄）。
+
+## 2q. P2.6 第一輪編譯/測試確認的修復（重跑待確認）
+
+第一輪 `npm run check`（9 錯）+ client suite（5/8 掛）：
+
+- **9 型別錯（全在 `context-gauge-compaction.svelte.test.ts` gauge 段）**：
+  測試用了 testing-library 風格 API——`screen.queryByText(...)` /
+  `screen.findByText(...)` / `row.parentElement` / `getByText((content) => ...)`。
+  但 `vitest-browser-svelte` 的 `render()` 回傳 `RenderResult`（extends
+  `vitest/browser` 的 `LocatorSelectors`），**只有** `getByRole` /
+  `getByText` / `getByLabelText` / `getByPlaceholder` / `getByTitle` /
+  `getByTestId`，且回 `Locator`、`getByText` 只收 `string | RegExp`
+  （不收函式回呼）——`queryByText` / `findByText` / `Locator.parentElement`
+  全都不存在。
+- **5 支 runtime 掛**：
+  - 3 支 gauge 列（`screen.queryByText is not a function` /
+    `screen.findByText is not a function`）——同上述 API 缺失。
+  - 2 支 form 入口（`Context "Tooltip.Provider" not found`）——
+    `ChatFormActions` 獨立渲染時，`ChatFormActionAddDropdown` /
+    `ChatFormActionInspectContext` 的 bits-ui `Tooltip.Root` 需要
+    `Tooltip.Provider` 祖先（app 裡由 `+layout.svelte` 提供、獨立渲染沒有）。
+
+全數已修（測試端 + 1 個新 wrapper，元件/store 零改動）：
+
+| 檔案 | 問題 | 修復 |
+| ---- | ---- | ---- |
+| `tests/client/context-gauge-compaction.svelte.test.ts` | gauge 3 支用不存在的 `queryByText`/`findByText`/`Locator.parentElement` | 改走 `document.querySelector` + 新增 `waitFor` / `bodyText()` helper（同 `context-inspector` 慣例）：spinner 列找 `span` 的 `parentElement` 再 `querySelector('.animate-spin')`；compacted 列找「無子元素且含 `tokens saved`」的 `div`（`textContent.trim()` 對 `'Compacted: 3 messages · ~1,794 tokens saved'`）；「不存在」斷言改 `bodyText()` 不含該文字 |
+| （同檔）form 2 支 | `ChatFormActions` 獨立渲染缺 `Tooltip.Provider` → `ChatFormActionAddDropdown` 的 `Tooltip.Root` 炸 | 改渲染新 `ChatFormActionsWrapper`（`Tooltip.Provider` 包 `ChatFormActions`，同 `ChatFormTestWrapper` 先例）；import 改本地 wrapper（字母序置最前） |
+| （同檔）form 2 支 latent | `expect(eyeButton).toBeVisible()` / `.toBeDisabled()` 直接把 `Locator` 傳 `expect()`——`@vitest/browser` 只有 `expect.element()` 會解析 locator（`expect-element.js` 的 `expect.element = bn`），直接傳不會 resolve（原本被 render 炸掉蓋住、沒跑到） | 改 `await expect.element(eyeButton).toBeVisible()` / `.toBeDisabled()`（同該檔 gauge 段既有寫法） |
+| `tests/client/components/ChatFormActionsWrapper.svelte` | **新**：form 入口測試缺 provider 的 wrapper | `Tooltip.Provider` 包 `ChatFormActions`、`disabled` prop 透傳（照 `ChatFormTestWrapper` 格式） |
+
+> 要點：
+> - 元件與 store **零改動**——全在測試端（API 用錯 + 缺 provider wrapper）。
+> - `estimateCompactionSavings` 的 1,794 已對 `estimateTokens`（`ceil(len/4)`）
+>   逐則核過：payload = system 4 + cmp 33 + kept 5 + final 4 = 46、
+>   saved = 1840 − 46 = 1794（cmp content = `SUMMARY_CONTENT_PREFIX`(56 字) +
+>   74 字 = 130 字 → `ceil(130/4)` = 33）。
+> - `Tooltip.Provider` 是全 app 唯一的 bits-ui top-level provider
+>   （`+layout.svelte` 只包它）；`ChatFormActions` 渲染樹內的
+>   `DropdownMenu` / `Drawer` / `Collapsible` / `Checkbox` / `ModelsSelector`
+>   皆不需其他 provider（已查 bits-ui 源：只有 `Tooltip` 有 `ProviderContext`）。
+> - 快捷鍵 3 支（原本就綠）零改動。
+
+### 重跑指令（~40s）
+
+```bash
+npm run check
+npx vitest --project=client --run tests/client/context-gauge-compaction.svelte.test.ts
+# 回歸
+npx vitest --project=client --run tests/client/context-panel-mobile.svelte.test.ts
+npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts
+npx vitest --project=unit --run tests/unit/compaction-policy.test.ts
+```
+
+全綠 → P2.6 確認、Phase 2 完成。
 
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 

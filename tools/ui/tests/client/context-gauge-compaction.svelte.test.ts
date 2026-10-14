@@ -7,9 +7,9 @@
 //
 // Run: npx vitest --project=client --run tests/client/context-gauge-compaction.svelte.test.ts
 
+import ChatFormActionsWrapper from './components/ChatFormActionsWrapper.svelte';
 import ContextGaugePopup from '$lib/components/app/chat/ChatForm/ChatFormContextGauge/ContextGaugePopup.svelte';
 import { gaugePopup } from '$lib/components/app/chat/ChatForm/ChatFormContextGauge/gauge-popup.svelte';
-import ChatFormActions from '$lib/components/app/chat/ChatForm/ChatFormActions/ChatFormActions.svelte';
 import { MessageRole, MessageType } from '$lib/enums';
 import { useKeyboardShortcuts } from '$lib/hooks/use-keyboard-shortcuts.svelte';
 import { SUMMARY_CONTENT_PREFIX } from '$lib/services/context';
@@ -93,6 +93,24 @@ function openGauge() {
 	return screen;
 }
 
+async function waitFor<T extends Node>(find: () => T | null, timeoutMs = 5000): Promise<T> {
+	const start = Date.now();
+
+	while (Date.now() - start < timeoutMs) {
+		const el = find();
+
+		if (el) return el;
+
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
+
+	throw new Error('Timed out waiting for element');
+}
+
+function bodyText(): string {
+	return document.body.textContent ?? '';
+}
+
 afterEach(() => {
 	vi.restoreAllMocks();
 	conversationsStore.activeMessages = [];
@@ -113,15 +131,19 @@ describe('gauge popup compaction row (Phase 2 P2.6)', () => {
 		buildCompactedFixture();
 		contextStatsStore.compacting = true;
 
-		const screen = openGauge();
+		openGauge();
 
-		await expect.element(screen.getByText('Compacting context…')).toBeVisible();
+		const row = await waitFor(() => {
+			const span = [...document.querySelectorAll('span')].find(
+				(el) => el.textContent?.trim() === 'Compacting context…'
+			);
 
-		const row = screen.getByText('Compacting context…');
+			return span?.parentElement ?? null;
+		});
 
 		// spinner inside the row, and the compacted row is hidden meanwhile
-		expect(row.parentElement?.querySelector('.animate-spin')).not.toBeNull();
-		expect(screen.queryByText((content) => content.includes('tokens saved'))).toBeNull();
+		expect(row.querySelector('.animate-spin')).not.toBeNull();
+		expect(bodyText()).not.toContain('tokens saved');
 	});
 
 	it('shows the in-effect entry savings above the inspector entry', async () => {
@@ -129,12 +151,16 @@ describe('gauge popup compaction row (Phase 2 P2.6)', () => {
 
 		const screen = openGauge();
 
-		const row = await screen.findByText((content) => content.includes('tokens saved'));
+		const row = await waitFor(() =>
+			[...document.querySelectorAll('div')].find(
+				(el) => el.children.length === 0 && el.textContent?.includes('tokens saved')
+			) ?? null
+		);
 
-		expect(row.textContent).toBe('Compacted: 3 messages · ~1,794 tokens saved');
+		expect(row.textContent?.trim()).toBe('Compacted: 3 messages · ~1,794 tokens saved');
 		// the inspector entry stays below the row
-		expect(screen.getByText('Inspect what the LLM sees →')).toBeVisible();
-		expect(screen.queryByText('Compacting context…')).toBeNull();
+		await expect.element(screen.getByText('Inspect what the LLM sees →')).toBeVisible();
+		expect(bodyText()).not.toContain('Compacting context…');
 	});
 
 	it('shows no compaction row without a compaction entry', async () => {
@@ -143,8 +169,8 @@ describe('gauge popup compaction row (Phase 2 P2.6)', () => {
 		const screen = openGauge();
 
 		await expect.element(screen.getByText('Inspect what the LLM sees →')).toBeVisible();
-		expect(screen.queryByText((content) => content.includes('tokens saved'))).toBeNull();
-		expect(screen.queryByText('Compacting context…')).toBeNull();
+		expect(bodyText()).not.toContain('tokens saved');
+		expect(bodyText()).not.toContain('Compacting context…');
 	});
 });
 
@@ -154,11 +180,11 @@ describe('chat form inspector entry (Phase 2 P2.6)', () => {
 	});
 
 	it('opens the context inspector from the Eye button', async () => {
-		const screen = render(ChatFormActions);
+		const screen = render(ChatFormActionsWrapper);
 
 		const eyeButton = screen.getByRole('button', { name: /Inspect what the LLM sees/ });
 
-		expect(eyeButton).toBeVisible();
+		await expect.element(eyeButton).toBeVisible();
 		expect(chatStore.showContextInspector).toBe(false);
 
 		await userEvent.click(eyeButton);
@@ -169,12 +195,12 @@ describe('chat form inspector entry (Phase 2 P2.6)', () => {
 	it('is disabled while the model responds', async () => {
 		vi.spyOn(chatStore, 'isLoading', 'get').mockReturnValue(true);
 
-		const screen = render(ChatFormActions);
+		const screen = render(ChatFormActionsWrapper);
 
 		// the sr-only label switches to the disabled-state text
 		const eyeButton = screen.getByRole('button', { name: /Unavailable while the model is responding/ });
 
-		expect(eyeButton).toBeDisabled();
+		await expect.element(eyeButton).toBeDisabled();
 	});
 });
 

@@ -8,8 +8,8 @@
 > [06-status.md](./06-status.md)（Phase 0 完成；Phase 1 5.1–5.7 完成並確認、
 > 剩 5.8 手動驗收（P2.4 的 inspector「Compact now」與 P2.5 的 cmp entry
 > 動作列皆可先行驗收）；Phase 2 P2.1–P2.5 全部完成並確認
-> （client suite 全綠 + `npm run check` 全綠）；P2.6 已實做、待使用者
-> 編譯確認（見 06-status 恢復點 / §2p））。
+> （client suite 全綠 + `npm run check` 全綠）；P2.6 第一輪編譯/測試
+> 確認的錯誤已全數修復、待使用者重跑確認（見 06-status 恢復點 / §2p / §2q））。
 
 ## 目錄
 
