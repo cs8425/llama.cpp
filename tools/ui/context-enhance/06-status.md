@@ -9,7 +9,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ⬜ |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成（待編譯確認，見 §4）；依 §5b 繼續 |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -127,6 +127,19 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
 | `tests/client/context-inspector.svelte.test.ts:243` | 型別錯：`.find()` 回 `HTMLButtonElement \| undefined`，自訂 `waitFor` 要 `Node \| null` | 箭尾加 `?? null` |
 | `tests/unit/compaction-policy.test.ts:139` | 型別錯：`format: 'wav'` 字面量不能指派給 `AudioInputFormat`（= `FileTypeAudio.WAV \| FileTypeAudio.MP3`） | 改 `FileTypeAudio.WAV`（import 加 `FileTypeAudio`） |
 
+## 2g. Phase 2 已交付檔案（P2.1，待編譯確認）
+
+| 檔案 | 改動 |
+| ---- | ---- |
+| `src/lib/services/context/compaction-policy.ts` | `MIN_SUMMARIZE_TOKENS = 2000` 常數（原在 chat store，上移為 policy 擁有）；`CompactionSettings`（structural pick，policy 不 import settings 型別）；`computeCompactionBudget(nCtx, settings)`（02-§3.3 公式） |
+| `src/lib/services/context/index.ts` | barrel 加 `computeCompactionBudget` / `MIN_SUMMARIZE_TOKENS` / `CompactionSettings` |
+| `src/lib/stores/chat/index.svelte.ts` | `compactConversation` auto gate 加 `contextAutoCompaction` 總開關（auto 時先查；手動照樣跳過開關與 threshold）；budget 改走 `computeCompactionBudget`（刪本機 `MIN_SUMMARIZE_TOKENS` 常數與 `CompactionBudget` import）；`streamChatCompletion` 兩個觸發點（fire-and-forget + catch）：①非 agentic `onComplete` 最末（pending 重送之後）②agentic `agenticResult.handled` 區塊末（pending steering 之後）——不在 `onFlowComplete` 回調內，因該時點 `isRunning` 仍 true 會被 I7 guard 擋 |
+| `tests/unit/compaction-policy.test.ts` | +2 用例（`computeCompactionBudget`：keep budget 公式 floor(32768×0.2)−1536；min 欄位透傳 + `minSummarizeTokens` pin 到常數） |
+
+> 觸發語義：`compactConversation(convId, { auto: true })` 內部依序查
+> I7（isChatLoading / isRunning / compacting）→ `contextAutoCompaction`
+> → threshold → plan。任一不過即靜默回，所以兩個觸發點可無條件 fire。
+
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
 ### 3.1 既有 broken state：`ChatRole` / `ChatMessageType` 原本未定義
@@ -237,6 +250,8 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   `npx vitest --project=unit --run tests/unit/context-builder.test.ts` +
   `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`（4/4），
   **全綠**。5.7 完成。
+- **Phase 2 P2.1**：變更完成，等使用者跑 `npm run check` +
+  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（18 用例，含 2 新）確認。
 - **Phase 1 目前停在這：只剩 5.8 手動驗收**（05-§1 Phase 1 ✅ 列）：
   1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
   2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。
@@ -389,6 +404,100 @@ static async createCompactionMessage(params: {
 1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
 2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。
 3. 無 cmp 對話行為與現行完全一致（context-builder.test.ts 的回归測試保證）。
+
+## 5b. Phase 2 執行清單（依序做；每完成一個單位請使用者編譯確認）
+
+> 原則同 Phase 1：純邏輯進 `services/context/`（unit 可測）；store 層只做
+> 觸發 + 協調；UI 走既有元件慣例。每單位獨立可編譯、可回退。
+
+### P2.1 自動觸發（flow 之間）
+- `compaction-policy.ts`：新增純函式 `computeCompactionBudget(nCtx, settings)`
+  （02-§3.3 公式：`floor(nCtx × (1 − threshold%) − summaryMaxTokens × 1.5)` +
+  三個 min 欄位）+ `MIN_SUMMARIZE_TOKENS = 2000` 常數上移到 policy（原在
+  chat store）；`CompactionSettings` 結構型別（structural pick，policy 不 import
+  settings 型別）。
+- `chatStore.compactConversation`：auto gate 加 `contextAutoCompaction` 總開關
+  （`auto: true` 時先查；`auto: false` 手動照樣跳過 threshold 與開關）；
+  budget 改走 `computeCompactionBudget`。
+- `streamChatCompletion` 兩個觸發點（皆 fire-and-forget + catch；
+  `compactConversation` 內部 I7 guard 防競態）：
+  1. 非 agentic：`onComplete` 最末（pending message 重送之後）；
+  2. agentic：`if (agenticResult.handled)` 區塊末（pending steering 之後）——
+     **不在** `onFlowComplete` 回調內，因為該時點 `agenticStore.isRunning`
+     仍為 true，I7 guard 會擋掉。
+- unit：`computeCompactionBudget` 公式 + 欄位透傳。
+
+### P2.2 agentic 迴圈 turn 之間再壓縮（03-§4.4）
+- `agenticStore` 新 private `compactBetweenTurns({ conversationId, lastPrompt,
+  model, sessionMessages, signal })`：
+  - gate：`contextAutoCompaction && contextAutoCompactionInLoop`、n_ctx 已知、
+    `lastPrompt ≥ nCtx × threshold%`（lastPrompt = 該 turn 的
+    `turnTimings.prompt_n ?? Σ estimateApiMessageTokens(sessionMessages)`）。
+  - path 解析同 `compactConversation`（active → `activeMessages`；非 active →
+    DB + `filterByLeafNodeId`）——flow 可能跑到使用者切離 active 之後。
+  - `planCompaction` → null 續跑；`summarizeMessages(plan, model, signal, …)`
+    （signal = flow abort，中斷即 fail-open）→ `createCompactionMessage`
+    （parent = 路徑最後一則）→ active：`addMessageToActive` +
+    `updateCurrentNode`；非 active：DB `updateCurrentNode` +
+    `applyConversationUpdate` → `updateConversationTimestamp`。
+  - **重建 `sessionMessages`**：`toAgenticMessages(buildLlmContext([...path, cmp],
+    { excludeReasoning: false }).messages)` 原地 splice（§3.9：reasoning 不 strip，
+    逐 turn strip 仍在 request mapping）。
+  - `contextStatsStore.compacting` 包裹；toast；任何失敗（含 abort）回 null、
+    舊 sessionMessages 續跑（fail-open）。
+  - 呼叫點：loop body 最末（steering check 之後、`turn++` 之前）。
+  - 不做 in-loop preEncode（下一 turn 立刻 re-encode 新前綴）。
+- 無新純邏輯（policy/builder/summarize 皆既有）→ 無新 unit；store 層照慣例不 unit 測。
+
+### P2.3 expand + chatStore 人工介入動作（DB + store）
+- `DatabaseService.expandCompactionMessage(convId, cmpId)`：transaction 內
+  子節點 `parent` 改指 `cmp.parent`、`parent.children` 以子節點替換 cmp、
+  刪 cmp 列、`conv.currNode === cmp.id` 時回 `cmp.parent`（同 transaction 直接
+  update conversations 表）；回新 currNode id。非 COMPACTION 型別 → throw。
+- `chatStore` 新方法（皆 I7 guard + active/non-active 雙路徑 mirror）：
+  - `updateCompactionSummary(convId, cmpId, plainText)`：content =
+    `SUMMARY_CONTENT_PREFIX + ' ' + text`（與建節點同一拼法）。
+  - `recompactConversationEntry(convId, cmpId)`：對**同一 summarize 區**（
+    `path[head..boundary)`，I2 含舊 cmp）重跑 summary，**更新同一節點**
+    content + meta（model / estimatedTokensBefore）；boundary 失效 → toast 回。
+  - `expandCompactionEntry(convId, cmpId)`：走新 DB 方法；active conv 同步
+    更新 `activeMessages`（照 delete flow 的 mirror 模式）。
+  - `moveCompactionBoundary(convId, cmpId, newFirstKeptMessageId)`：
+    前移（kept 變長）只改 meta；後移（kept 變短）對擴大後的區強制重摘要
+    （02-§4 防靜默遺失）；新邊界必須是路徑上的 user/assistant（I4）。
+  - recompact 與後移共用 private `summarizeRegion` helper。
+- unit：DB 層是 Dexie、store 協調層不 unit 測（同 5.4/5.5 先例）。
+
+### P2.4 Inspector 編輯 + 動作（04-§2.2 完整版）
+- `DialogContextInspector.svelte`：
+  - summary 列「編輯」→ 就地 textarea（prefix 剝除後預填）→ 存檔走
+    `updateCompactionSummary` → 重新 buildLlmContext 刷新 WYSIWYG。
+  - 「進階」區：斷點選擇器（Select；I4 合法斷點分兩組：回合邊界 user /
+    turn 內 assistant）→ `moveCompactionBoundary`；[Compact now]
+    （`compactConversation auto:false`）/ [Expand]（確認對話框）/ [重新摘要]。
+  - `contextStatsStore.compacting` 時：spinner 列 + 動作全 disabled。
+  - 每次動作後重抓 payload（dialog 開啟期間 path 已可被動作改變，Phase 1 的
+    「open 時抓一次」前提不再成立）。
+- client 測試：`tests/client/context-inspector.svelte.test.ts` 擴編（store spy）。
+
+### P2.5 cmp entry 動作（04-§1.2）
+- `ChatMessageCompaction.svelte` 展開區加動作列：[編輯]（就地 textarea）/
+  [重新摘要] / [還原全部上下文]（確認對話框）；皆走 P2.3 的 chatStore 方法
+  （`message.convId` 可用）。進行中（`compacting`）disabled。
+- client 測試：`tests/client/chat-message-compaction.svelte.test.ts` 擴編。
+
+### P2.6 gauge 列 + 第三入口 + 快捷鍵（04-§2.3 / §3）
+- `ContextGaugePopup.svelte` body：inspector 連結上方加列——
+  `compacting` 時「Compacting context…」（spinner）；有生效 cmp 時
+  「Compacted: N messages · ~X tokens saved」（X = `estimatedTokensBefore −`
+  當前 payload 估計，同步估算、與 policy 同 estimator）。
+- `ChatFormActions.svelte`：add 選單旁 icon 按鈕（Eye）→
+  `chatStore.showContextInspector = true`；`chatStore.isLoading` 時 disabled
+  （與 gauge 入口一致）；tooltip 帶快捷鍵。
+- `use-keyboard-shortcuts.svelte.ts`：`Shift+Ctrl/Cmd+I` → 開 inspector
+  （hook 內直接動 store，同 new-chat 模式；loading 中 / 無 active conv 不動作）；
+  `KeyboardKey` enum 加 `I_UPPER`（字母序）。
+- client 測試：gauge 列 + 入口（看既有 client 測試結構決定掛哪）。
 
 ## 6. 專案慣例 / 陷阱（Phase 1 寫碼前速讀）
 

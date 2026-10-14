@@ -3,8 +3,14 @@
 // land on a tool result (I4) and the kept region must respect I5.
 
 import { AttachmentType, ContentPartType, FileTypeAudio, MessageRole, MessageType } from '$lib/enums';
-import { estimateApiMessageTokens, estimateTokens, planCompaction } from '$lib/services/context/compaction-policy';
-import type { CompactionBudget } from '$lib/services/context/types';
+import {
+	computeCompactionBudget,
+	estimateApiMessageTokens,
+	estimateTokens,
+	MIN_SUMMARIZE_TOKENS,
+	planCompaction
+} from '$lib/services/context/compaction-policy';
+import type { CompactionBudget, CompactionSettings } from '$lib/services/context/types';
 import type { ApiChatMessageData } from '$lib/types/api';
 import type { DatabaseMessage, DatabaseMessageExtra } from '$lib/types/database';
 import { describe, expect, it } from 'vitest';
@@ -160,6 +166,34 @@ describe('estimateApiMessageTokens', () => {
 		};
 
 		expect(estimateApiMessageTokens(mixed)).toBe(1100);
+	});
+});
+
+describe('computeCompactionBudget', () => {
+	const settings: CompactionSettings = {
+		contextCompactionThreshold: 80,
+		contextKeepMinMessages: 2,
+		contextKeepMinUserTurns: 4,
+		contextSummaryMaxTokens: 1024
+	};
+
+	it('derives the keep budget from n_ctx, threshold and the summary reserve', () => {
+		// 32768 × (1 − 0.8) = 6553.6 → 6553; reserve = 1024 × 1.5 = 1536
+		const budget = computeCompactionBudget(32768, settings);
+
+		expect(budget.keepBudgetTokens).toBe(6553 - 1536);
+	});
+
+	it('passes the min limits through and pins minSummarizeTokens', () => {
+		const budget = computeCompactionBudget(8192, {
+			...settings,
+			contextKeepMinMessages: 3,
+			contextKeepMinUserTurns: 5
+		});
+
+		expect(budget.minKeptMessages).toBe(3);
+		expect(budget.minKeptUserTurns).toBe(5);
+		expect(budget.minSummarizeTokens).toBe(MIN_SUMMARIZE_TOKENS);
 	});
 });
 

@@ -18,8 +18,14 @@ import {
 	StreamConnectionState
 } from '$lib/enums';
 import { ChatService } from '$lib/services/chat.service';
-import { SUMMARY_CONTENT_PREFIX, estimateTokens, planCompaction, summarizeMessages } from '$lib/services/context';
-import type { CompactionBudget } from '$lib/services/context';
+import {
+	MIN_SUMMARIZE_TOKENS,
+	SUMMARY_CONTENT_PREFIX,
+	computeCompactionBudget,
+	estimateTokens,
+	planCompaction,
+	summarizeMessages
+} from '$lib/services/context';
 import { DatabaseService } from '$lib/services/database.service';
 // direct imports between stores, not via the barrel, to avoid circular deps
 import { agenticStore } from '$lib/stores/agentic/index.svelte';
@@ -53,12 +59,6 @@ import {
 } from '$lib/utils';
 import { SvelteMap } from 'svelte/reactivity';
 import { toast } from 'svelte-sonner';
-
-/**
- * Minimum estimated tokens in the summarize region for a compaction to be
- * worth the summary round-trip (context-enhance/02 §3.3 example value).
- */
-const MIN_SUMMARIZE_TOKENS = 2000;
 
 class ChatStore implements ChatStreamHost, ChatFlowsHost {
 	chatReasoningStates = new SvelteMap<string, boolean>();
@@ -583,9 +583,11 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 
 		const threshold = config.contextCompactionThreshold;
 
-		// Auto compaction only kicks in once the last prompt reached the
-		// threshold; the manual action skips this gate.
+		// Auto compaction needs the master switch on AND the last prompt to
+		// have reached the threshold; the manual action skips both gates.
 		if (auto) {
+			if (!config.contextAutoCompaction) return;
+
 			let lastPrompt: number | null = null;
 
 			for (let i = path.length - 1; i >= 0; i--) {
@@ -604,15 +606,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			if (effectiveLastPrompt < nCtx * (threshold / 100)) return;
 		}
 
-		const summaryReserve = config.contextSummaryMaxTokens * 1.5;
-		const budget: CompactionBudget = {
-			keepBudgetTokens: Math.floor(nCtx * (1 - threshold / 100) - summaryReserve),
-			minKeptMessages: config.contextKeepMinMessages,
-			minKeptUserTurns: config.contextKeepMinUserTurns,
-			minSummarizeTokens: MIN_SUMMARIZE_TOKENS
-		};
-
-		const plan = planCompaction(path, budget);
+		const plan = planCompaction(path, computeCompactionBudget(nCtx, config));
 
 		if (!plan) {
 			if (!auto) toast.info('No range to compact');
@@ -1337,6 +1331,12 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 					await this.sendMessage(pending.content, pending.extras);
 				}
 
+				// Auto-compaction check between flows (02-data-model §6): the
+				// method no-ops unless the switch is on and the last prompt
+				// crossed the threshold; fire-and-forget so the completion
+				// handler (and any re-send above) is not delayed by a summary call.
+				void this.compactConversation(convId, { auto: true }).catch(console.error);
+
 				return;
 			}
 		}
@@ -1396,6 +1396,10 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 					if (pending) {
 						await this.sendMessage(pending.content, pending.extras);
 					}
+
+					// Auto-compaction check between flows (02-data-model §6):
+					// no-op unless the switch is on and the threshold crossed.
+					void this.compactConversation(convId, { auto: true }).catch(console.error);
 				},
 				onCompletionId: streamCallbacks.onCompletionId,
 				onConnectionState: (state: StreamConnectionState) => {

@@ -7,7 +7,13 @@
  */
 
 export { buildLlmContext, findLastCompactionEntry } from './context-builder';
-export { estimateApiMessageTokens, estimateTokens, planCompaction } from './compaction-policy';
+export {
+	computeCompactionBudget,
+	estimateApiMessageTokens,
+	estimateTokens,
+	MIN_SUMMARIZE_TOKENS,
+	planCompaction
+} from './compaction-policy';
 export {
 	buildSummaryTranscript,
 	DEFAULT_SUMMARY_PROMPT,
@@ -19,6 +25,7 @@ export type { SummarizeOptions } from './summarize';
 export type {
 	CompactionBudget,
 	CompactionPlan,
+	CompactionSettings,
 	ContextBuildOptions,
 	ContextBuildResult,
 	ContextCompactionInfo

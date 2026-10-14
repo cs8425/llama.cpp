@@ -17,6 +17,11 @@ const TOKENS_PER_IMAGE = 1000;
 const TOKENS_PER_AUDIO_VIDEO = 3000;
 /** Characters per token for text. Deliberately simple (v1); see context-enhance/02 §3.4. */
 const CHARS_PER_TOKEN = 4;
+/**
+ * Minimum estimated tokens in the summarize region for a compaction to be
+ * worth the summary round-trip (02-data-model §3.3 example value).
+ */
+export const MIN_SUMMARIZE_TOKENS = 2000;
 
 function textTokens(text: string | undefined | null): number {
 	if (!text) return 0;
@@ -104,6 +109,34 @@ function estimateContentPartTokens(part: ApiChatMessageContentPart): number {
  * user or assistant — never a tool result (orphan tool results are rejected by the API). */
 function isCuttable(message: DatabaseMessage): boolean {
 	return message.role === MessageRole.USER || message.role === MessageRole.ASSISTANT;
+}
+
+/**
+ * The context settings that shape the compaction budget. A structural pick
+ * (no settings import) so the policy stays store-free and unit-testable.
+ */
+export interface CompactionSettings {
+	contextCompactionThreshold: number;
+	contextKeepMinMessages: number;
+	contextKeepMinUserTurns: number;
+	contextSummaryMaxTokens: number;
+}
+
+/**
+ * Compaction budget for a known n_ctx (02-data-model §3.3): the kept suffix
+ * must fit under `n_ctx × (1 − threshold%)` minus a reserve for the summary
+ * itself (≈ 1.5 × the summary's max tokens, so summary + kept stay under the
+ * threshold line).
+ */
+export function computeCompactionBudget(nCtx: number, settings: CompactionSettings): CompactionBudget {
+	const summaryReserve = settings.contextSummaryMaxTokens * 1.5;
+
+	return {
+		keepBudgetTokens: Math.floor(nCtx * (1 - settings.contextCompactionThreshold / 100) - summaryReserve),
+		minKeptMessages: settings.contextKeepMinMessages,
+		minKeptUserTurns: settings.contextKeepMinUserTurns,
+		minSummarizeTokens: MIN_SUMMARIZE_TOKENS
+	};
 }
 
 /**
