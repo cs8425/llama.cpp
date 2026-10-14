@@ -232,9 +232,44 @@ function watchArrayMutations() {
 	conversationsStore.activeMessages = new Proxy(arr, handler);
 }
 
+// TEMP-DIAG: wrap the state signal's `v` property — catches EVERY value
+// replacement, including direct `source.v = x` writes inside the Svelte
+// runtime (batch.capture) that bypass the prototype setter.
+function watchSignalValue() {
+	const desc = Object.getOwnPropertyDescriptor(conversationsStore, 'activeMessages');
+	const signal = desc?.value as { f?: number; v?: DatabaseMessage[] } | undefined;
+
+	if (!signal || typeof signal !== 'object' || !('f' in signal)) {
+		console.log('[diag] own property is not a signal', {
+			type: typeof signal,
+			keys: signal && typeof signal === 'object' ? Object.keys(signal) : String(signal)
+		});
+
+		return;
+	}
+
+	let current: unknown = signal.v;
+
+	Object.defineProperty(signal, 'v', {
+		configurable: true,
+		get() {
+			return current;
+		},
+		set(value: unknown) {
+			console.log(
+				`[diag] SIGNAL.v SET (len=${Array.isArray(value) ? value.length : '?'})`,
+				new Error('signal-trace').stack
+			);
+
+			current = value;
+		}
+	});
+}
+
 async function openInspector() {
 	patchActiveMessagesSetter();
 	watchArrayMutations();
+	watchSignalValue();
 
 	const { unmount } = render(DialogContextInspector, { open: true });
 

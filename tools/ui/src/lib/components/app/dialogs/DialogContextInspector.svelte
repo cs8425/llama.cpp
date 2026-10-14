@@ -71,6 +71,8 @@
 
 	const instanceId = ++instanceCounter;
 
+	let lastPathRef: DatabaseMessage[] | undefined;
+
 	let nCtx = $derived(contextStatsStore.contextTotal);
 	let modelId = $derived(contextStatsStore.activeModelId);
 	let path = $derived(conversationsStore.activeMessages);
@@ -109,7 +111,14 @@
 
 		// TEMP-DIAG (remove after P2.4 first green run): trace the payload
 		// fetch in the page console (vitest browser forwards it to the terminal).
-		console.log('[inspector-diag] effect', { instanceId, open, pathLen: path.length, tick: refreshTick });
+		console.log('[inspector-diag] effect', {
+			instanceId,
+			pathLen: path.length,
+			sameRef: path === lastPathRef,
+			tick: refreshTick
+		});
+
+		lastPathRef = path;
 
 		// On a refresh after an action the previous result stays visible
 		// until the new one lands (the rebuild is fast; a blank flash is noise).

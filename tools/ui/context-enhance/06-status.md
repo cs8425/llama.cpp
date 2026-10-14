@@ -3,18 +3,18 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：P2.4 第三輪診斷出爐：`instanceId` 皆 1（無 double mount），
-> 但 **setter patch 完全沒觸發**（無 `activeMessages SET` log、無「no prototype
-> setter」log）→ 變更不是 reassign。查 Svelte 5 編譯器（ClassBody.js）+ runtime
-> （sources.js）：`$state` class 字段 = own property 存 source signal + prototype
-> getter/setter；setter 走 `$.set(source, v, true)` **原地改 source.v**，值被
-> `proxy()` 包成深 proxy。→ 7→0 必是 **proxied array 的 in-place mutation**
-> （effect 追蹤 proxy 的 `length`，mutation 觸發重跑，setter 不被呼叫）。
-> 已加第四層 TEMP-DIAG：`watchArrayMutations()` 把 array 再包一層 logging proxy
-> （set/deleteProperty 打 `[diag] MUTATE …` + stack trace）。
+> **恢復點（最新）**：P2.4 第四輪診斷出爐：setter patch 運作正常（抓到我們自己的
+> `watchArrayMutations` 寫入 `SET (len=7)`），但 **無任何 `[diag] MUTATE`**——
+> 非 in-place mutation、非 reassign，effect 卻用 pathLen 0 重跑。查 runtime
+> `batch.capture`：`source.v = value` 是直接寫 signal 物件的 `v` 屬性（繞過
+> setter）。已加第五層 TEMP-DIAG：① `watchSignalValue()` 包 signal 的 `v`
+> getter/setter（抓所有值替換 + stack；含 shape 檢查 log）；② 元件 effect log
+> 加 `sameRef`（path 參考相等性）。決策樹：SIGNAL.v SET  firing = 抓到元兇；
+> sameRef=false 且無 SIGNAL.v SET = signal 物件本身被換；sameRef=true 且無
+> MUTATE = proxy 回傳不一致值。
 > 第一件要做的事：請使用者再跑
 > `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts -t "lists the compacted payload"`
-> ，把完整輸出（特別是 `[diag] MUTATE` 的 stack trace）貼回來。
+> ，把完整輸出貼回來。
 
 ## 1. 進度總覽
 
@@ -384,13 +384,11 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   （suite import 失敗、0 test）。4 錯：`@lucide/svelte` v1.46.0 無 `Compress`
   icon（vitest 的 module graph 因此整 suite 炸掉）+ test 檔 3 個型別錯
   （`trigger` 未收斂 null、2 處 `Element` 無 `disabled`）。已全數修完（§2k）。
-- **Phase 2 P2.4 第三輪**：使用者重跑單支。`instanceId` 皆 1（無 double
-  mount）；**setter patch 未觸發**（無 SET log）→ 非 reassign。查 Svelte 5
-  編譯器 ClassBody.js + runtime sources.js：`$state` class 字段 = own property
-  存 source signal + prototype accessor；setter 原地改 `source.v`（值被
-  `proxy()` 深 proxy）→ 7→0 必是 array 的 **in-place mutation**（effect 追蹤
-  proxy `length`）。已加 logging proxy 包 array 抓 mutation stack（TEMP-DIAG），
-  待重跑。
+- **Phase 2 P2.4 第四輪**：使用者重跑單支。setter patch 運作正常（抓到
+  `watchArrayMutations` 自己的寫入 `SET (len=7)`），但 **無 `[diag] MUTATE`**——
+  非 in-place mutation、非 reassign，effect 卻用 pathLen 0 重跑。查 runtime
+  `batch.capture`：`source.v = value` 直接寫 signal 的 `v`（繞過 setter）。
+  已加 signal `v` wrapper + `sameRef` probe（TEMP-DIAG），待重跑。
 - **Phase 2 P2.4 待重跑確認**（變更見 §2j、修復見 §2k）：請跑
   `npm run check` +
   `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
