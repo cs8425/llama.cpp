@@ -84,7 +84,7 @@
 > attach 的 lastUser fallback 只在「全對話無 assistant」時觸發，corner case 下 placeholder
 > 掛在 cmp 之下反而是正確樹形）。
 
-## 2e. Phase 1 已交付檔案（5.7，待編譯確認）
+## 2e. Phase 1 已交付檔案（5.7，已確認全綠；第一輪修復見 §2f）
 
 | 檔案 | 改動 |
 | ---- | ---- |
@@ -250,13 +250,13 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   `npx vitest --project=unit --run tests/unit/context-builder.test.ts` +
   `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`（4/4），
   **全綠**。5.7 完成。
-- **Phase 2 P2.1**：變更完成，等使用者跑 `npm run check` +
-  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（18 用例，含 2 新）確認。
-- **Phase 1 目前停在這：只剩 5.8 手動驗收**（05-§1 Phase 1 ✅ 列）：
+- **Phase 1 目前只剩 5.8 手動驗收**（05-§1 Phase 1 ✅ 列；與 Phase 2 並行不阻塞）：
   1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
   2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。
   3. 無 cmp 對話行為與現行完全一致（context-builder.test.ts 的回归測試保證）。
-  驗收通過後 Phase 1 完成，可進 Phase 2（05-§1：自動觸發 + 人工介入 + flow 內再壓縮）。
+- **Phase 2 P2.1（目前停在這）**：變更完成（§2g），等使用者跑 `npm run check` +
+  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（18 用例，含 2 新）確認。
+  全綠後續做 P2.2（agentic 迴圈 turn 之間再壓縮，規格見 §5b）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 

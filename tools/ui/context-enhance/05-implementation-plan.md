@@ -27,7 +27,7 @@
 - [x] `ChatMessageCompaction.svelte` + `ChatMessage.svelte` 分派 +
       `ChatMessages.svelte` grouping 確認（已編譯確認）
 - [x] Inspector 只讀版(`DialogContextInspector.svelte`)+ gauge popup 入口
-      （已實做、待編譯確認；交付明細見 06-status §2e/§4）
+      （已實做並確認全綠；交付明細見 06-status §2e/§2f/§4）
 - [x] Settings 8 個 key(先全部加好,自動壓縮預設 off)
 
 ✅ 驗收:有 cmp 的對話,送出 payload = inspector 顯示 = 網路抓包;
