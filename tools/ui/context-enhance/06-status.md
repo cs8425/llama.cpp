@@ -248,7 +248,7 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
 > 反應性問題**——selector 撞了 P2.4 新增的 Select trigger；「pathLen 0 重跑」
 > 是 afterEach 紅鵝（見 §2m）。
 
-### 已確立的事實（四輪診斷）
+### 已確立的事實（診斷期第一~四輪；第五輪結案見 §2m）
 
 - `npm run check` ✅ 全綠（§2k 修復後）。
 - suite 可載入；10/10 全掛在 `openInspector()` 等 4 支 payload row（5s timeout）。
@@ -257,7 +257,8 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
      DOM 確實渲染 4 行 + Advanced 區（`[diag]` 的 5 支 `aria-expanded` 按鈕
      = 4 payload 行 + bits-ui Select trigger——trigger 帶 `aria-expanded`）。
   2. `pathLen: 0` → `built {messages: 0, compaction: null}`；`result` 被覆蓋成
-     空 payload，但 **DOM 停在 4 則狀態**（次要症狀：state-DOM desync）。
+     空 payload，但 **DOM 停在 4 則狀態**（當時視為「state-DOM desync」；結案後
+     確認是紅鵝——DOM dump 拍在 afterEach 之前，見 §2m）。
 - 無 console error → `buildLlmContext` 沒 reject（catch 會 `console.error`）。
 - builder / policy / converter 純函式、已靜態驗證（fixture 無附件走最簡路徑）。
 - **非 reassign、非 in-place mutation**：
@@ -267,8 +268,9 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
   - 全 repo `activeMessages` 寫入點皆顯式方法（delete/load/refresh/slice/create）；
     `conversationsStore` 無 `$effect`/`$derived`；`vitest-browser-svelte` 的
     `cleanup` 只跑 `beforeEach`；`vitest-setup-client.ts` 只 mock fetch。
-- → 值變化發生在 **state signal 層**（機制見下）；元兇待第五輪 `watchSignalValue`
-  的 stack trace 指認。
+- → （當時推論）值變化發生在 **state signal 層**（機制見下）；元兇待第五輪
+  `watchSignalValue` 指認。**第五輪結案：無元兇**——「值變化」是
+  `afterEach` 的合法重置打在還掛著的元件上（見 §2m）。
 
 ### Svelte 5 機制（已讀 compiler + runtime 源碼確認，不必重查）
 

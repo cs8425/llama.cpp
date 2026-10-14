@@ -39,8 +39,11 @@
 - [x] agentic `executeAgenticLoop` turn 之間再壓縮(03-§4.4):
       plan → summarize → 建 cmp → 重建 `sessionMessages` → 續跑;
       fail-open;signal 綁 flow abort;`contextAutoCompactionInLoop` 開關
-- [ ] Inspector 編輯:summary 文字 / 斷點選擇器(前移安全、後移強制重摘要)
-- [ ] Inspector 動作:Compact now / Expand(確認對話框)/ 重新摘要 / Copy JSON
+- [x] Inspector 編輯:summary 文字 / 斷點選擇器(前移安全、後移強制重摘要)
+      （P2.4 已交付、check 全綠；client 測試根因已修、待重跑確認——
+      見 06-status §2j/§2m）
+- [x] Inspector 動作:Compact now / Expand(確認對話框)/ 重新摘要 / Copy JSON
+      （同左）
 - [ ] cmp entry 的「編輯 / 重新摘要 / 還原」動作
 - [ ] gauge「Compacted: … saved」列 + 進行中狀態
 - [ ] 快捷鍵 `Shift+Ctrl/Cmd+I` + 快捷鍵說明表登記
