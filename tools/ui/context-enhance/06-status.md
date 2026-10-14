@@ -9,7 +9,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成（見 §2i，**待使用者編譯確認**） |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4） |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -166,7 +166,7 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
 >   （vision tool result）在 compaction 後會回到 mapper 語義——窄邊界情境，記錄在此。
 > - 無新純邏輯（policy / builder / summarize 皆既有）→ 無新 unit；store 層照慣例不 unit 測。
 
-## 2i. Phase 2 已交付檔案（P2.3，待使用者編譯確認）
+## 2i. Phase 2 已交付檔案（P2.3，已確認）
 
 ### 修改
 
@@ -323,17 +323,15 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
     **全綠**。P2.1 完成。
 - **Phase 2 P2.2 ✅ 完成**：使用者跑了 `npm run check`，確認全綠
   （無新增 unit——P2.2 無新純邏輯，見 §5b P2.2 註；store 層照慣例不 unit 測）。
-- **Phase 2 P2.3 ✅ 完成（待使用者編譯確認）**：變更見 §2i。
-  - 請跑 `npm run check`（無新增 unit——P2.3 無新純邏輯，DB 層是 Dexie、
-    store 協調層照慣例不 unit 測，同 5.4/5.5 先例）。
-  - 注意：`compactConversation` 的 path 解析被移入 `resolveConversationPath`
-    （原樣搬移、行為不變）；若 check 有問題優先看這塊與新 import 區塊。
 - **Phase 2 P2.3 第一輪**：使用者跑了 `npm run check`，1 個型別錯：
   `database.service.ts:373` `expandCompactionMessage` 的
   `parent.children.flatMap((childId) => …)` 參數 `childId` implicit any
   （Dexie `.get()` 結果的 `children` 對回調無 contextual typing；本檔既有
   慣例是顯式註解，見 §6）。已修：改 `(childId: string)`，無行為改動。
-- **Phase 2 P2.3 重跑**：請再跑 `npm run check`（無新增 unit）；全綠即 P2.3 完成。
+  （無新增 unit——P2.3 無新純邏輯，DB 層是 Dexie、
+  store 協調層照慣例不 unit 測，同 5.4/5.5 先例）
+- **Phase 2 P2.3 重跑**：使用者跑了 `npm run check`，**全綠**。P2.3 完成
+  （變更見 §2i）。
 - **下一步：P2.4**（Inspector 編輯 + 動作，規格見 §5b P2.4；Phase 1 的 5.8
   手動驗收在 P2.4/P2.6 UI 落地後可一併做，目前阻塞——沒有界面能觸發）。
 
