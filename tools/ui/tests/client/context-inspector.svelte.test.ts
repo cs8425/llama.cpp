@@ -105,7 +105,25 @@ async function waitFor<T extends Node>(find: () => T | null, timeoutMs = 5000): 
 		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
 
-	throw new Error('Timed out waiting for element');
+	throw new Error(`Timed out waiting for element${describeDom()}`);
+}
+
+// Dumps the DOM state on timeout so a failing run shows exactly what the
+// inspector rendered (no dialog at all / dialog stuck on "Building payload…" /
+// dialog with the wrong row count).
+function describeDom(): string {
+	const dialogs = document.querySelectorAll('[role="dialog"]');
+	const dialog = dialogs[0];
+	const rows = document.querySelectorAll('[role="dialog"] button[aria-expanded]');
+	const text = dialog ? (dialog.textContent ?? '').replace(/\s+/g, ' ').slice(0, 400) : 'NONE';
+
+	return [
+		'',
+		`[diag] [role=dialog] elements: ${dialogs.length}`,
+		`[diag] payload row buttons: ${rows.length}`,
+		`[diag] dialog text: ${text}`,
+		`[diag] body length: ${document.body.innerHTML.length}`
+	].join('\n');
 }
 
 function dialogText(): string {
@@ -143,7 +161,56 @@ function setActiveConversation() {
 	} as unknown as DatabaseConversation;
 }
 
+// --- TEMP-DIAG: trace who reassigns conversationsStore.activeMessages -------
+// Svelte 5 compiles $state class fields to prototype accessors; wrapping the
+// setter captures a stack trace for every reassignment (the fixture write
+// happens before the patch, so only in-test writes are logged).
+
+let activeMessagesSetPatched = false;
+let originalActiveMessagesSet: ((value: DatabaseMessage[]) => void) | null = null;
+
+function patchActiveMessagesSetter() {
+	if (activeMessagesSetPatched) return;
+
+	const proto = Object.getPrototypeOf(conversationsStore);
+	const desc = Object.getOwnPropertyDescriptor(proto, 'activeMessages');
+
+	if (!desc?.set) {
+		console.log('[diag] no prototype setter found for activeMessages');
+
+		return;
+	}
+
+	originalActiveMessagesSet = desc.set;
+	activeMessagesSetPatched = true;
+
+	Object.defineProperty(proto, 'activeMessages', {
+		...desc,
+		set(value: DatabaseMessage[]) {
+			console.log(`[diag] activeMessages SET (len=${value.length})`, new Error('set-trace').stack);
+
+			return desc.set!.call(this, value);
+		}
+	});
+}
+
+function unpatchActiveMessagesSetter() {
+	if (!activeMessagesSetPatched || !originalActiveMessagesSet) return;
+
+	const proto = Object.getPrototypeOf(conversationsStore);
+	const desc = Object.getOwnPropertyDescriptor(proto, 'activeMessages');
+
+	if (desc) {
+		Object.defineProperty(proto, 'activeMessages', { ...desc, set: originalActiveMessagesSet });
+	}
+
+	originalActiveMessagesSet = null;
+	activeMessagesSetPatched = false;
+}
+
 async function openInspector() {
+	patchActiveMessagesSetter();
+
 	const { unmount } = render(DialogContextInspector, { open: true });
 
 	await waitFor(() => (payloadRowButtons().length === 4 ? document.querySelector('[role="dialog"]') : null));
@@ -152,6 +219,7 @@ async function openInspector() {
 }
 
 afterEach(() => {
+	unpatchActiveMessagesSetter();
 	vi.restoreAllMocks();
 	conversationsStore.activeMessages = [];
 	conversationsStore.activeConversation = null;

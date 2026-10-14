@@ -3,13 +3,18 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：P2.4（Inspector 編輯 + 動作）已交付，第一輪編譯確認
-> 抓到 4 個錯（`@lucide/svelte` 無 `Compress` icon + 3 個 test 型別錯），
-> 已全數修完（§2k）。第一件要做的事：請使用者重跑 `npm run check` +
-> `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
-> （10 支：4 回歸 + 6 新）。全綠後把 §1/§4/§5b 的 P2.4 改「已確認」，
-> 接著做 P2.5（cmp entry 動作列，規格見 §5b）；Phase 1 的 5.8 手動驗收
-> 項目 1–2 也可一併做（inspector 已有「Compact now」入口）。
+> **恢復點（最新）**：P2.4 第二輪診斷已出爐：`npm run check` ✅；vitest 單支掛，
+> 但 `[inspector-diag]` 顯示 **effect 跑了兩次**：第一次 pathLen 7 → built 4
+> messages（DOM 確實顯示 4 則 + Advanced 區），**然後 `activeMessages` 被清成
+> `[]`** → effect 重跑 pathLen 0 → `result` 被覆蓋成 0 messages（但 DOM 停在
+> 4 則狀態）。conversationsStore 無 `$effect`、全 repo 的 `activeMessages` 寫入點
+> 皆為顯式方法（無自動調用者）→ 元兇未知。已加第三層 TEMP-DIAG：
+> ① test 包 `activeMessages` 的 prototype setter，每次 reassign 打
+> `[diag] activeMessages SET (len=N)` + 完整 stack trace；② 元件加 module-scope
+> `instanceId` counter（偵測 double mount）。
+> 第一件要做的事：請使用者再跑
+> `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts -t "lists the compacted payload"`
+> ，把完整輸出（含 `[diag]` stack trace、`instanceId`）貼回來。
 
 ## 1. 進度總覽
 
@@ -379,6 +384,14 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   （suite import 失敗、0 test）。4 錯：`@lucide/svelte` v1.46.0 無 `Compress`
   icon（vitest 的 module graph 因此整 suite 炸掉）+ test 檔 3 個型別錯
   （`trigger` 未收斂 null、2 處 `Element` 無 `disabled`）。已全數修完（§2k）。
+- **Phase 2 P2.4 第二輪**：使用者跑了 `npm run check`（**全綠**）+ vitest 單支
+  （掛）。`[inspector-diag]` 顯示 effect 跑兩次：pathLen 7 → built 4 messages
+  （DOM 有 4 則 + 5 支 `aria-expanded` 按鈕 = 4 行 + select trigger），
+  **其後 `activeMessages` 被清成 `[]`** → 重跑 pathLen 0 → `result` 被 0 messages
+  覆蓋（DOM 停在 4 則）。靜態排查：conversationsStore 無 `$effect`/`$derived`，
+  全 repo `activeMessages` 寫入點皆顯式方法（delete/load/refresh/slice），
+  無自動調用者；vitest-browser-svelte 的 `cleanup` 只跑 `beforeEach`。
+  已加 setter stack-trace 診斷 + `instanceId`（TEMP-DIAG），待重跑。
 - **Phase 2 P2.4 待重跑確認**（變更見 §2j、修復見 §2k）：請跑
   `npm run check` +
   `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`

@@ -65,6 +65,12 @@
 	let result = $state<ContextBuildResult | null>(null);
 	let showExpandConfirm = $state(false);
 
+	// TEMP-DIAG (remove after P2.4 first green run): module-scoped counter,
+	// shared across instances — detects double mounting in tests.
+	let instanceCounter = 0;
+
+	const instanceId = ++instanceCounter;
+
 	let nCtx = $derived(contextStatsStore.contextTotal);
 	let modelId = $derived(contextStatsStore.activeModelId);
 	let path = $derived(conversationsStore.activeMessages);
@@ -101,17 +107,28 @@
 		let cancelled = false;
 		building = true;
 
+		// TEMP-DIAG (remove after P2.4 first green run): trace the payload
+		// fetch in the page console (vitest browser forwards it to the terminal).
+		console.log('[inspector-diag] effect', { instanceId, open, pathLen: path.length, tick: refreshTick });
+
 		// On a refresh after an action the previous result stays visible
 		// until the new one lands (the rebuild is fast; a blank flash is noise).
 		void buildLlmContext(path)
 			.then((built) => {
 				if (cancelled) return;
 
+				console.log('[inspector-diag] built', {
+					messages: built.messages.length,
+					compaction: built.compaction
+				});
+
 				building = false;
 				result = built;
 			})
 			.catch((error) => {
 				if (cancelled) return;
+
+				console.log('[inspector-diag] build failed', error);
 
 				building = false;
 				console.error('Failed to build the LLM context:', error);
