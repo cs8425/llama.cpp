@@ -3,15 +3,14 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**下一輪 4 項增強已寫入文件（規劃定、未實做）**：
-> N1 `contextSummaryMaxTokens` 上限 4096→65536；N2 新設定
-> `contextKeepTargetPercent`（compact target 提出来給 user 自訂）；
-> N3 手動壓縮 [Stop] 按鈕；N4 prefix-stable summary 模式（設為 default）。
-> 文件已同步：03-§2.1（summary 模式）、04-§2.2/§4（停止鍵 + 設定表）、
-> 05-§1 Phase 3（下一輪 N1–N4）、本檔 §5c。**未改任何 code**。
-> 另：§3.12 threshold 語義修正仍待使用者編譯確認（`npm run check` +
-> unit `compaction-policy`，26 支預期）。
-> 下一輪：依 §5c 實做 N1→N4（每項獨立可編譯確認）。
+> **恢復點（最新）**：**N1 已實做、待編譯確認（設計變更，§3.13）**：
+> summary 上限不再固定數字，改**新設定 `contextSummaryMaxTokensPercent`
+> （INPUT 10–90，預設 70）= n_ctx × %**（128k → ~91k、256k → ~183k）；
+> 舊 key `contextSummaryMaxTokens` 移除（不 migration，舊值丟棄、回預設 70）。
+> N2–N4 未實做（明細 §5c）。§3.12 threshold 語義修正**已使用者確認**
+> （check + unit 26/26 全綠）。
+> 待使用者跑：`npm run check` + unit `compaction-policy`（29 支預期）。
+> 下一輪：N1 確認後依 §5c 續做 N2→N4。
 
 ## 1. 進度總覽
 
@@ -21,8 +20,8 @@
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
-| 設計修正 — threshold 觸發語義解耦（§3.12） | 🚧 已實做、待編譯確認（code + unit + 文件） |
-| 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | ⬜ 規劃定（文件已寫、未實做） |
+| 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
+| 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | 🚧 N1 ✅ 已實做、待編譯確認（§3.13 設計變更：改 n_ctx × %）；N2–N4 ⬜ |
 
 ## 2. Phase 0 已交付檔案
 
@@ -647,6 +646,39 @@ ctx > ~99.2% n_ctx（keep budget + minSummarizeTokens）才可能產生 plan，
 - 任何 threshold：壓縮後 payload ≈ ≤ 50% n_ctx + summary（+ system head），
   與 threshold 數值無關。
 
+### 3.13 N1 設計變更：summary 上限 = n_ctx × %（使用者要求，已實做、待確認）
+
+**背景**：原 N1 規劃是把固定上限 `contextSummaryMaxTokens` 4096 → 65536。
+使用者指出固定數字不對：上限應**跟著 LLM 的 ctx 大小走**——例如 256k 的
+70% ≈ 180k、128k 的 70% ≈ 90k，不該固定死。
+
+**實做**（已改完、待編譯確認）：
+- 設定：`contextSummaryMaxTokens`（INPUT 128–4096、預設 1024）**移除**，改
+  新 key `contextSummaryMaxTokensPercent`（INPUT **10–90**、預設 **70**）
+  （`settings-keys.constants.ts` + `settings.constants.ts` registry；舊 key 不
+  migration、舊值丟棄、回預設 70）。
+- `compaction-policy.ts`：新純函式 `computeSummaryMaxTokens(nCtx, percent) =
+  max(1, floor(nCtx × percent / 100))`；`CompactionSettings` 欄位改名為
+  `contextSummaryMaxTokensPercent`；`computeCompactionBudget` 的
+  `summaryReserve` 改 `computeSummaryMaxTokens(nCtx, …) × 1.5`（公式結構不變）。
+- 3 個 summary 呼叫點改傳 derived 值（三處 nCtx 皆已在 scope）：
+  `chatStore.compactConversation`、`chatStore.summarizeRegion`（recompact /
+  斷點後移共用；簽名加 `convId`，nCtx 未知 → `undefined` →
+  `summarizeMessages` 內建 1024 fallback）、`agenticStore.compactBetweenTurns`。
+- `summarize.ts` 零改動（`maxTokens` 本來就透傳）。
+- unit：新 `computeSummaryMaxTokens` 2 支（128k/256k @70% = 91750/183500、
+  floor 且永不 0）+ budget 4→6 支（50% 公式 / 與 threshold 無關 / reserve
+  壓過 floor / **大模型 @70% 落 10% floor** = 13107）。
+- 文件：02-§3.3/§4.2、04-§4、05-§1、本檔 §5c。
+
+**Budget 連動（行為變更）**：預設 70% cap 時 `summaryReserve = 105% n_ctx`
+> 50% target → `keepBudgetTokens` **恆落 10% n_ctx floor**（小 cap 例如 10%
+時 50% target 公式仍有效：keep = 50% − 15% = 35%）。最壞情況安全：10%
+kept + 70% summary cap + 20% system headroom < n_ctx ✓。意義：壓縮後只留
+~10% n_ctx 的近期上下文——比舊 1024 cap（keep ≈ 50% − 1536）更激進。使用者
+想留更多可調低 percent（20% → keep 20%）；N2 的 keep target 在 percent ≥ 33%
+時會被 floor 蓋過（target 要生效需 percent < target/1.5）。
+
 ## 4. 驗證狀態（目前停在這）
 
 - Phase 0：使用者已跑 `npm run check` + 4 支 unit，**全綠**。
@@ -778,10 +810,15 @@ ctx > ~99.2% n_ctx（keep budget + minSummarizeTokens）才可能產生 plan，
   `context-gauge-compaction`（**8/8**）+ 回歸 `context-panel-mobile` /
   `context-inspector`。**P2.6 完成、Phase 2 完成**（變更見 §2p；第一輪修復
   §2q；第二輪修復 §2r）。
-- **下一步**：① threshold 語義修正的編譯確認（§3.12：`npm run check` +
-  unit `compaction-policy`，26 支預期）；② 下一輪 4 項增強（§5c：N1–N4，
-  規劃已定、未實做）；③ Phase 1 的 5.8 手動驗收（見上方清單）；
-  ④ Phase 3 可選後續（規劃見 05-§1）。
+- **§3.12 threshold 語義修正 ✅ 確認**：使用者跑 `npm run check` +
+  unit `compaction-policy`（26/26），全綠。
+- **N1 已實做、待編譯確認**（變更見 §3.13）：summary 上限改
+  n_ctx × `contextSummaryMaxTokensPercent`（預設 70，舊固定 key 移除）。
+  待使用者跑：`npm run check` + unit `compaction-policy`（29 支預期：
+  舊 26 + 新 3）。
+- **下一步**：① N1 編譯確認；② 依 §5c 續做 N2→N4（N2 的 keep target 與
+  N1 的 percent 在 budget 公式有交互，見 §3.13）；③ Phase 1 的 5.8 手動驗收
+  （見上方清單）；④ Phase 3 可選後續（規劃見 05-§1）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -1029,16 +1066,14 @@ static async createCompactionMessage(params: {
 > 來源：使用者 2026-07-21 要求（§3.12 修正後）。每項獨立可編譯、
 > 獨立可確認；順序建議 N1→N4（N1/N2 同動 settings 檔、可合併一次確認）。
 
-### N1 `contextSummaryMaxTokens` 上限放寬（4096 → 65536）
-- `settings.constants.ts` registry：`max: 4096` → `65536`（min 128 不動）。
-- 理由：agentic 長線跑的被摘要區隨便破 80k tokens，4k summary 上限
-  不夠（摘要要能涵蓋長 turn 的 tool 交換）。
-- `summarize.ts` 的 `max_tokens` 已透傳 `contextSummaryMaxTokens`，零 code
-  改動（只動 registry clamp）。
-- 連動效應：`computeCompactionBudget` 的 `summaryReserve`（1.5 ×
-  summaryMaxTokens）隨之變大 → keep budget 變小；10% n_ctx floor
-  （§3.12）已擋住負值。實做時確認 65536 × 1.5 在小 n_ctx 模型下
-  floor 行為正常。
+### N1 summary 上限 = n_ctx × %（✅ 已實做、待編譯確認；設計變更見 §3.13）
+- ~~registry `max: 4096` → `65536`~~ → 使用者指出固定數字不對：上限應跟著
+  LLM ctx 大小走（256k 的 70% ≈ 180k、128k 的 70% ≈ 90k）。
+- 改新設定 `contextSummaryMaxTokensPercent`（INPUT 10–90、預設 70）+ 純函式
+  `computeSummaryMaxTokens(nCtx, percent)`；3 個 summary 呼叫點（compact / 
+  summarizeRegion / in-loop）取 nCtx 現算；budget reserve 用同一 derived 值 × 1.5
+  （70% 時 keep budget 落 10% floor，明細 §3.13）。
+- 待確認：`npm run check` + unit `compaction-policy`（29 支預期）。
 
 ### N2 新設定 `contextKeepTargetPercent`（compact target 自訂）
 - 新 key `CONTEXT_KEEP_TARGET_PERCENT`（`contextKeepTargetPercent`）+

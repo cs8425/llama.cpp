@@ -155,6 +155,8 @@ Split user-message span (one span exceeds budget):
 ```
 budget = keepBudgetTokens
         # = n_ctx × 0.5 - summaryReserve(≈ summary max_tokens × 1.5),下限 n_ctx × 0.1
+        # summary max_tokens = n_ctx × contextSummaryMaxTokensPercent%(預設 70%;
+        # 70% 時 reserve 壓過 50% target → keep 恆落 10% 下限,見 06-status §3.13)
         # (trigger threshold 只決定「何時檢查」,不參與 budget — 見下方解耦說明)
 
 valid(j) = path[j].role ∈ {user, assistant}
@@ -225,7 +227,8 @@ estimate(msg) = len(content)/4
   ```
 - **transcript 格式**:`[role] content`,attachments 以佔位符表示
   (`[image: name.jpg]`、`[file: x.ts, 12KB]`),避免把 base64 餵進 summary 呼叫。
-- **參數**:`max_tokens ≈ 1024`(可設)、`temperature 0.2`、
+- **參數**:`max_tokens = n_ctx × contextSummaryMaxTokensPercent%`(預設 70%;
+  128k → 91750、256k → 183500;n_ctx 未知時 fallback 1024)、`temperature 0.2`、
   model = 該對話的模型(`getConversationModel`),ROUTER 模式下明確帶 model。
 - **預設 prompt(可設定)**:
   ```

@@ -59,8 +59,9 @@
 ### Phase 3 —(可選,後續)
 
 > **下一輪(規劃已定、未實做;明細見 06-status §5c,依序 N1→N4)**:
-> 1. **N1** `contextSummaryMaxTokens` 上限 4096 → **65536**(agentic 長線
->    跑的被摘要區隨便破 80k,4k 上限不夠)。
+> 1. **N1** ✅ summary 上限 = n_ctx × %（新設定 `contextSummaryMaxTokensPercent`
+>    預設 70：128k → ~91k、256k → ~183k；舊固定 key 移除——已實做、待確認，
+>    見 06-status §3.13）。
 > 2. **N2** 新設定 `contextKeepTargetPercent`(INPUT 10–90,預設 50)——
 >    compact target 從固定 50% 常數(`KEEP_TARGET_FRACTION`)提出来給
 >    user 自訂。

@@ -18,7 +18,7 @@ export const SETTINGS_KEYS = {
 	CONTEXT_KEEP_MIN_MESSAGES: 'contextKeepMinMessages',
 	CONTEXT_KEEP_MIN_USER_TURNS: 'contextKeepMinUserTurns',
 	CONTEXT_SHOW_COMPACTION_ENTRIES: 'contextShowCompactionEntries',
-	CONTEXT_SUMMARY_MAX_TOKENS: 'contextSummaryMaxTokens',
+	CONTEXT_SUMMARY_MAX_TOKENS_PERCENT: 'contextSummaryMaxTokensPercent',
 	CONTEXT_SUMMARY_PROMPT: 'contextSummaryPrompt',
 	CONVERSATION_TABS: 'conversationTabs',
 	COPY_TEXT_ATTACHMENTS_AS_PLAIN_TEXT: 'copyTextAttachmentsAsPlainText',

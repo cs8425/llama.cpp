@@ -238,13 +238,13 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 				type: SettingsFieldType.INPUT
 			},
 			{
-				defaultValue: 1024,
-				help: 'Maximum tokens for the generated conversation summary.',
+				defaultValue: 70,
+				help: 'Maximum size of the generated summary, as a percentage of the model context (n_ctx): 70% allows ~91k tokens on a 128k model, ~183k on a 256k model. Scales with the model instead of a fixed cap.',
 				isPositiveInteger: true,
-				key: SETTINGS_KEYS.CONTEXT_SUMMARY_MAX_TOKENS,
-				label: 'Summary max tokens',
-				max: 4096,
-				min: 128,
+				key: SETTINGS_KEYS.CONTEXT_SUMMARY_MAX_TOKENS_PERCENT,
+				label: 'Summary max tokens (% of n_ctx)',
+				max: 90,
+				min: 10,
 				type: SettingsFieldType.INPUT
 			},
 			{

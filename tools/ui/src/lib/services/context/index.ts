@@ -9,6 +9,7 @@
 export { buildLlmContext, findLastCompactionEntry } from './context-builder';
 export {
 	computeCompactionBudget,
+	computeSummaryMaxTokens,
 	estimateApiMessageTokens,
 	estimateCompactionSavings,
 	estimateTokens,

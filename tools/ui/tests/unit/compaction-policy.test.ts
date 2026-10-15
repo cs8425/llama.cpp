@@ -5,6 +5,7 @@
 import { AttachmentType, ContentPartType, FileTypeAudio, MessageRole, MessageType } from '$lib/enums';
 import {
 	computeCompactionBudget,
+	computeSummaryMaxTokens,
 	estimateApiMessageTokens,
 	estimateCompactionSavings,
 	estimateTokens,
@@ -171,18 +172,30 @@ describe('estimateApiMessageTokens', () => {
 	});
 });
 
+describe('computeSummaryMaxTokens', () => {
+	it('derives the cap as a percentage of n_ctx (70% of 128k ≈ 91750, of 256k ≈ 183500)', () => {
+		expect(computeSummaryMaxTokens(131072, 70)).toBe(91750);
+		expect(computeSummaryMaxTokens(262144, 70)).toBe(183500);
+	});
+
+	it('floors the product and never returns 0', () => {
+		expect(computeSummaryMaxTokens(1000, 33)).toBe(330);
+		expect(computeSummaryMaxTokens(5, 10)).toBe(1);
+	});
+});
+
 describe('computeCompactionBudget', () => {
 	const settings: CompactionSettings = {
 		contextKeepMinMessages: 2,
 		contextKeepMinUserTurns: 4,
-		contextSummaryMaxTokens: 1024
+		contextSummaryMaxTokensPercent: 7
 	};
 
 	it('derives the keep budget from n_ctx and the summary reserve (50% target)', () => {
-		// 32768 × 0.5 = 16384; reserve = 1024 × 1.5 = 1536
-		const budget = computeCompactionBudget(32768, settings);
+		// 20000 × 0.5 = 10000; summary max = 20000 × 7% = 1400; reserve = 2100
+		const budget = computeCompactionBudget(20000, settings);
 
-		expect(budget.keepBudgetTokens).toBe(16384 - 1536);
+		expect(budget.keepBudgetTokens).toBe(10000 - 2100);
 	});
 
 	it('is independent of the trigger threshold', () => {
@@ -191,16 +204,26 @@ describe('computeCompactionBudget', () => {
 		const low = { ...settings, contextCompactionThreshold: 1 };
 		const high = { ...settings, contextCompactionThreshold: 90 };
 
-		expect(computeCompactionBudget(32768, low).keepBudgetTokens).toBe(
-			computeCompactionBudget(32768, high).keepBudgetTokens
+		expect(computeCompactionBudget(20000, low).keepBudgetTokens).toBe(
+			computeCompactionBudget(20000, high).keepBudgetTokens
 		);
 	});
 
-	it('floors the keep budget at 10% of n_ctx for small models', () => {
-		// 2048 × 0.5 = 1024; reserve 1536 → 1024 − 1536 < 0 → floor 2048 × 0.1 = 204
-		const budget = computeCompactionBudget(2048, settings);
+	it('floors the keep budget at 10% of n_ctx when the reserve dominates', () => {
+		// 2048 × 0.5 = 1024; summary max = 2048 × 70% = 1433; reserve = 2149.5
+		// → 1024 − 2149.5 < 0 → floor 2048 × 0.1 = 204.8
+		const budget = computeCompactionBudget(2048, { ...settings, contextSummaryMaxTokensPercent: 70 });
 
 		expect(budget.keepBudgetTokens).toBe(204);
+	});
+
+	it('lands on the 10% floor at the default 70% cap on a large model', () => {
+		// 131072 × 0.5 = 65536; summary max = 91750; reserve = 137625
+		// → floor 131072 × 0.1 = 13107.2 (the safe worst case: 10% kept +
+		// 70% summary cap + headroom for the system prompt)
+		const budget = computeCompactionBudget(131072, { ...settings, contextSummaryMaxTokensPercent: 70 });
+
+		expect(budget.keepBudgetTokens).toBe(13107);
 	});
 
 	it('passes the min limits through and pins minSummarizeTokens', () => {

@@ -22,6 +22,7 @@ import {
 	type CompactionPlan,
 	SUMMARY_CONTENT_PREFIX,
 	computeCompactionBudget,
+	computeSummaryMaxTokens,
 	estimateTokens,
 	planCompaction,
 	summarizeMessages
@@ -608,7 +609,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 
 		try {
 			const summary = await summarizeMessages(plan, model, undefined, {
-				maxTokens: config.contextSummaryMaxTokens,
+				maxTokens: computeSummaryMaxTokens(nCtx, config.contextSummaryMaxTokensPercent),
 				prompt: config.contextSummaryPrompt.trim() || undefined
 			});
 
@@ -800,6 +801,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 
 		try {
 			const summary = await this.summarizeRegion(
+				convId,
 				path,
 				newIndex,
 				path[newIndex].role === MessageRole.ASSISTANT
@@ -879,6 +881,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 
 		try {
 			const summary = await this.summarizeRegion(
+				convId,
 				path,
 				boundaryIndex,
 				baseMeta.isSplitTurn === true
@@ -994,16 +997,19 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 	/**
 	 * Shared summary call for the manual re-summarizations (recompact, backward
 	 * boundary move): resolves the model like compactConversation, applies the
-	 * configured summary options and summarizes the region before
-	 * `boundaryIndex` (the system-prompt head excluded).
+	 * configured summary options (maxTokens derived from the conversation's
+	 * n_ctx) and summarizes the region before `boundaryIndex` (the system-prompt
+	 * head excluded).
 	 */
 	private async summarizeRegion(
+		convId: string,
 		path: DatabaseMessage[],
 		boundaryIndex: number,
 		isSplitTurn: boolean
 	): Promise<string> {
 		const headLength = this.headLengthOf(path);
 		const config = settingsStore.config;
+		const nCtx = this.getContextSizeForConversation(convId, path);
 		const plan: CompactionPlan = {
 			cutIndex: boundaryIndex,
 			estimatedTokensAfter: path
@@ -1017,7 +1023,11 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		};
 
 		return await summarizeMessages(plan, this.resolveCompactionModel(path), undefined, {
-			maxTokens: config.contextSummaryMaxTokens,
+			// unknown context size → summarizeMessages' built-in 1024 default
+			maxTokens:
+				nCtx && nCtx > 0
+					? computeSummaryMaxTokens(nCtx, config.contextSummaryMaxTokensPercent)
+					: undefined,
 			prompt: config.contextSummaryPrompt.trim() || undefined
 		});
 	}

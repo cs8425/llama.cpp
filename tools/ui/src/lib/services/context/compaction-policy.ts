@@ -173,18 +173,30 @@ function isCuttable(message: DatabaseMessage): boolean {
 export interface CompactionSettings {
 	contextKeepMinMessages: number;
 	contextKeepMinUserTurns: number;
-	contextSummaryMaxTokens: number;
+	contextSummaryMaxTokensPercent: number;
+}
+
+/**
+ * Max tokens for the summary LLM call: a percentage of the model context
+ * (n_ctx) so the cap scales with the model — 70% of 128k ≈ 91750, of 256k ≈
+ * 183500 — instead of a fixed number (06-status §3.13).
+ */
+export function computeSummaryMaxTokens(nCtx: number, percent: number): number {
+	return Math.max(1, Math.floor((nCtx * percent) / 100));
 }
 
 /**
  * Compaction budget for a known n_ctx (02-data-model §3.3). The kept suffix
  * must fit under a fixed 50% of n_ctx minus a reserve for the summary itself
- * (≈ 1.5 × the summary's max tokens), floored at 10% of n_ctx. The threshold
- * only decides WHEN the auto check runs, never how much context survives —
- * see the note on {@link KEEP_TARGET_FRACTION}.
+ * (≈ 1.5 × the summary's max tokens, which is a percentage of n_ctx — at the
+ * default 70% cap the keep budget lands on the 10% floor: the safe worst
+ * case is 10% kept + 70% summary cap + headroom for the system prompt),
+ * floored at 10% of n_ctx. The threshold only decides WHEN the auto check
+ * runs, never how much context survives — see the note on
+ * {@link KEEP_TARGET_FRACTION}.
  */
 export function computeCompactionBudget(nCtx: number, settings: CompactionSettings): CompactionBudget {
-	const summaryReserve = settings.contextSummaryMaxTokens * 1.5;
+	const summaryReserve = computeSummaryMaxTokens(nCtx, settings.contextSummaryMaxTokensPercent) * 1.5;
 
 	return {
 		keepBudgetTokens: Math.max(
