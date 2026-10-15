@@ -340,10 +340,20 @@
 		}
 	}
 
+	// Collapsed rows show a one-line preview; the full text stays reachable
+	// through the expanded row and Copy JSON. Capping the preview keeps huge
+	// tool results from rendering as single multi-KB text nodes (which also
+	// pushed the dialog's min-content width past its bounds).
+	const PREVIEW_MAX_LENGTH = 150;
+
+	function clampPreview(text: string): string {
+		return text.length > PREVIEW_MAX_LENGTH ? `${text.slice(0, PREVIEW_MAX_LENGTH)}…` : text;
+	}
+
 	function apiPreviewText(message: ApiChatMessageData): string {
 		const text = contentText(message.content).trim().replace(/\s+/g, ' ');
 
-		if (text) return text;
+		if (text) return clampPreview(text);
 
 		const callNames = (message.tool_calls ?? [])
 			.map((call) => call.function?.name)
@@ -390,7 +400,7 @@
 	function dbPreviewText(message: DatabaseMessage): string {
 		const text = message.content.trim().replace(/\s+/g, ' ');
 
-		if (text) return text;
+		if (text) return clampPreview(text);
 
 		if (message.toolCalls) return '(tool_calls)';
 
@@ -503,8 +513,8 @@
 </script>
 
 <Dialog.Root onOpenChange={handleOpenChange} {open}>
-	<Dialog.Content class="sm:max-w-2xl md:max-w-3xl">
-		<Dialog.Header>
+	<Dialog.Content class="overflow-x-hidden sm:max-w-2xl md:max-w-3xl">
+		<Dialog.Header class="md:bg-background">
 			<Dialog.Title class="flex items-center gap-2">
 				<Braces class="h-5 w-5" />
 
