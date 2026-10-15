@@ -514,7 +514,9 @@
 
 <Dialog.Root onOpenChange={handleOpenChange} {open}>
 	<Dialog.Content class="overflow-x-hidden sm:max-w-2xl md:max-w-3xl">
-		<Dialog.Header class="md:bg-background">
+		<Dialog.Header />
+
+		<div class="flex flex-col gap-2">
 			<Dialog.Title class="flex items-center gap-2">
 				<Braces class="h-5 w-5" />
 
@@ -524,7 +526,7 @@
 			<Dialog.Description>
 				The exact payload the next request sends to the LLM, built by the same code path as sending.
 			</Dialog.Description>
-		</Dialog.Header>
+		</div>
 
 		{#if !result}
 			<div class="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
@@ -633,7 +635,7 @@
 						</Button>
 					</div>
 
-					<ul class="flex flex-col divide-y divide-border/40 rounded-md border border-border/50">
+					<ul class="max-w-2xl flex flex-col divide-y divide-border/40 rounded-md border border-border/50">
 						{#each payloadRows as row, index (index)}
 							<li>
 								<div class="flex items-start gap-1">
