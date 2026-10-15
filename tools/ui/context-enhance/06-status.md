@@ -3,18 +3,13 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**P2.6 第二輪重跑剩 2 支 form 入口 strict mode violation、已修復（見 §2r）、
-> 待使用者重跑確認**——第二輪 8 支掛 2 支（6 綠：gauge 列 3 + 快捷鍵 3）：
-> `getByRole('button', { name: … })` 同時命中 bits-ui `Tooltip.Trigger` 自帶的
-> `<button>` 外殼與內層真正的 `Button`（同一 accessible name；Add/Mic 按鈕同款
-> 雙 button 結構、app 既有慣例）→ 2 支各加 `.last()` 取內層（`onclick` /
-> `disabled` 都在內層）。元件/store 零改動。第一輪修復明細見 §2q。
-> 要跑的指令：`npm run check` +
-> `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
-> `npx vitest --project=client --run tests/client/context-gauge-compaction.svelte.test.ts`
-> +（回歸）`npx vitest --project=client --run tests/client/context-panel-mobile.svelte.test.ts`
-> +（回歸）`npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`。
-> 全綠 → P2.6 確認、Phase 2 完成（剩 5.8 手動驗收 + Phase 3 可選後續）。
+> **恢復點（最新）**：**P2.6 ✅ 完成並確認——Phase 2 完成**。
+> 使用者重跑第二輪的 5 條指令全綠：`npm run check` + unit
+> `compaction-policy` + client `context-gauge-compaction`（**8/8**）+ 回歸
+> `context-panel-mobile` / `context-inspector`。第二輪 2 支 strict mode
+> violation 已修（測試端：`.last()` 取內層 `Button`，見 §2r）；元件/store 零改動。
+> 接下來：① Phase 1 的 5.8 手動驗收（三入口已齊、現在可驗；清單見 §4）；
+> ② Phase 3 可選後續（規劃見 05-§1）。無未決實做項。
 
 ## 1. 進度總覽
 
@@ -22,7 +17,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 ✅ 完成並確認（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅ 完成並確認（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 第二輪剩 2 支 strict mode violation 已修復、待重跑確認**（見 §2p/§2q/§2r） |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -493,7 +488,7 @@ npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts
 npx vitest --project=unit --run tests/unit/compaction-policy.test.ts
 ```
 
-## 2r. P2.6 第二輪重跑剩 2 支 strict mode violation 的修復（重跑待確認）
+## 2r. P2.6 第二輪重跑剩 2 支 strict mode violation 的修復（重跑已確認全綠、8/8）
 
 第二輪重跑 8 支掛 2 支（6 綠：gauge 列 3 + 快捷鍵 3）。兩支都是
 `getByRole('button', { name: … })` 的 strict mode violation——同一 accessible
@@ -524,18 +519,12 @@ role 查這些按鈕所以沒浮出。
 > - 不改元件：雙 button 是 Add/Mic 同款既有結構，只改一個會造成同列按鈕不一致；
 >   若要根治 trigger 的 button 外殼屬獨立 a11y 工單，不在 P2.6 範圍。
 
-### 重跑指令（~45s）
+### 重跑（已確認全綠）
 
-```bash
-npm run check
-npx vitest --project=client --run tests/client/context-gauge-compaction.svelte.test.ts
-# 回歸
-npx vitest --project=client --run tests/client/context-panel-mobile.svelte.test.ts
-npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts
-npx vitest --project=unit --run tests/unit/compaction-policy.test.ts
-```
-
-全綠 → P2.6 確認、Phase 2 完成（剩 5.8 手動驗收 + Phase 3 可選後續）。
+上述 5 條指令由使用者全數跑過、**全綠**：`npm run check` + unit
+`compaction-policy` + client `context-gauge-compaction`（**8/8**，含上述修復的
+2 支 form 入口）+ 回歸 `context-panel-mobile` / `context-inspector`。
+**P2.6 確認、Phase 2 完成**（剩 Phase 1 的 5.8 手動驗收 + Phase 3 可選後續）。
 
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
@@ -651,8 +640,8 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
   2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。
   3. 無 cmp 對話行為與現行完全一致（context-builder.test.ts 的回归測試保證）。
-  > ⚠️ **5.8 項目 1–2 待 P2.4 編譯確認後即可驗收**：P2.4 已在 inspector 提供「Compact now」入口（§2j）；
-  > P2.6 再補其餘入口（表單 icon + 快捷鍵 + gauge 列）。項目 3 已由 unit 回歸覆蓋。
+  > ✅ **5.8 項目 1–2 現在可驗**（P2.4 的 inspector「Compact now」§2j + P2.6 的表單
+  > Eye 按鈕 / 快捷鍵 / gauge 列皆已落地並確認）。項目 3 已由 unit 回歸覆蓋。
 - **Phase 2 P2.1 ✅ 完成**：變更見 §2g。
   - 第一輪：使用者跑了 `npm run check` +
     `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（18/18 綠）。
@@ -748,9 +737,14 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
 - **Phase 2 P2.6 第二輪**（修復見 §2r）：client 6/8 綠，2 支 form 入口 strict
   mode violation——`getByRole('button', { name })` 同時命中 bits-ui
   `Tooltip.Trigger` 外層 button 與內層 `Button`（Add/Mic 同款既有雙 button
-  結構）。2 支各加 `.last()` 取內層（`onclick`/`disabled` 都在內層）。待使用者
-  重跑：`npm run check` + gauge-compaction suite（8 支）+ 回歸（panel-mobile /
-  inspector）+ unit（compaction-policy）。
+  結構）。2 支各加 `.last()` 取內層（`onclick`/`disabled` 都在內層）。
+- **Phase 2 P2.6 第二輪重跑 ✅ 確認**：使用者跑了 5 條指令全綠——
+  `npm run check` + unit `compaction-policy` + client
+  `context-gauge-compaction`（**8/8**）+ 回歸 `context-panel-mobile` /
+  `context-inspector`。**P2.6 完成、Phase 2 完成**（變更見 §2p；第一輪修復
+  §2q；第二輪修復 §2r）。
+- **下一步**：① Phase 1 的 5.8 手動驗收（見上方清單；三入口已齊、現在可驗）；
+  ② Phase 3 可選後續（規劃見 05-§1）。無未決實做項。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -980,7 +974,7 @@ static async createCompactionMessage(params: {
   （`message.convId` 可用）。進行中（`compacting`）disabled。
 - client 測試：`tests/client/chat-message-compaction.svelte.test.ts` 擴編（4 → 10 支）。
 
-### P2.6 gauge 列 + 第三入口 + 快捷鍵（04-§2.3 / §3）✅ 已實做、待編譯確認（變更見 §2p）
+### P2.6 gauge 列 + 第三入口 + 快捷鍵（04-§2.3 / §3）✅ 完成並確認（client 8/8 + check 全綠；變更見 §2p、修復見 §2q/§2r）
 - `ContextGaugePopup.svelte` body：inspector 連結上方加列——
   `compacting` 時「Compacting context…」（spinner）；有生效 cmp 時
   「Compacted: N messages · ~X tokens saved」（X = `estimatedTokensBefore −`
