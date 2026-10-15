@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Check, Pencil, RefreshCw, UnfoldVertical } from '@lucide/svelte';
+	import { Check, Pencil, RefreshCw, Square, UnfoldVertical } from '@lucide/svelte';
 	import DialogConfirmation from '$lib/components/app/dialogs/DialogConfirmation.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Textarea } from '$lib/components/ui/textarea';
@@ -26,6 +26,7 @@
 	let meta = $derived(message.compactionMeta);
 	let path = $derived(conversationsStore.activeMessages);
 	let headLength = $derived(path[0]?.role === MessageRole.SYSTEM ? 1 : 0);
+	let compacting = $derived(contextStatsStore.compacting);
 
 	// The store actions are I7-guarded anyway (isChatLoading / compacting);
 	// the UI just gives feedback while the context is busy.
@@ -118,6 +119,13 @@
 
 	async function handleRecompact() {
 		await chatStore.recompactConversationEntry(message.convId, message.id);
+	}
+
+	// N3: aborts the in-flight summary call (store fails open — no cmp node);
+	// compacting resets in the store's finally, which flips the row back to the
+	// normal action buttons.
+	function handleStopCompaction() {
+		chatStore.stopCompaction();
 	}
 
 	function requestExpand() {
@@ -239,38 +247,46 @@
 				</div>
 
 				<div class="flex flex-wrap gap-2 border-t border-border/50 pt-2">
-					<Button
-						class="h-7 gap-1 px-2 text-xs"
-						disabled={actionsBlocked}
-						onclick={startEditingSummary}
-						variant="outline"
-					>
-						<Pencil class="h-3.5 w-3.5" />
+					{#if compacting}
+						<Button class="h-7 gap-1 px-2 text-xs" onclick={handleStopCompaction} variant="destructive">
+							<Square class="h-3.5 w-3.5" />
 
-						Edit
-					</Button>
+							Stop
+						</Button>
+					{:else}
+						<Button
+							class="h-7 gap-1 px-2 text-xs"
+							disabled={actionsBlocked}
+							onclick={startEditingSummary}
+							variant="outline"
+						>
+							<Pencil class="h-3.5 w-3.5" />
 
-					<Button
-						class="h-7 gap-1 px-2 text-xs"
-						disabled={actionsBlocked || !boundaryValid}
-						onclick={handleRecompact}
-						variant="outline"
-					>
-						<RefreshCw class="h-3.5 w-3.5" />
+							Edit
+						</Button>
 
-						Re-summarize
-					</Button>
+						<Button
+							class="h-7 gap-1 px-2 text-xs"
+							disabled={actionsBlocked || !boundaryValid}
+							onclick={handleRecompact}
+							variant="outline"
+						>
+							<RefreshCw class="h-3.5 w-3.5" />
 
-					<Button
-						class="h-7 gap-1 px-2 text-xs"
-						disabled={actionsBlocked}
-						onclick={requestExpand}
-						variant="outline"
-					>
-						<UnfoldVertical class="h-3.5 w-3.5" />
+							Re-summarize
+						</Button>
 
-						Restore all context
-					</Button>
+						<Button
+							class="h-7 gap-1 px-2 text-xs"
+							disabled={actionsBlocked}
+							onclick={requestExpand}
+							variant="outline"
+						>
+							<UnfoldVertical class="h-3.5 w-3.5" />
+
+							Restore all context
+						</Button>
+					{/if}
 				</div>
 			</div>
 		{/if}

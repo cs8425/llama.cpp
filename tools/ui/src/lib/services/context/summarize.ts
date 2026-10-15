@@ -129,7 +129,9 @@ function summarizeToolCalls(toolCallsJson: string): string {
  *
  * @param plan - The plan whose `toSummarize` region gets summarized.
  * @param model - Model to use (the conversation's model; required in ROUTER mode).
- * @param signal - Abort signal (bound to the flow abort for mid-loop compaction).
+ * @param signal - Abort signal (the flow abort for mid-loop compaction, the
+ *   stop-compaction controller for manual actions). An aborted signal throws
+ *   an `AbortError` so callers can distinguish "stopped" from "failed".
  * @param options - maxTokens / temperature / custom prompt.
  * @returns The summary text (trimmed). Throws on any failure — the caller must
  *   treat that as "do not compact".
@@ -158,6 +160,13 @@ export async function summarizeMessages(
 		undefined,
 		signal
 	);
+
+	// ChatService swallows a fetch AbortError (returns undefined), which would
+	// otherwise surface below as "empty response". Re-throw it as a real
+	// abort so callers can distinguish "stopped" from "failed".
+	if (signal?.aborted) {
+		throw new DOMException('Summary generation aborted', 'AbortError');
+	}
 
 	const summary = typeof response === 'string' ? response.trim() : '';
 

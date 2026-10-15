@@ -5,8 +5,9 @@
 // entirely when `contextShowCompactionEntries` is off. P2.5 adds the
 // manual-intervention actions in the expanded region, all spied on the
 // chatStore: edit the summary in place (prefix stripped), re-summarize and
-// restore the full context (with a confirmation dialog); while
-// `contextStatsStore.compacting` every action is disabled.
+// restore the full context (with a confirmation dialog). N3: while
+// `contextStatsStore.compacting` the action row is replaced by a Stop button
+// calling `stopCompaction`.
 //
 // Run: npx vitest --project=client --run tests/client/chat-message-compaction.svelte.test.ts
 
@@ -373,15 +374,33 @@ describe('ChatMessageCompaction entry actions (Phase 2 P2.5)', () => {
 		unmount();
 	});
 
-	it('disables the actions while compacting', async () => {
+	it('shows a Stop button in place of the actions while compacting', async () => {
 		buildFixture();
 		contextStatsStore.compacting = true;
 
 		const { row, unmount } = await openExpandedEntry();
 
-		expect(findRowButton(row, 'Edit')?.disabled).toBe(true);
-		expect(findRowButton(row, 'Re-summarize')?.disabled).toBe(true);
-		expect(findRowButton(row, 'Restore all context')?.disabled).toBe(true);
+		const stopButton = findRowButton(row, 'Stop');
+
+		expect(stopButton).not.toBeNull();
+		expect(stopButton?.disabled).toBe(false);
+		expect(findRowButton(row, 'Edit')).toBeNull();
+		expect(findRowButton(row, 'Re-summarize')).toBeNull();
+		expect(findRowButton(row, 'Restore all context')).toBeNull();
+
+		unmount();
+	});
+
+	it('Stop calls stopCompaction while a summary is in flight', async () => {
+		buildFixture();
+		contextStatsStore.compacting = true;
+		const stopSpy = vi.spyOn(chatStore, 'stopCompaction');
+
+		const { row, unmount } = await openExpandedEntry();
+
+		await userEvent.click(findRowButton(row, 'Stop')!);
+
+		expect(stopSpy).toHaveBeenCalledTimes(1);
 
 		unmount();
 	});

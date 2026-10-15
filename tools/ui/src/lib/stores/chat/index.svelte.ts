@@ -83,6 +83,10 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 	streamConnectionState = $state<StreamConnectionState>(StreamConnectionState.STREAMING);
 	private abortControllers = new SvelteMap<string, AbortController>();
 	private addFilesHandler: ((files: File[]) => void) | null = $state(null);
+	// N3: the in-flight manual compaction's summary call (compact / recompact /
+	// backward boundary move). stopCompaction() aborts it; in-loop compaction
+	// keeps the flow's own signal.
+	private compactionAbortController: AbortController | null = null;
 	// message flows: edit, regenerate, continue, delete
 	private flows = new ChatMessageFlows(this);
 	private isEditModeActive = $state(false);
@@ -606,9 +610,11 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		const model = this.resolveCompactionModel(path);
 
 		contextStatsStore.compacting = true;
+		const abortController = new AbortController();
+		this.compactionAbortController = abortController;
 
 		try {
-			const summary = await summarizeMessages(plan, model, undefined, {
+			const summary = await summarizeMessages(plan, model, abortController.signal, {
 				maxTokens: computeSummaryMaxTokens(nCtx, config.contextSummaryMaxTokensPercent),
 				prompt: config.contextSummaryPrompt.trim() || undefined
 			});
@@ -646,9 +652,26 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		} catch (error) {
 			// Fail-open: no cmp node was created (or it was created but the
 			// state updates failed) — the conversation keeps its full context.
-			toast.error(`Compaction failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+			if (isAbortError(error)) {
+				toast.info('Compaction stopped');
+			} else {
+				toast.error(`Compaction failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+			}
 		} finally {
+			this.compactionAbortController = null;
 			contextStatsStore.compacting = false;
+		}
+	}
+
+	/**
+	 * Stops the in-flight manual compaction (N3): aborts the summary call, which
+	 * fails open — no cmp node is created, `compacting` resets and the UI's
+	 * Stop button flips back to the normal actions. In-loop compaction is
+	 * stopped through the flow's own abort, not this method.
+	 */
+	stopCompaction(): void {
+		if (this.compactionAbortController) {
+			this.compactionAbortController.abort();
 		}
 	}
 
@@ -798,13 +821,16 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 
 		// Backward move: the enlarged region must be re-summarized (02-§4).
 		contextStatsStore.compacting = true;
+		const abortController = new AbortController();
+		this.compactionAbortController = abortController;
 
 		try {
 			const summary = await this.summarizeRegion(
 				convId,
 				path,
 				newIndex,
-				path[newIndex].role === MessageRole.ASSISTANT
+				path[newIndex].role === MessageRole.ASSISTANT,
+				abortController.signal
 			);
 			const model = this.resolveCompactionModel(path);
 			const updates = {
@@ -826,8 +852,13 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			conversationsStore.updateConversationTimestamp(convId);
 			toast.success('Boundary moved — summary regenerated');
 		} catch (error) {
-			toast.error(`Boundary move failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+			if (isAbortError(error)) {
+				toast.info('Compaction stopped');
+			} else {
+				toast.error(`Boundary move failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+			}
 		} finally {
+			this.compactionAbortController = null;
 			contextStatsStore.compacting = false;
 		}
 	}
@@ -878,13 +909,16 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		}
 
 		contextStatsStore.compacting = true;
+		const abortController = new AbortController();
+		this.compactionAbortController = abortController;
 
 		try {
 			const summary = await this.summarizeRegion(
 				convId,
 				path,
 				boundaryIndex,
-				baseMeta.isSplitTurn === true
+				baseMeta.isSplitTurn === true,
+				abortController.signal
 			);
 			const model = this.resolveCompactionModel(path);
 			const updates = {
@@ -905,8 +939,13 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			conversationsStore.updateConversationTimestamp(convId);
 			toast.success('Summary regenerated');
 		} catch (error) {
-			toast.error(`Re-summarization failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+			if (isAbortError(error)) {
+				toast.info('Compaction stopped');
+			} else {
+				toast.error(`Re-summarization failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+			}
 		} finally {
+			this.compactionAbortController = null;
 			contextStatsStore.compacting = false;
 		}
 	}
@@ -999,13 +1038,14 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 	 * boundary move): resolves the model like compactConversation, applies the
 	 * configured summary options (maxTokens derived from the conversation's
 	 * n_ctx) and summarizes the region before `boundaryIndex` (the system-prompt
-	 * head excluded).
+	 * head excluded). `signal` carries the stop-compaction abort (N3).
 	 */
 	private async summarizeRegion(
 		convId: string,
 		path: DatabaseMessage[],
 		boundaryIndex: number,
-		isSplitTurn: boolean
+		isSplitTurn: boolean,
+		signal?: AbortSignal
 	): Promise<string> {
 		const headLength = this.headLengthOf(path);
 		const config = settingsStore.config;
@@ -1022,7 +1062,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			toSummarize: path.slice(headLength, boundaryIndex)
 		};
 
-		return await summarizeMessages(plan, this.resolveCompactionModel(path), undefined, {
+		return await summarizeMessages(plan, this.resolveCompactionModel(path), signal, {
 			// unknown context size → summarizeMessages' built-in 1024 default
 			maxTokens:
 				nCtx && nCtx > 0

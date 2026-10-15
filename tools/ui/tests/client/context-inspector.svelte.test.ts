@@ -430,7 +430,7 @@ describe('DialogContextInspector (actions, Phase 2 P2.4)', () => {
 		unmount();
 	});
 
-	it('disables the actions and shows a spinner row while compacting', async () => {
+	it('shows a Stop button in place of the actions while compacting', async () => {
 		buildCompactedFixture();
 		setActiveConversation();
 		contextStatsStore.compacting = true;
@@ -439,15 +439,37 @@ describe('DialogContextInspector (actions, Phase 2 P2.4)', () => {
 
 		expect(dialogText()).toContain('Compacting context…');
 
-		expect(findDialogButton('Compact now')?.disabled).toBe(true);
-		expect(findDialogButton('Expand')?.disabled).toBe(true);
-		expect(findDialogButton('Re-summarize')?.disabled).toBe(true);
+		// the summary-producing actions are replaced by a single enabled Stop
+		const stopButton = findDialogButton('Stop');
+
+		expect(stopButton).not.toBeNull();
+		expect(stopButton?.disabled).toBe(false);
+		expect(findDialogButton('Compact now')).toBeNull();
+		expect(findDialogButton('Expand')).toBeNull();
+		expect(findDialogButton('Re-summarize')).toBeNull();
+
+		// the non-summary actions stay disabled
 		expect(
 			document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="Edit summary"]')?.disabled
 		).toBe(true);
 		expect(
 			document.querySelector<HTMLButtonElement>('[role="dialog"] [data-slot="select-trigger"]')?.disabled
 		).toBe(true);
+
+		unmount();
+	});
+
+	it('Stop calls stopCompaction while a summary is in flight', async () => {
+		buildCompactedFixture();
+		setActiveConversation();
+		contextStatsStore.compacting = true;
+		const stopSpy = vi.spyOn(chatStore, 'stopCompaction');
+
+		const { unmount } = await openInspector();
+
+		await userEvent.click(findDialogButton('Stop')!);
+
+		expect(stopSpy).toHaveBeenCalledTimes(1);
 
 		unmount();
 	});

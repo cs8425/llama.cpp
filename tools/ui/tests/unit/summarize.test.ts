@@ -3,7 +3,9 @@
 // their names, and empty messages drop out entirely.
 
 import { AttachmentType, MessageRole, MessageType } from '$lib/enums';
-import { buildSummaryTranscript } from '$lib/services/context/summarize';
+import { ChatService } from '$lib/services/chat.service';
+import { buildSummaryTranscript, summarizeMessages } from '$lib/services/context/summarize';
+import type { CompactionPlan } from '$lib/services/context/types';
 import type { DatabaseMessage } from '$lib/types/database';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -99,5 +101,44 @@ describe('buildSummaryTranscript', () => {
 
 	it('returns an empty string for an empty region', () => {
 		expect(buildSummaryTranscript([])).toBe('');
+	});
+});
+
+// --- summarizeMessages abort (N3 stop button) --------------------------------
+
+function makePlan(): CompactionPlan {
+	const summarized = message(MessageRole.USER, 'old question');
+	const kept = message(MessageRole.USER, 'recent question');
+
+	return {
+		cutIndex: 1,
+		estimatedTokensAfter: 10,
+		estimatedTokensBefore: 20,
+		firstKeptMessageId: kept.id,
+		isSplitTurn: false,
+		kept: [kept],
+		toSummarize: [summarized]
+	};
+}
+
+describe('summarizeMessages (abort, N3)', () => {
+	it('throws an AbortError when the signal is aborted', async () => {
+		// The real ChatService swallows a fetch AbortError and returns undefined;
+		// summarizeMessages must re-surface it as a real abort so the store can
+		// distinguish "stopped" from "failed" (fail-open, no cmp node).
+		const controller = new AbortController();
+
+		controller.abort();
+		vi.mocked(ChatService.sendMessage).mockResolvedValue(undefined);
+
+		await expect(summarizeMessages(makePlan(), null, controller.signal)).rejects.toMatchObject({
+			name: 'AbortError'
+		});
+	});
+
+	it('still throws for an empty response without a signal', async () => {
+		vi.mocked(ChatService.sendMessage).mockResolvedValue(undefined);
+
+		await expect(summarizeMessages(makePlan(), null)).rejects.toThrow('empty response');
 	});
 });

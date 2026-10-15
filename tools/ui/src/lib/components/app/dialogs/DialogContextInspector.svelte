@@ -24,6 +24,7 @@
 		Pencil,
 		RefreshCw,
 		Shrink,
+		Square,
 		UnfoldVertical
 	} from '@lucide/svelte';
 	import {
@@ -246,6 +247,13 @@
 
 		await chatStore.compactConversation(convId, { auto: false });
 		refreshPayload();
+	}
+
+	// N3: aborts the in-flight summary call (store fails open — no cmp node);
+	// compacting resets in the store's finally, which flips the UI back to the
+	// normal action row. Nothing changed, so no payload refresh is needed.
+	function handleStopCompaction() {
+		chatStore.stopCompaction();
 	}
 
 	async function handleRecompact() {
@@ -774,34 +782,42 @@
 					{/if}
 
 					<div class="flex flex-wrap gap-2">
-						<Button class="h-7 gap-1 px-2 text-xs" disabled={actionsBlocked} onclick={handleCompactNow}>
-							<Shrink class="h-3.5 w-3.5" />
+						{#if compacting}
+							<Button class="h-7 gap-1 px-2 text-xs" onclick={handleStopCompaction} variant="destructive">
+								<Square class="h-3.5 w-3.5" />
 
-							Compact now
-						</Button>
+								Stop
+							</Button>
+						{:else}
+							<Button class="h-7 gap-1 px-2 text-xs" disabled={actionsBlocked} onclick={handleCompactNow}>
+								<Shrink class="h-3.5 w-3.5" />
 
-						{#if result.compaction}
-							<Button
-								class="h-7 gap-1 px-2 text-xs"
-								disabled={actionsBlocked}
-								onclick={requestExpand}
-								variant="outline"
-							>
-								<UnfoldVertical class="h-3.5 w-3.5" />
-
-								Expand
+								Compact now
 							</Button>
 
-							<Button
-								class="h-7 gap-1 px-2 text-xs"
-								disabled={actionsBlocked || !result.compaction.boundaryValid}
-								onclick={handleRecompact}
-								variant="outline"
-							>
-								<RefreshCw class="h-3.5 w-3.5" />
+							{#if result.compaction}
+								<Button
+									class="h-7 gap-1 px-2 text-xs"
+									disabled={actionsBlocked}
+									onclick={requestExpand}
+									variant="outline"
+								>
+									<UnfoldVertical class="h-3.5 w-3.5" />
 
-								Re-summarize
-							</Button>
+									Expand
+								</Button>
+
+								<Button
+									class="h-7 gap-1 px-2 text-xs"
+									disabled={actionsBlocked || !result.compaction.boundaryValid}
+									onclick={handleRecompact}
+									variant="outline"
+								>
+									<RefreshCw class="h-3.5 w-3.5" />
+
+									Re-summarize
+								</Button>
+							{/if}
 						{/if}
 					</div>
 				</div>
