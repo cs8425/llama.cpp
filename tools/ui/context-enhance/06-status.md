@@ -593,12 +593,13 @@ role 查這些按鈕所以沒浮出。
 - **第 2 輪（變更 5）✅ 使用者已確認**：`npm run check` + client 全綠；
   實測 mobile 不再超出，**但 dialog 變很窄（~50vw）難以閱讀**（根因見
   變更 6）。
-- **第 3 輪（變更 6）⬜ 待使用者驗證**：
+- **第 3 輪（變更 6）✅ 使用者已確認**（2026-07-22，與 §2t 手動驗證一併驗）：
   1. `npm run check`
   2. `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
   3. 手動 mobile：dialog **滿寬**（375px 手機 = 全螢幕寬）、列表 100% 內寬、
      長列 ellipsis 正常、無水平 scroll、可讀。
   4. 手動 PC 回歸：不變（md+ 由 `md:w-auto` 勝出、~50vw 且被 48rem 夾住）。
+  → 全部通過，§2s 完成。
 
 ### 若第 3 輪 mobile 仍 NG
 檢查 devtools 的 dialog computed width（應為 100vw / 被 max-w 夾住）；若
@@ -639,12 +640,13 @@ shrink-to-fit 異常仍在，改明確寫 `w-[min(100vw,42rem)]`。
 - 第二輪（使用者跑）：`npm run check` +
   `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
   （**14/14**）**全綠** → 自動驗證完成。
-- ⬜ 待使用者手動驗證：
+- ✅ 使用者手動驗證已通過（2026-07-22）：
   1. PC：inspector 開框即見 Advanced 區塊（ctx 條正下方）：boundary select +
      Compact/Expand/Re-summarize；payload 列在下方；最底部 Back to top。
   2. 長對話捲到底 → Back to top → 平滑回頂。
   3. Mobile：頂端區較高（title + ctx + Advanced ≈ 300px）、payload 在
      第一視口之下、跳頂可用；**無水平溢出**（§2s 第 3 輪 `w-full` 修復回歸確認，可一併驗）。
+  → 全部通過，§2t 完成。
 
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
@@ -1113,10 +1115,12 @@ KV cache 無法重用；且模型看不到原始訊息結構。N4 改送
   （~50vw）難以閱讀** → 第 3 輪已改（`Dialog.Content` 加 `w-full`，md 以下；
   根因：fixed 元素 shrink-to-fit 可用空間 = 視口 − 50% left offset = 50vw，
   min-content 歸零後寬度塌到 50vw）。
-- **Context Inspector UI 修復第 3 輪（mobile 寬度）⬜ 待使用者驗證**：重跑
+- **Context Inspector UI 修復第 3 輪（mobile 寬度）✅ 使用者已確認**（2026-07-22）：
+  重跑
   `npm run check` +
   `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
-  + mobile 手動（滿寬、可讀、無水平 scroll）+ PC 回歸（不變，清單見 §2s）。
+  + mobile 手動（滿寬、可讀、無水平 scroll）+ PC 回歸（不變，清單見 §2s）
+  全部通過。
 - **Context Inspector 版面輪（§2t）第一輪**：使用者跑 client `context-inspector`
   （**13/14**）——唯一掛「Back to top scrolls the dialog content back to the
   top」（`expect(content.scrollTop).toBeGreaterThan(0)` 實得 0）。根因（§2t 驗證
@@ -1126,7 +1130,17 @@ KV cache 無法重用；且模型看不到原始訊息結構。N4 改送
 - **Context Inspector 版面輪（§2t）第二輪 ✅ 自動驗證確認**：使用者跑
   `npm run check` + client `context-inspector`（**14/14**）全綠。剩手動驗證
   （PC 頂端區塊 / 跳頂 / mobile，清單見 §2t）。
-- **下一步**：① Context Inspector 版面輪（§2t）手動驗證 + UI mobile 寬度修復（§2s 第 3 輪，可一併驗）；② 依 §5c 做 N4（prefix-stable summary 模式、設為 default）；③ Phase 1 的 5.8 手動驗收（見上方清單）；④ Phase 3 可選後續（規劃見 05-§1）。
+- **Context Inspector 版面輪（§2t）手動驗證 ✅ 通過**（使用者 2026-07-22）：
+  PC 頂端區塊版面、長對話 Back to top 平滑回頂、mobile 第一視口 + 無水平
+  溢出（含 §2s 第 3 輪 `w-full` 一併通過）。§2t / §2s 完成。
+- **N4 prefix-stable summary 模式已實做、待使用者確認**（變更見 §3.18）：
+  `summarize.ts`（mode / excludeReasoning / prefix-stable payload）、
+  `types.ts`（`CompactionPlan.systemHead`）、`compaction-policy.ts`（plan 帶
+  head）、呼叫端 3 處、unit `summarize` +6 / `compaction-policy` +2 斷言。
+  待使用者跑：`npm run check` +
+  `npx vitest --project=unit --run tests/unit/summarize.test.ts` +
+  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`。
+- **下一步**：① 確認 N4（§3.18，上述 3 條指令）；② Phase 1 的 5.8 手動驗收（見上方清單）；③ Phase 3 可選後續（規劃見 05-§1）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
