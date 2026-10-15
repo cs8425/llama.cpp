@@ -3,17 +3,12 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**P2.6 第一輪編譯/測試確認的錯誤已全數修復（見 §2q）、
-> 待使用者重跑確認**——第一輪 `npm run check` 9 型別錯 + client suite 5/8 掛：
-> 3 支 gauge 列用了 `vitest-browser-svelte` `RenderResult` 不存在的
-> testing-library API（`queryByText` / `findByText` / `Locator.parentElement` /
-> `getByText(fn)`）、2 支 form 入口因 `ChatFormActions` 獨立渲染缺
-> `Tooltip.Provider` 炸掉（`ChatFormActionAddDropdown` 的 `Tooltip.Root`）。
-> 修復全在測試端（元件/store 零改動）：gauge 3 支改 `document.querySelector` +
-> 新 `waitFor`/`bodyText()` helper（同 `context-inspector` 慣例）、form 2 支改
-> 渲染新 `ChatFormActionsWrapper`（`Tooltip.Provider` 包 `ChatFormActions`，同
-> `ChatFormTestWrapper` 先例）、順手修 2 支 latent `expect(locator)` →
-> `await expect.element(locator)`。P2.6 交付明細見 §2p。
+> **恢復點（最新）**：**P2.6 第二輪重跑剩 2 支 form 入口 strict mode violation、已修復（見 §2r）、
+> 待使用者重跑確認**——第二輪 8 支掛 2 支（6 綠：gauge 列 3 + 快捷鍵 3）：
+> `getByRole('button', { name: … })` 同時命中 bits-ui `Tooltip.Trigger` 自帶的
+> `<button>` 外殼與內層真正的 `Button`（同一 accessible name；Add/Mic 按鈕同款
+> 雙 button 結構、app 既有慣例）→ 2 支各加 `.last()` 取內層（`onclick` /
+> `disabled` 都在內層）。元件/store 零改動。第一輪修復明細見 §2q。
 > 要跑的指令：`npm run check` +
 > `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
 > `npx vitest --project=client --run tests/client/context-gauge-compaction.svelte.test.ts`
@@ -27,7 +22,7 @@
 | ---- | ---- |
 | Phase 0 — 純核心 | ✅ 完成（使用者已確認 `npm run check` + unit 全綠） |
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
-| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 ✅ 完成並確認（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅ 完成並確認（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 第一輪編譯/測試錯誤已修復、待重跑確認**（見 §2p/§2q） |
+| Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | 🚧 P2.1 ✅ 完成並確認（見 §4）；P2.2 ✅ 完成並確認（見 §2h/§4）；P2.3 ✅ 完成並確認（見 §2i/§4）；P2.4 ✅ 完成並確認（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅ 完成並確認（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 第二輪剩 2 支 strict mode violation 已修復、待重跑確認**（見 §2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
 
 ## 2. Phase 0 已交付檔案
@@ -498,7 +493,49 @@ npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts
 npx vitest --project=unit --run tests/unit/compaction-policy.test.ts
 ```
 
-全綠 → P2.6 確認、Phase 2 完成。
+## 2r. P2.6 第二輪重跑剩 2 支 strict mode violation 的修復（重跑待確認）
+
+第二輪重跑 8 支掛 2 支（6 綠：gauge 列 3 + 快捷鍵 3）。兩支都是
+`getByRole('button', { name: … })` 的 strict mode violation——同一 accessible
+name 命中 **2 個 button**：
+
+1. 外層：bits-ui `Tooltip.Trigger` 自渲染的 `<button data-slot="tooltip-trigger">`
+   （accessible name 由內容計算，等於內層 sr-only 文字）
+2. 內層：真正的 shadcn `Button`（`<button data-slot="button">`，`onclick` 與
+   `disabled` 都在这）
+
+這是 **app 既有慣例**（`ChatFormActionAddButton` / `ChatFormActionRecord` 同樣是
+`Tooltip.Trigger` 包 `Button` 的雙 button 結構），非 P2.6 引入——之前沒測試用
+role 查這些按鈕所以沒浮出。
+
+### 修復（單檔，元件/store 零改動）
+
+| 檔案 | 問題 | 修復 |
+| ---- | ---- | ---- |
+| `tests/client/context-gauge-compaction.svelte.test.ts` | form 入口 2 支的 `getByRole('button', { name: /Inspect what the LLM sees/ })` / `{ name: /Unavailable while the model is responding/ }` 各命中 2 個嵌套 button | 各加 `.last()` 取內層 `Button`（document order 上 descendant 恆在 ancestor 之後，page 上只有一個 Eye 按鈕）；補註解說明雙 button 來源 |
+
+> 要點：
+> - `.last()`（= `nth(-1)`）是 `Locator` 公開 API；不選 `.locator('[data-slot="button"]')`
+>   因 `Locator.locator()` 是 `protected`（`npm run check` 會炸，已查
+>   `@vitest/browser` 的 `locators.d.ts`）。
+> - `toBeDisabled()` 斷的是內層——第二輪錯誤輸出已印出兩者 attribute 對照：
+>   `disabled` 只在內層 `Button`，外層 trigger 不帶。
+> - `userEvent.click` 也打內層（`onclick` 在內層）。
+> - 不改元件：雙 button 是 Add/Mic 同款既有結構，只改一個會造成同列按鈕不一致；
+>   若要根治 trigger 的 button 外殼屬獨立 a11y 工單，不在 P2.6 範圍。
+
+### 重跑指令（~45s）
+
+```bash
+npm run check
+npx vitest --project=client --run tests/client/context-gauge-compaction.svelte.test.ts
+# 回歸
+npx vitest --project=client --run tests/client/context-panel-mobile.svelte.test.ts
+npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts
+npx vitest --project=unit --run tests/unit/compaction-policy.test.ts
+```
+
+全綠 → P2.6 確認、Phase 2 完成（剩 5.8 手動驗收 + Phase 3 可選後續）。
 
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
@@ -703,6 +740,17 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   `npx vitest --project=client --run tests/client/context-gauge-compaction.svelte.test.ts`（8 支）+
   回歸 `context-panel-mobile`（2 支）+ `context-inspector`（10 支）。
   全綠 → P2.6 確認、Phase 2 完成（剩 5.8 手動驗收 + Phase 3 可選後續）。
+- **Phase 2 P2.6 第一輪**（修復見 §2q）：`npm run check` 9 型別錯（gauge 3 支用了
+  `RenderResult` 不存在的 testing-library API）+ client 5/8 掛（gauge 3 支 API
+  缺失 + form 2 支獨立渲染缺 `Tooltip.Provider`）。全數測試端修復（新
+  `ChatFormActionsWrapper`、`document.querySelector` + `waitFor`/`bodyText()`
+  helper）。
+- **Phase 2 P2.6 第二輪**（修復見 §2r）：client 6/8 綠，2 支 form 入口 strict
+  mode violation——`getByRole('button', { name })` 同時命中 bits-ui
+  `Tooltip.Trigger` 外層 button 與內層 `Button`（Add/Mic 同款既有雙 button
+  結構）。2 支各加 `.last()` 取內層（`onclick`/`disabled` 都在內層）。待使用者
+  重跑：`npm run check` + gauge-compaction suite（8 支）+ 回歸（panel-mobile /
+  inspector）+ unit（compaction-policy）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 

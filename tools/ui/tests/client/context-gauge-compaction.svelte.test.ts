@@ -182,7 +182,13 @@ describe('chat form inspector entry (Phase 2 P2.6)', () => {
 	it('opens the context inspector from the Eye button', async () => {
 		const screen = render(ChatFormActionsWrapper);
 
-		const eyeButton = screen.getByRole('button', { name: /Inspect what the LLM sees/ });
+		// bits-ui's Tooltip.Trigger renders its own <button> wrapping the real
+		// Button (same pattern as the add / mic buttons), so the role query
+		// matches two nested buttons with the same accessible name — take the
+		// inner one (it carries the onclick handler)
+		const eyeButton = screen
+			.getByRole('button', { name: /Inspect what the LLM sees/ })
+			.last();
 
 		await expect.element(eyeButton).toBeVisible();
 		expect(chatStore.showContextInspector).toBe(false);
@@ -197,8 +203,12 @@ describe('chat form inspector entry (Phase 2 P2.6)', () => {
 
 		const screen = render(ChatFormActionsWrapper);
 
-		// the sr-only label switches to the disabled-state text
-		const eyeButton = screen.getByRole('button', { name: /Unavailable while the model is responding/ });
+		// the sr-only label switches to the disabled-state text; .last() picks
+		// the inner Button — the disabled attribute lives there, not on the
+		// tooltip trigger wrapper (see the sibling test's note)
+		const eyeButton = screen
+			.getByRole('button', { name: /Unavailable while the model is responding/ })
+			.last();
 
 		await expect.element(eyeButton).toBeDisabled();
 	});
