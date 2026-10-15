@@ -10,7 +10,8 @@
 > 確認**（client suite 全綠 + `npm run check` 全綠，見 06-status 恢復點 /
 > §2p–§2r）。剩：5.8 手動驗收 + Phase 3 可選後續（**N1 ✅ 完成並確認**；
 > **N2 ✅ 完成並確認**（threshold 預設 80→70 + `contextKeepTargetPercent`，
-> 見 06-status §3.14）；N3–N4 未實做）。
+> 見 06-status §3.14）；**N3 ✅ 完成並確認**（手動壓縮 [Stop] 鍵，見
+> 06-status §3.15）；N4 未實做）。
 
 ## 目錄
 

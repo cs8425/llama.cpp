@@ -3,17 +3,15 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**N2 完成並確認**（§5c N2 + §3.14；使用者跑 3 條
-> 指令全綠：`npm run check` + unit `compaction-policy`（**30/30**）+ client
-> `settings-registry-invariants`）：
-> ① `contextCompactionThreshold` 預設 80 → **70**（純預設值變更）；
-> ② 新設定 `contextKeepTargetPercent`（INPUT 10–90，預設 50）——compact
-> target 從固定 50% 常數 `KEEP_TARGET_FRACTION` 提出來給 user 自訂
-> （`computeCompactionBudget` 改讀 `settings.contextKeepTargetPercent / 100`；
-> 10% n_ctx floor 不動）。
-> N3–N4 未實做（明細 §5c）。§3.12、N1、§3.13、N2（§3.14）皆已確認。
-> 下一輪：依 §5c 做 **N3**（Stop 鍵）→
-> **N4**（prefix-stable summary 模式、設為 default）。
+> **恢復點（最新）**：**N3 完成並確認**（§5c N3 + §3.15；使用者跑 4 條
+> 指令全綠：`npm run check` + unit `summarize` + client `context-inspector`
+> + client `chat-message-compaction`）：手動壓縮 [Stop] 鍵——
+> `compacting` 期間可中斷 summary 呼叫（`chatStore.stopCompaction()` abort
+> → `summarizeMessages` 丟 `AbortError` → 既有 fail-open：不建 cmp、
+> toast「Compaction stopped」）；inspector 與 cmp row 的動作列在
+> `compacting` 時換成單一 [Stop] 按鈕；in-loop 沿用 flow abort（未動）。
+> N1、N2 皆已確認（§3.13/§3.14）。N4 未實做（明細 §5c）。
+> 下一輪：依 §5c 做 **N4**（prefix-stable summary 模式、設為 default）。
 
 ## 1. 進度總覽
 
@@ -24,7 +22,7 @@
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
-| 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | 🚧 N1 ✅ 完成並確認（§3.13：改 n_ctx × %）；**N2 ✅ 完成並確認**（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`，check + unit 30/30 + registry invariants 全綠）；N3–N4 ⬜ 未實做 |
+| 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | 🚧 N1 ✅ 完成並確認（§3.13：改 n_ctx × %）；N2 ✅ 完成並確認（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；**N3 ✅ 完成並確認**（§3.15：手動壓縮 Stop 鍵，check + unit `summarize` + client `context-inspector`/`chat-message-compaction` 全綠）；N4 ⬜ 未實做 |
 
 ## 2. Phase 0 已交付檔案
 
@@ -724,6 +722,46 @@ user 自訂。
 **確認**：使用者跑 `npm run check` + unit `compaction-policy`
 （**30/30**：原 29 + 新 1）+ client `settings-registry-invariants`，全綠。
 
+### 3.15 N3 手動壓縮 [Stop] 鍵（完成並確認）
+
+**背景**：`compacting` 期間（summary 呼叫在跑）UI 全部 disabled、只能等
+（04-§2.2 舊行為）。本項讓 user 可中斷手動壓縮的 summary 呼叫。
+
+**實做**：
+- `summarize.ts`：`summarizeMessages` 在 `signal?.aborted` 時丟真正的
+  `AbortError`（DOMException）。動機：`ChatService.sendMessage` 會吞掉
+  fetch 的 AbortError（return `undefined`），不補這層會降級成
+  「empty response」，store 無法區分「已停止」vs「失敗」。
+- `chat/index.svelte.ts`：新 private 欄位 `compactionAbortController:
+  AbortController | null`（非 reactive；UI 只看 `contextStatsStore.compacting`）。
+  三處手動摘要路徑（`compactConversation` / `recompactConversationEntry` /
+  `moveCompactionBoundary` 後移分支）都在 `compacting = true` 後建
+  controller、signal 傳 `summarizeMessages`（後兩者經 `summarizeRegion` 新增
+  的 `signal?` 參數轉傳）；catch 用 `isAbortError` 分流（abort →
+  `toast.info('Compaction stopped')`，否則維持原 error toast）；finally 清
+  controller + `compacting = false`。fail-open 語義不變：不建 cmp、
+  context 完整保留。
+- 新 public `stopCompaction()`：abort 該 controller（無 in-flight 時 no-op）。
+- UI：`compacting === true` 時，inspector 的 Advanced 動作列
+  （[Compact now]/[Expand]/[Re-summarize]）與 fail-open 警告列的 [Compact now]
+  換成單一 [Stop]（destructive、lucide `Square` icon）；cmp row 展開區動作列
+  （Edit / Re-summarize / Restore all context）同換 [Stop]；皆呼叫
+  `stopCompaction()`。`compacting` 在 store finally 重置後 UI 自動翻回原
+  按鈕；Stop 不觸發 payload refresh（fail-open 什麼都沒改）。
+- **未動**（照 §5c 範圍）：in-loop `compactBetweenTurns` 沿用 flow abort
+  signal；gauge 的「Compacting context…」列；`triggerPreEncode`（自管
+  preEncodeAbortController；summary 完成後才跑，Stop 對它是 no-op）。
+- 測試：unit `summarize.test.ts` +2（aborted signal → reject `AbortError`；
+  無 signal 的 empty response 維持原 throw）；client `context-inspector`：
+  原「compacting 時全 disabled」用例改「Stop 取代動作列、Edit summary /
+  boundary select 仍 disabled」+ 新點 Stop → spy `stopCompaction`；
+  client `chat-message-compaction` 同模式 2 支。
+
+**確認**：使用者跑 4 條指令全綠：`npm run check` +
+`npx vitest --project=unit --run tests/unit/summarize.test.ts` +
+`npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
++ `npx vitest --project=client --run tests/client/chat-message-compaction.svelte.test.ts`。
+
 ## 4. 驗證狀態（目前停在這）
 
 - Phase 0：使用者已跑 `npm run check` + 4 支 unit，**全綠**。
@@ -866,7 +904,12 @@ user 自訂。
   `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`
   （**30/30**：原 29 + 新 1）+
   `npx vitest --project=client --run tests/client/settings-registry-invariants.svelte.test.ts`。
-- **下一步**：① 依 §5c 做 N3（Stop 鍵）→ N4；② Phase 1 的 5.8 手動驗收（見上方清單）；③ Phase 3 可選後續（規劃見 05-§1）。
+- **N3 ✅ 完成並確認**（變更見 §3.15）：手動壓縮 Stop 鍵
+  （`chatStore.stopCompaction()` + inspector/cmp row [Stop] 按鈕 +
+  `summarizeMessages` abort 時丟真 `AbortError`）。使用者跑 4 條指令全綠：
+  `npm run check` + unit `summarize`（8/8：原 6 + 新 2）+ client
+  `context-inspector` + client `chat-message-compaction`。
+- **下一步**：① 依 §5c 做 N4（prefix-stable summary 模式、設為 default）；② Phase 1 的 5.8 手動驗收（見上方清單）；③ Phase 3 可選後續（規劃見 05-§1）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -1109,7 +1152,7 @@ static async createCompactionMessage(params: {
   `KeyboardKey` enum 加 `I_UPPER`（字母序）。
 - client 測試：gauge 列 + 入口（看既有 client 測試結構決定掛哪）。
 
-## 5c. 下一輪執行清單（N1 ✅ 完成並確認；N2–N4 未實做）
+## 5c. 下一輪執行清單（N1 ✅、N2 ✅、N3 ✅ 完成並確認；N4 未實做）
 
 > 來源：使用者 2026-07-21 要求（§3.12 修正後）。每項獨立可編譯、
 > 獨立可確認；順序建議 N1→N4（N1/N2 同動 settings 檔、可合併一次確認）。
@@ -1138,19 +1181,26 @@ static async createCompactionMessage(params: {
   `n_ctx × contextKeepTargetPercent%`。✅
 - 另：`contextCompactionThreshold` 預設 80 → 70（使用者要求，同批）。✅
 
-### N3 手動壓縮 [Stop] 按鈕
-- `chatStore`：`compactConversation` 建 `AbortController`（$state 或
-  private 欄位）、signal 傳 `summarizeMessages`；新 public `stopCompaction()`
-  （abort → summarizeMessages throw → 走既有 fail-open：不建 cmp、
-  toast「已停止壓縮」、`compacting = false`）。
-- 同樣的 signal 套用到 `recompactConversationEntry` 與
-  `moveCompactionBoundary`（後移重摘要）；`compactBetweenTurns`
-  （in-loop）沿用既有 flow abort signal，不另加。
-- UI：`compacting === true` 時 inspector 的 [Compact now] / [重新摘要]
-  與 cmp row 動作列變 [Stop]（呼叫 `stopCompaction()`）；gauge 的
-  「Compacting context…」列不動。
-- 現行行為對照：`compacting` 時全部 disabled、只能等（04-§2.2 已註記）。
-- client 測試：inspector + cmp row 各加 stop 用例（spy `stopCompaction`）。
+### N3 手動壓縮 [Stop] 按鈕（✅ 完成並確認；明細見 §3.15）
+- ~~`chatStore`：`compactConversation` 建 `AbortController`…~~ → 照計畫落地：
+  private `compactionAbortController`（非 $state，UI 只看 `compacting`）、
+  signal 傳 `summarizeMessages`、新 public `stopCompaction()`；catch 用
+  `isAbortError` 分流 → `toast.info('Compaction stopped')`；fail-open 不變。
+- ~~同樣的 signal 套用到 `recompactConversationEntry` 與 `moveCompactionBoundary`~~
+  → 已做（經 `summarizeRegion` 新增 `signal?` 參數）；`compactBetweenTurns`
+  未動（沿用 flow abort）。✅
+- ~~UI：`compacting === true` 時 inspector 的 [Compact now] / [重新摘要] 與
+  cmp row 動作列變 [Stop]~~ → 已做：inspector 的 Advanced 動作列與
+  fail-open 警告列、cmp row 展開區動作列，`compacting` 時皆換成單一
+  [Stop]（destructive + `Square` icon，呼叫 `stopCompaction()`）；
+  gauge 列未動。✅
+- ~~client 測試：inspector + cmp row 各加 stop 用例~~ → 已做：兩套各改
+  1 支（compacting 時 Stop 取代動作列）+ 各新增 1 支（點 Stop → spy
+  `stopCompaction`）。✅
+- 額外（計畫外但必要）：`summarizeMessages` 在 `signal?.aborted` 時丟真
+  `AbortError`——`ChatService.sendMessage` 會吞掉 fetch AbortError（回
+  `undefined`），不補這層 store 無法區分「已停止」vs「empty response」。
+  unit +2 支（§3.15）。✅
 
 ### N4 prefix-stable summary 模式（新增、設為 default）
 - 設計：03-§2.1。payload = `[system（path 的 system head 原樣）, 被壓縮

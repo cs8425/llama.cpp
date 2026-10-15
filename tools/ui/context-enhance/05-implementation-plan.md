@@ -58,15 +58,18 @@
 
 ### Phase 3 —(可選,後續)
 
-> **下一輪(規劃已定、未實做;明細見 06-status §5c,依序 N1→N4)**:
+> **下一輪(規劃已定;N1–N3 ✅ 完成並確認,明細見 06-status §3.13–§3.15,依序 N1→N4)**:
 > 1. **N1** ✅ summary 上限 = n_ctx × %（新設定 `contextSummaryMaxTokensPercent`
 >    預設 70：128k → ~91k、256k → ~183k；舊固定 key 移除——完成並確認，
 >    見 06-status §3.13）。
 > 2. **N2** ✅ 新設定 `contextKeepTargetPercent`(INPUT 10–90,預設 50)——
 >    compact target 從固定 50% 常數(`KEEP_TARGET_FRACTION`)提出来給
 >    user 自訂(完成並確認,見 06-status §3.14/§5c)。
-> 3. **N3** 手動壓縮 [Stop] 按鈕——`compacting` 期間可中斷 summary 呼叫
->    (不建 cmp、toast「已停止」、fail-open);in-loop 沿用 flow abort。
+> 3. **N3** ✅ 手動壓縮 [Stop] 按鈕——`compacting` 期間可中斷 summary 呼叫
+>    (`chatStore.stopCompaction()` abort → `summarizeMessages` 丟真
+>    `AbortError` → 既有 fail-open:不建 cmp、toast「Compaction stopped」);
+>    inspector 與 cmp row 動作列換 [Stop];in-loop 沿用 flow abort
+>    (完成並確認,見 06-status §3.15/§5c)。
 > 4. **N4** prefix-stable summary 模式(新增、**設為 default**):
 >    `[system, 被壓縮訊息原文, 要求壓縮的 prompt]`,前綴完全一致、
 >    只有最後的壓縮 prompt 不同(KV 前綴重用);transcript 模式保留為
