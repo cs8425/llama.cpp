@@ -287,6 +287,7 @@ export function planCompaction(path: DatabaseMessage[], budget: CompactionBudget
 		firstKeptMessageId: path[cutIndex].id,
 		isSplitTurn,
 		kept,
+		systemHead: systemStart === 1 ? path[0] : null,
 		toSummarize
 	};
 }

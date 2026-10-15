@@ -615,6 +615,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 
 		try {
 			const summary = await summarizeMessages(plan, model, abortController.signal, {
+				excludeReasoning: config.excludeReasoningFromContext === true,
 				maxTokens: computeSummaryMaxTokens(nCtx, config.contextSummaryMaxTokensPercent),
 				prompt: config.contextSummaryPrompt.trim() || undefined
 			});
@@ -1059,10 +1060,12 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			firstKeptMessageId: path[boundaryIndex].id,
 			isSplitTurn,
 			kept: path.slice(boundaryIndex),
+			systemHead: headLength === 1 ? path[0] : null,
 			toSummarize: path.slice(headLength, boundaryIndex)
 		};
 
 		return await summarizeMessages(plan, this.resolveCompactionModel(path), signal, {
+			excludeReasoning: config.excludeReasoningFromContext === true,
 			// unknown context size → summarizeMessages' built-in 1024 default
 			maxTokens:
 				nCtx && nCtx > 0

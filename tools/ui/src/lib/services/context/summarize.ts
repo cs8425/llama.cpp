@@ -5,10 +5,25 @@
  * one async LLM call — a non-streaming `ChatService.sendMessage`, same pattern
  * as `generateTitleWithLLM`. On failure the caller must NOT create the
  * compaction node (fail-open: keep the full context).
+ *
+ * Two prompt modes (`SummaryMode`):
+ * - `prefix-stable` (default): the payload is
+ *   `[system head (verbatim), …summarize region (converted per message, original
+ *   roles/structure kept: user/assistant/tool, tool_calls, attachments),
+ *   user (the instruction)]`. The prefix (system + region) is byte-identical to
+ *   the main conversation payload's prefix — same `normalizeMessagesForApi`
+ *   conversion the builder uses — so repeated summaries of the same region
+ *   (re-summarize, re-compact) reuse the KV cache prefix, and the model sees
+ *   the original message structure for higher fidelity. Only the trailing
+ *   instruction varies (default / custom prompt, normal / split-turn variant).
+ * - `transcript` (v1 fallback): `[system (the instruction),
+ *   user (buildSummaryTranscript flat text)]` — attachments become
+ *   placeholders, tool calls reduce to names.
  */
 
 import { AttachmentType, MessageRole } from '$lib/enums';
 import { ChatService } from '$lib/services/chat.service';
+import type { ApiChatMessageData } from '$lib/types/api';
 import type { DatabaseMessage, DatabaseMessageExtra } from '$lib/types/database';
 import { formatFileSize } from '$lib/utils/formatters';
 import type { CompactionPlan } from './types';
@@ -41,6 +56,12 @@ verbatim if short), steps already taken, files touched, tool results that
 matter, and the likely next step.
 Be dense; drop small talk.`;
 
+/**
+ * Prompt mode for the summary call (see the module docs). `prefix-stable` is
+ * the default; `transcript` is the v1 flat-text fallback.
+ */
+export type SummaryMode = 'prefix-stable' | 'transcript';
+
 /** Options for {@link summarizeMessages}. */
 export interface SummarizeOptions {
 	/** Max tokens for the summary (default 1024). */
@@ -49,6 +70,15 @@ export interface SummarizeOptions {
 	temperature?: number;
 	/** Custom summary instruction; overrides the default / split-turn prompt. */
 	prompt?: string;
+	/** Prompt mode (default `'prefix-stable'`; `'transcript'` = v1 fallback). */
+	mode?: SummaryMode;
+	/**
+	 * When true, `reasoning_content` is stripped from the outgoing payload,
+	 * mirroring the main send path's `excludeReasoningFromContext` switch so
+	 * the prefix-stable prefix stays identical to the conversation payload's
+	 * prefix in both settings.
+	 */
+	excludeReasoning?: boolean;
 }
 
 /**
@@ -127,12 +157,14 @@ function summarizeToolCalls(toolCallsJson: string): string {
 /**
  * Runs the summary LLM call for a compaction plan.
  *
- * @param plan - The plan whose `toSummarize` region gets summarized.
+ * @param plan - The plan whose `toSummarize` region gets summarized (plus the
+ *   `systemHead` sent first in prefix-stable mode).
  * @param model - Model to use (the conversation's model; required in ROUTER mode).
  * @param signal - Abort signal (the flow abort for mid-loop compaction, the
  *   stop-compaction controller for manual actions). An aborted signal throws
  *   an `AbortError` so callers can distinguish "stopped" from "failed".
- * @param options - maxTokens / temperature / custom prompt.
+ * @param options - maxTokens / temperature / custom prompt / mode /
+ *   excludeReasoning (see {@link SummarizeOptions}).
  * @returns The summary text (trimmed). Throws on any failure — the caller must
  *   treat that as "do not compact".
  */
@@ -142,16 +174,25 @@ export async function summarizeMessages(
 	signal?: AbortSignal,
 	options: SummarizeOptions = {}
 ): Promise<string> {
-	const systemPrompt =
+	const instruction =
 		options.prompt?.trim() || (plan.isSplitTurn ? SPLIT_TURN_SUMMARY_PROMPT : DEFAULT_SUMMARY_PROMPT);
-	const transcript = buildSummaryTranscript(plan.toSummarize);
+
+	const messages: ApiChatMessageData[] =
+		options.mode === 'transcript'
+			? [
+					{ content: instruction, role: MessageRole.SYSTEM },
+					{ content: buildSummaryTranscript(plan.toSummarize), role: MessageRole.USER }
+				]
+			: [
+				...(plan.systemHead ? await ChatService.normalizeMessagesForApi([plan.systemHead]) : []),
+				...(await ChatService.normalizeMessagesForApi(plan.toSummarize)),
+				{ content: instruction, role: MessageRole.USER }
+			];
 
 	const response = await ChatService.sendMessage(
-		[
-			{ content: systemPrompt, role: MessageRole.SYSTEM },
-			{ content: transcript, role: MessageRole.USER }
-		],
+		messages,
 		{
+			excludeReasoningFromContext: options.excludeReasoning === true,
 			max_tokens: options.maxTokens ?? 1024,
 			model: model ?? undefined,
 			stream: false,

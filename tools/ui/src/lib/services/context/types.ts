@@ -36,6 +36,12 @@ export interface CompactionPlan {
 	isSplitTurn: boolean;
 	/** id of `path[cutIndex]` — the start of the send window. */
 	firstKeptMessageId: string;
+	/**
+	 * The system-prompt head (`path[0]` when it is a SYSTEM message), sent first
+	 * in the prefix-stable summary payload so its prefix matches the main
+	 * conversation payload; null when the path has no system prompt.
+	 */
+	systemHead: DatabaseMessage | null;
 	/** `path[systemStart..cutIndex)` — messages to summarize; never includes the system prompt (I1). */
 	toSummarize: DatabaseMessage[];
 	/** `path[cutIndex..end]` — messages kept verbatim. */

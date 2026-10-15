@@ -3,24 +3,23 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**Context Inspector 版面：Advanced 整塊上移 + 跳回頂端
-> 自動驗證全綠（check + client 14/14）、待使用者手動驗證**（§2t / §3.17）：
-> Advanced 整塊（boundary select +
-> Compact now/Expand/Re-summarize，compacting → Stop）移到 Estimated send ctx
-> 條附近、紅警告條的重複 Compact 按鈕移除、最底部加 [Back to top]
-> （`Dialog.Content` `bind:ref` + `scrollTo({ top: 0, behavior: 'smooth' })`）。
-> 第一輪（使用者跑）client 13/14：唯一掛「Back to top…」= browser 測試環境
-> 獨立掛載元件、app 的 Tailwind CSS 未載入（只有 `+layout.svelte` import
-> `app.css`）→ `Dialog.Content` 的 `overflow-y-auto` 無效、元素非 scroll
-> container、`scrollTop` 永遠 0（非元件 bug）。**測試端修復**：明確設
-> `style.overflowY = 'auto'`（mirror production class）+ 限高 200px → 80px，
-> 元件零改動。
-> 第二輪（使用者跑）：`npm run check` + client `context-inspector`（**14/14**）
-> **全綠** → 自動驗證完成；剩手動（PC：頂端區塊版面；長對話跳頂；mobile：
-> 第一視口 + 無水平溢出回歸）。
-> 此前待驗：§2s 第 3 輪 mobile 寬度修復（`w-full`）也待驗證（可與上述手動項目一併驗）。
-> 下一輪：① 確認本版面輪手動驗證（§2t）+ §2s 第 3 輪；② 依 §5c 做
-> **N4**（prefix-stable summary 模式、設為 default）。
+> **恢復點（最新）**：**N4 prefix-stable summary 模式已實做、待使用者確認**
+> （§3.18）：summary 呼叫改送「[system head（原樣）, 被壓訊息逐則轉換（原
+> role/結構、附件原樣送）, 指令（末尾 user)]」；`summarizeMessages` 加
+> `mode`（`'prefix-stable' | 'transcript'`，**default = prefix-stable**）+
+> `excludeReasoning`（跟隨 `excludeReasoningFromContext` 開關）；
+> `CompactionPlan` 加 `systemHead`；呼叫端 3 處各加 `excludeReasoning`（mode
+> 靠 default 零改動）；unit `summarize` +6、`compaction-policy` +2 斷言。
+> **待使用者跑**：`npm run check` +
+> `npx vitest --project=unit --run tests/unit/summarize.test.ts` +
+> `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`。
+> 確認後剩：Phase 1 的 5.8 手動驗收（見 §4 清單）+ Phase 3 可選後續
+> （兩段式 summary / token 校準 / per-conversation 覆蓋 / 合併重摘要提示，
+> 05-§1）。
+>
+> 此前（已確認）：§2t 版面輪手動驗證通過（PC 頂端區塊版面、長對話
+> Back to top 平滑回頂、mobile 第一視口 + 無水平溢出）+ §2s 第 3 輪 mobile
+> 寬度修復（`w-full`）一併通過。
 
 ## 1. 進度總覽
 
@@ -31,9 +30,9 @@
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
-| 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | 🚧 N1 ✅ 完成並確認（§3.13：改 n_ctx × %）；N2 ✅ 完成並確認（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；**N3 ✅ 完成並確認**（§3.15：手動壓縮 Stop 鍵，check + unit `summarize` + client `context-inspector`/`chat-message-compaction` 全綠）；N4 ⬜ 未實做 |
-| Context Inspector UI 修復（水平溢出 + header 重疊，§2s/§3.16） | 🚧 第 1 輪 ✅ PC 確認；第 2 輪 ✅ mobile 不超出但 dialog 塌到 ~50vw 很窄 → 第 3 輪（`w-full`，md 以下）**待驗證** |
-| Context Inspector 版面：Advanced 整塊上移 + Back to top（§2t/§3.17） | 🚧 自動驗證 ✅（check + client **14/14** 全綠；第一輪 1 掛 = 測試環境無 CSS → `scrollTop` 不可設，已測試端修復）；**待手動驗證**（PC 頂端區塊 / 跳頂 / mobile） |
+| 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | 🚧 N1 ✅ 完成並確認（§3.13：改 n_ctx × %）；N2 ✅ 完成並確認（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；N3 ✅ 完成並確認（§3.15：手動壓縮 Stop 鍵）；**N4 已實做、待使用者確認**（§3.18：prefix-stable default + 附件原樣送 + reasoning 跟隨主送出開關） |
+| Context Inspector UI 修復（水平溢出 + header 重疊，§2s/§3.16） | ✅ 完成並確認（第 3 輪 `w-full` mobile 寬度修復已通過手動驗證） |
+| Context Inspector 版面：Advanced 整塊上移 + Back to top（§2t/§3.17） | ✅ 完成並確認（自動驗證 check + client 14/14 全綠；手動驗證通過：PC 頂端區塊版面 / 長對話跳頂 / mobile 第一視口 + 無水平溢出） |
 
 ## 2. Phase 0 已交付檔案
 
@@ -541,7 +540,7 @@ role 查這些按鈕所以沒浮出。
 2 支 form 入口）+ 回歸 `context-panel-mobile` / `context-inspector`。
 **P2.6 確認、Phase 2 完成**（剩 Phase 1 的 5.8 手動驗收 + Phase 3 可選後續）。
 
-## 2s. Context Inspector UI 修復：水平溢出 + header 重疊（第 1–2 輪已確認；第 3 輪 mobile 寬度待驗證）
+## 2s. Context Inspector UI 修復：水平溢出 + header 重疊（第 1–3 輪皆已確認）
 
 ### 症狀（使用者實測回報）
 1. **水平溢出**：收合（未點擊）狀態下，長訊息（tool result 可達數萬字元）的
@@ -605,7 +604,7 @@ role 查這些按鈕所以沒浮出。
 檢查 devtools 的 dialog computed width（應為 100vw / 被 max-w 夾住）；若
 shrink-to-fit 異常仍在，改明確寫 `w-[min(100vw,42rem)]`。
 
-## 2t. Context Inspector 版面：Advanced 整塊上移 + 跳回頂端（使用者指定，已實做待驗證）
+## 2t. Context Inspector 版面：Advanced 整塊上移 + 跳回頂端（使用者指定，已實做並確認）
 
 ### 使用者要求
 - 手動壓縮等動作在 dialog 最底部，長 payload 列要捲到底才碰得到主要動作 →
@@ -896,6 +895,67 @@ select + Compact/Expand/Re-summarize）上移到「Estimated send / % of n_ctx�
 `$bindable` ref）+ `scrollTo({ top: 0, behavior: 'smooth' })`。**不採用**
 sticky 方案（控制區恆駐頂端）：§2s 第 1–3 輪皆在處理 sticky 重疊 / 寬度
 回歸，且 mobile 上 ~300px 的 sticky 區塊會吃掉大半視口。
+
+### 3.18 N4 prefix-stable summary 模式（完成、待使用者確認）
+
+**背景**：v1 transcript 模式把被壓訊息拍平成一段文字、指令當 system——
+同一 summarize 區的重複摘要（Re-summarize、同區再壓）前綴完全不同，
+KV cache 無法重用；且模型看不到原始訊息結構。N4 改送
+「[system head, 被壓訊息原結構, 指令（末尾 user)]」：前綴恆定、只有最後
+一則指令變（03-§2.1）。
+
+**決策（使用者 2026-07-22 定，D1/D2 皆 A）**：
+- **D1 附件原樣送**（不佔位符）：前綴與主對話 payload byte 一致 → summary
+  呼叫可直接重用上一個主 turn / preEncode 的熱 KV cache；摘要忠度最高。
+  非 vision 模型由 `sendMessage` 既有的 vision filter 自動剝除 image parts
+  （與主送出路徑同行為，無新失效模式）。toSummarize 區剛在主對話全量送出
+  過（auto 觸發在 threshold），大小安全已證明。
+- **D2 `reasoning_content` 跟隨 `excludeReasoningFromContext` 開關**：summary
+  呼叫把同一開關傳進 `sendMessage`，兩種設定下前綴都與主 payload 一致；
+  開關關時 summarizer 還能看到 assistant 推理。
+
+**實做**：
+- `types.ts`：`CompactionPlan` 加 `systemHead: DatabaseMessage | null`
+  （path 的 system head；null = 無 system prompt）。`summarizeMessages`
+  簽名不變，head 由 plan 帶。
+- `compaction-policy.ts`：`planCompaction` 回傳值加
+  `systemHead: systemStart === 1 ? path[0] : null`。
+- `summarize.ts`：新 `SummaryMode = 'prefix-stable' | 'transcript'`；
+  `SummarizeOptions` 加 `mode?`（**default = `'prefix-stable'`**）與
+  `excludeReasoning?`。prefix-stable 的 payload =
+  `[…normalizeMessagesForApi([head]), …normalizeMessagesForApi(toSummarize),
+  { content: 指令, role: user }]`——與 builder 同一套轉換（WYSIWYG 同源）；
+  指令內容不變（`DEFAULT_SUMMARY_PROMPT` / `SPLIT_TURN_SUMMARY_PROMPT` /
+  自訂），位置從 system 位移到末尾 user 訊息。transcript 模式維持 v1 形狀
+  （`[system(指令), user(transcript)]`）作 fallback。`excludeReasoning`
+  轉傳 `sendMessage` 的 `excludeReasoningFromContext`（request body 映射
+  剝除 `reasoning_content`，與主送出路徑同一機制）。abort / empty
+  response 行為不變。
+- 呼叫端 3 處各加 `excludeReasoning:
+  config.excludeReasoningFromContext === true`（`compactConversation` /
+  `summarizeRegion`（手動 plan 補 `systemHead`）/ in-loop
+  `compactBetweenTurns`）；mode 靠 default，呼叫端零其他改動。
+- barrel：export `SummaryMode`。
+- 測試：unit `summarize.test.ts` mock 的 `normalizeMessagesForApi` 改
+  pass-through（原 `vi.fn()` 回 undefined 會在 spread 時炸）；`makePlan`
+  補 `systemHead: null`；新 `makePlanWithHead`（system head +
+  user/assistant(tool_calls)/tool 三則 region）。新增 6 支：default
+  prefix-stable 結構（head 第一、region 順序與 role 保留、指令最後 user、
+  `normalizeMessagesForApi` 收 `[head]` 與 `[toSummarize]`）、split 變體只換
+  指令（prefix 逐則相等）、自訂 prompt（trim）、無 system head、
+  `excludeReasoning` 透傳、transcript fallback 維持 v1 形狀（不碰
+  `normalizeMessagesForApi`）。unit `compaction-policy.test.ts` +2 斷言
+  （`systemHead` = `path[0]` / 無 system 時 null）。
+- 文件：02-§5（兩模式 payload 形狀 + D1/D2）、03-§2.1（標記已實做 + 兩決策）
+  、05-Phase 3 清單、README。
+- **已知邊界**（fail-open 覆蓋）：region 以 tool 訊息結尾時（典型 = flow
+  被中斷後直接發新訊息），prefix-stable payload 會出現 `[…, tool, user(指令)]`
+  的 role 轉折；個別嚴格的 chat template 若拒絕，summary 呼叫失敗 → 不建
+  cmp、context 完整保留（與既有 fail-open 同路徑）。
+
+**待確認**：使用者跑 `npm run check` +
+`npx vitest --project=unit --run tests/unit/summarize.test.ts` +
+`npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`。
 
 ## 4. 驗證狀態（目前停在這）
 
@@ -1309,7 +1369,7 @@ static async createCompactionMessage(params: {
   `KeyboardKey` enum 加 `I_UPPER`（字母序）。
 - client 測試：gauge 列 + 入口（看既有 client 測試結構決定掛哪）。
 
-## 5c. 下一輪執行清單（N1 ✅、N2 ✅、N3 ✅ 完成並確認；N4 未實做）
+## 5c. 下一輪執行清單（N1–N4 皆已完成；N4 待使用者確認，§3.18）
 
 > 來源：使用者 2026-07-21 要求（§3.12 修正後）。每項獨立可編譯、
 > 獨立可確認；順序建議 N1→N4（N1/N2 同動 settings 檔、可合併一次確認）。
@@ -1359,24 +1419,29 @@ static async createCompactionMessage(params: {
   `undefined`），不補這層 store 無法區分「已停止」vs「empty response」。
   unit +2 支（§3.15）。✅
 
-### N4 prefix-stable summary 模式（新增、設為 default）
+### N4 prefix-stable summary 模式（✅ 已實做、待使用者確認；明細見 §3.18）
 - 設計：03-§2.1。payload = `[system（path 的 system head 原樣）, 被壓縮
   訊息逐則轉換（保留原 role/結構：user/assistant/tool、tool_calls、
-  attachments）, user（要求壓縮的 prompt）]`。
+  attachments）, user（要求壓縮的 prompt）]`。✅
 - 關鍵約束：前綴（system + 被壓縮訊息）完全一致、只有最後的壓縮 prompt
   不同（default / 自訂 `contextSummaryPrompt`、正常 / split-turn 變體只換
   最後一則）→ 同一 summarize 區的重複摘要（Re-summarize 等）可重用
-  KV cache 前綴。
+  KV cache 前綴。✅
 - `summarize.ts`：`summarizeMessages` 加 mode 參數
   （`'prefix-stable' | 'transcript'`，**default = prefix-stable**）；v1
-  transcript 模式（`buildSummaryTranscript` 扁平文字）保留為 fallback。
+  transcript 模式（`buildSummaryTranscript` 扁平文字）保留為 fallback。✅
 - 指令內容不變（`DEFAULT_SUMMARY_PROMPT` / `SPLIT_TURN_SUMMARY_PROMPT` /
-  自訂），位置從「system 位」移到「末尾 user 訊息」。
-- 未決（實做時定）：附件在 prefix 模式的原樣送 vs 佔位符——原樣送則
-  summary 呼叫 prompt 含圖片 tokens（配合 N1 上限）；佔位符則前綴與
-  主對話 payload 不完全同形。
+  自訂），位置從「system 位」移到「末尾 user 訊息」。✅
+- 原未決兩點已定（使用者 2026-07-22，D1/D2 皆 A，見 §3.18）：
+  附件**原樣送**（前綴與主 payload byte 一致；非 vision 模型由 `sendMessage`
+  既有 vision filter 自動剝除）；`reasoning_content` **跟隨**
+  `excludeReasoningFromContext` 開關（summary 呼叫轉傳同一開關）。✅
+- `CompactionPlan` 加 `systemHead`（`planCompaction` / `summarizeRegion`
+  手動 plan 各填一筆）；呼叫端 3 處各加 `excludeReasoning`（mode 靠
+  default 零改動）。✅
 - unit：prefix-stable payload 結構（system 第一、訊息順序與 role 保留、
-  指令最後、split 變體只換指令）；transcript fallback 回歸。
+  指令最後、split 變體只換指令）；transcript fallback 回歸；+ 無 head /
+  自訂 prompt / excludeReasoning 透傳。✅（待使用者跑確認）
 
 ## 6. 專案慣例 / 陷阱（Phase 1 寫碼前速讀）
 

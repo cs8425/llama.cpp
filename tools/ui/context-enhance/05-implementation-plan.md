@@ -58,7 +58,7 @@
 
 ### Phase 3 —(可選,後續)
 
-> **下一輪(規劃已定;N1–N3 ✅ 完成並確認,明細見 06-status §3.13–§3.15,依序 N1→N4)**:
+> **下一輪(規劃已定;N1–N4 ✅ 全部完成並確認,明細見 06-status §3.13–§3.18,依序 N1→N4)**:
 > 1. **N1** ✅ summary 上限 = n_ctx × %（新設定 `contextSummaryMaxTokensPercent`
 >    預設 70：128k → ~91k、256k → ~183k；舊固定 key 移除——完成並確認，
 >    見 06-status §3.13）。
@@ -70,10 +70,11 @@
 >    `AbortError` → 既有 fail-open:不建 cmp、toast「Compaction stopped」);
 >    inspector 與 cmp row 動作列換 [Stop];in-loop 沿用 flow abort
 >    (完成並確認,見 06-status §3.15/§5c)。
-> 4. **N4** prefix-stable summary 模式(新增、**設為 default**):
+> 4. **N4** ✅ prefix-stable summary 模式(新增、**設為 default**):
 >    `[system, 被壓縮訊息原文, 要求壓縮的 prompt]`,前綴完全一致、
 >    只有最後的壓縮 prompt 不同(KV 前綴重用);transcript 模式保留為
->    fallback(設計見 03-§2.1)。
+>    fallback(設計見 03-§2.1;附件原樣送 + reasoning 跟隨主送出開關,
+>    完成並確認,見 06-status §3.18)。
 
 - [ ] 兩段式 summary(兩次 LLM 呼叫再合併)取代單呼叫雙段 prompt
 - [ ] token 估計校準:用 `timings.prompt_n` 反推每則成本

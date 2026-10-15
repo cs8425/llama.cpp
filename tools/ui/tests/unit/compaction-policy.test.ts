@@ -285,8 +285,10 @@ describe('planCompaction', () => {
 		// kept = u2..a5 → 800 tokens ≤ budget, 4 user messages
 		expect(plan?.kept.map((m) => m.id)).toEqual(['u2', 'a2', 'u3', 'a3', 'u4', 'a4', 'u5', 'a5']);
 		expect(plan?.kept.reduce((s, m) => s + estimateTokens(m), 0)).toBeLessThanOrEqual(1400);
-		// summarize = u1..a1, system prompt excluded (I1)
+		// summarize = u1..a1, system prompt excluded (I1); the head rides along
+		// separately for the prefix-stable summary payload (N4)
 		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['u1', 'a1']);
+		expect(plan?.systemHead?.id).toBe('sys');
 		expect(plan?.estimatedTokensBefore).toBe(2300);
 	});
 
@@ -411,6 +413,7 @@ describe('planCompaction', () => {
 		expect(plan).not.toBeNull();
 		expect(plan?.firstKeptMessageId).toBe('u3');
 		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['u1', 'a1', 'u2', 'a2']);
+		expect(plan?.systemHead).toBeNull();
 	});
 });
 

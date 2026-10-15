@@ -526,6 +526,7 @@ class AgenticStore {
 			// The summary call shares the flow's model and abort signal: stopping
 			// the flow aborts a running summary, which fails open below.
 			const summary = await summarizeMessages(plan, model || null, signal, {
+				excludeReasoning: config.excludeReasoningFromContext === true,
 				maxTokens: computeSummaryMaxTokens(nCtx, config.contextSummaryMaxTokensPercent),
 				prompt: config.contextSummaryPrompt.trim() || undefined
 			});

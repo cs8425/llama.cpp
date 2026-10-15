@@ -24,7 +24,7 @@ export {
 	SUMMARY_CONTENT_PREFIX,
 	summarizeMessages
 } from './summarize';
-export type { SummarizeOptions } from './summarize';
+export type { SummaryMode, SummarizeOptions } from './summarize';
 export type {
 	CompactionBudget,
 	CompactionPlan,

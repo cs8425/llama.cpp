@@ -93,12 +93,12 @@ export async function summarizeMessages(
 `ChatService.convertDbMessageToApiChatMessageData` → 插入 summary」,
 即 02-data-model.md §2 的演算法。
 
-### 2.1 Summary prompt 模式（下輪：新增 prefix-stable 並設為 default）
+### 2.1 Summary prompt 模式(prefix-stable 為 default,已實做)
 
-現行 v1（transcript 模式）：`[system(壓縮指令), user(buildSummaryTranscript
+v1(transcript 模式,保留為 fallback):`[system(壓縮指令), user(buildSummaryTranscript
 扁平文字)]` — 指令當 system、被壓訊息拍平成一段文字。
 
-下輪新增 **prefix-stable 模式並設為 default**（規劃定、未實做）：
+**prefix-stable 模式(已實做、default)**:
 
 ```
 [system]      對話的 system prompt(path 的 system head,原樣)
@@ -111,11 +111,13 @@ export async function summarizeMessages(
 壓縮 prompt 不同**（default / 自訂 `contextSummaryPrompt`、正常 / split-turn
 變體只換最後一則）→ 對同一 summarize 區的重複摘要（Re-summarize、同區
 再壓）可重用 KV cache 前綴;且模型看到的是**原始訊息結構**而非扁平
-transcript,摘要忠度更高。v1 transcript 模式保留為 fallback。
+transcript,摘要忠度更高。實做時兩點已定(使用者 2026-07-22,D1/D2 皆 A):
 
-> 影響：`summarizeMessages` 加 mode 參數（default = prefix-stable）;
-> 附件在 prefix 模式下的處理（base64 原樣送 vs 佔位符）下輪實做時定 —
-> 若原樣送,summary 呼叫的 prompt 會包含圖片 tokens,需配合 N1 的上限放寬。
+- **附件原樣送**(base64 照主對話 payload 送):前綴與主 payload byte 一致、
+  摘要忠度最高;非 vision 模型由 `sendMessage` 既有的 vision filter 自動
+  剝除 image parts(與主送出路徑同行為)。
+- **`reasoning_content` 跟隨 `excludeReasoningFromContext` 開關**:summary
+  呼叫把同一開關傳進 `sendMessage`,兩種設定下前綴都與主 payload 一致。
 
 ## 3. 整合點對照表(改動最小化)
 

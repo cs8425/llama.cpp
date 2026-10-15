@@ -221,12 +221,27 @@ estimate(msg) = len(content)/4
 ## 5. Summary 產生(簡單版)
 
 - **呼叫方式**:非 streaming `ChatService.sendMessage()`(與
-  `generateTitleWithLLM` 同模式),獨立 messages:
-  ```
-  [ { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
-    { role: 'user',   content: transcript(被 summarize 的 1..i-1 則) } ]
-  ```
-- **transcript 格式**:`[role] content`,attachments 以佔位符表示
+  `generateTitleWithLLM` 同模式),`summarizeMessages` 的 `mode` 參數決定
+  payload 形狀(**default = `prefix-stable`**;`transcript` = v1 fallback):
+  - **prefix-stable**(default):前綴與主對話 payload 的 prefix 完全一致
+    (同一套 `normalizeMessagesForApi` 轉換、附件原樣送、
+    `reasoning_content` 跟隨 `excludeReasoningFromContext` 開關),
+    同一 summarize 區的重複摘要(Re-summarize、同區再壓)可重用 KV cache
+    前綴;模型看到原始訊息結構,摘要忠度更高:
+    ```
+    [ { role: 'system',      content: 對話的 system head(原樣) },
+      …被 summarize 的 1..i-1 則(逐則轉換,保留原 role/結構:
+        user/assistant/tool、tool_calls、attachments),
+      { role: 'user',        content: 壓縮指令 } ]
+    ```
+    只有最後一則壓縮指令會變(default / 自訂 `contextSummaryPrompt`、
+    正常 / split-turn 變體),前綴恆定。
+  - **transcript**(v1 fallback):
+    ```
+    [ { role: 'system', content: 壓縮指令 },
+      { role: 'user',   content: transcript(被 summarize 的 1..i-1 則) } ]
+    ```
+- **transcript 格式**(僅 transcript 模式):`[role] content`,attachments 以佔位符表示
   (`[image: name.jpg]`、`[file: x.ts, 12KB]`),避免把 base64 餵進 summary 呼叫。
 - **參數**:`max_tokens = n_ctx × contextSummaryMaxTokensPercent%`(預設 70%;
   128k → 91750、256k → 183500;n_ctx 未知時 fallback 1024)、`temperature 0.2`、
