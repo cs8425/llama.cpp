@@ -22,7 +22,8 @@ export {
 	DEFAULT_SUMMARY_PROMPT,
 	SPLIT_TURN_SUMMARY_PROMPT,
 	SUMMARY_CONTENT_PREFIX,
-	summarizeMessages
+	summarizeMessages,
+	toSummaryMode
 } from './summarize';
 export type { SummaryMode, SummarizeOptions } from './summarize';
 export type {

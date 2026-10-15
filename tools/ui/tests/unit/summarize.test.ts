@@ -8,7 +8,8 @@ import {
 	buildSummaryTranscript,
 	DEFAULT_SUMMARY_PROMPT,
 	SPLIT_TURN_SUMMARY_PROMPT,
-	summarizeMessages
+	summarizeMessages,
+	toSummaryMode
 } from '$lib/services/context/summarize';
 import type { CompactionPlan } from '$lib/services/context/types';
 import type { DatabaseMessage } from '$lib/types/database';
@@ -108,6 +109,21 @@ describe('buildSummaryTranscript', () => {
 
 	it('returns an empty string for an empty region', () => {
 		expect(buildSummaryTranscript([])).toBe('');
+	});
+});
+
+// --- toSummaryMode (contextSummaryMode setting) -------------------------------
+
+describe('toSummaryMode', () => {
+	it('accepts the two known modes verbatim', () => {
+		expect(toSummaryMode('prefix-stable')).toBe('prefix-stable');
+		expect(toSummaryMode('transcript')).toBe('transcript');
+	});
+
+	it('falls back to prefix-stable for unknown / corrupted values', () => {
+		expect(toSummaryMode(undefined)).toBe('prefix-stable');
+		expect(toSummaryMode('')).toBe('prefix-stable');
+		expect(toSummaryMode('bogus')).toBe('prefix-stable');
 	});
 });
 

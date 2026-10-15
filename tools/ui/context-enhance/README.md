@@ -11,13 +11,14 @@
 > §2p–§2r）。剩：5.8 手動驗收 + Phase 3 可選後續（**N1 ✅ 完成並確認**；
 > **N2 ✅ 完成並確認**（threshold 預設 80→70 + `contextKeepTargetPercent`，
 > 見 06-status §3.14）；**N3 ✅ 完成並確認**（手動壓縮 [Stop] 鍵，見
-> 06-status §3.15）；**N4 第一輪 13/14、test bug 已修、待重跑確認**（prefix-stable summary
-> 模式設為 default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status
-> §3.18））。
-> **目前停點**：N4 第一輪 unit `summarize` 13/14（唯一失敗為 test 的隨機 id
-> 問題，已修、實做零改動），**待使用者重跑 `npm run check` + unit 確認**；
-> 此前 Context Inspector 版面輪（Advanced 上移 + Back to top）與 mobile
-> 寬度修復已手動驗證通過。
+> 06-status §3.15）；**N4 ✅ 完成並確認**（prefix-stable summary 模式設為
+> default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status §3.18）；
+> **N5 已實做、待重跑確認**（新設定 `contextSummaryMode`：summary 的 prompt
+> 模式開放給 user 選，見 06-status §3.19））。
+> **目前停點**：N5 已實做（`contextSummaryMode` SELECT 設定 + `toSummaryMode()`
+> + 3 個呼叫點透傳 + unit +2），**待使用者跑 `npm run check` + unit +
+> client registry 測試確認**；此前 N4 已重跑全綠、Context Inspector 版面輪
+> （Advanced 上移 + Back to top）與 mobile 寬度修復已手動驗證通過。
 
 ## 目錄
 

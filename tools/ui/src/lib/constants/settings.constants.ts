@@ -6,7 +6,9 @@ import { FILE_GLOB_SEARCH_PICKERS } from './working-directory.constants';
 import {
 	Code,
 	Database,
+	FileText,
 	Funnel,
+	Layers,
 	ListRestart,
 	Monitor,
 	Moon,
@@ -263,6 +265,17 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 				key: SETTINGS_KEYS.CONTEXT_SHOW_COMPACTION_ENTRIES,
 				label: 'Show compaction entries',
 				type: SettingsFieldType.CHECKBOX
+			},
+			{
+				defaultValue: 'prefix-stable',
+				help: 'How the summary payload is built. Prefix-stable sends the original messages (roles, tool calls, attachments intact) so repeated summaries of the same region reuse the KV-cache prefix; transcript (v1) sends a flat text transcript. Pick transcript if your server rejects the prefix-stable payload.',
+				key: SETTINGS_KEYS.CONTEXT_SUMMARY_MODE,
+				label: 'Summary mode',
+				options: [
+					{ icon: Layers, label: 'Prefix-stable (default)', value: 'prefix-stable' },
+					{ icon: FileText, label: 'Transcript (v1)', value: 'transcript' }
+				],
+				type: SettingsFieldType.SELECT
 			},
 			{
 				defaultValue: '',

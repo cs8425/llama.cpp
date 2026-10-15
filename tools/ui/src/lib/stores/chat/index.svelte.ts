@@ -25,7 +25,8 @@ import {
 	computeSummaryMaxTokens,
 	estimateTokens,
 	planCompaction,
-	summarizeMessages
+	summarizeMessages,
+	toSummaryMode
 } from '$lib/services/context';
 import { DatabaseService } from '$lib/services/database.service';
 // direct imports between stores, not via the barrel, to avoid circular deps
@@ -617,6 +618,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			const summary = await summarizeMessages(plan, model, abortController.signal, {
 				excludeReasoning: config.excludeReasoningFromContext === true,
 				maxTokens: computeSummaryMaxTokens(nCtx, config.contextSummaryMaxTokensPercent),
+				mode: toSummaryMode(config.contextSummaryMode),
 				prompt: config.contextSummaryPrompt.trim() || undefined
 			});
 
@@ -1071,6 +1073,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				nCtx && nCtx > 0
 					? computeSummaryMaxTokens(nCtx, config.contextSummaryMaxTokensPercent)
 					: undefined,
+			mode: toSummaryMode(config.contextSummaryMode),
 			prompt: config.contextSummaryPrompt.trim() || undefined
 		});
 	}

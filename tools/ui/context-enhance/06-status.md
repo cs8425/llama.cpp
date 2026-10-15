@@ -3,28 +3,27 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**N4 第一輪 13/14、唯一失敗已修（test bug）、待使用者重跑**
-> （§3.18）：N4 prefix-stable summary 模式已實做（summary 呼叫改送
-> 「[system head（原樣）, 被壓訊息逐則轉換（原 role/結構、附件原樣送）,
-> 指令（末尾 user)]」；`summarizeMessages` 加 `mode`（**default =
-> prefix-stable**）+ `excludeReasoning`（跟隨 `excludeReasoningFromContext`
-> 開關）；`CompactionPlan` 加 `systemHead`；呼叫端 3 處各加
-> `excludeReasoning`；unit `summarize` +6、`compaction-policy` +2 斷言）。
-> 使用者第一輪：`npm run check` + unit `compaction-policy`（30/30）全綠；
-> unit `summarize` **13/14**，唯一掛「split-turn prefix identical」——
-> **test bug、非實做 bug**（兩支 `makePlanWithHead()` 產生兩組隨機 id，mock
-> pass-through 把 id 原樣送進 payload，prefix 比對必然不等）；已改測試共用
-> 同一個 plan（實做零改動，見 §3.18 第一輪修復）。
-> **待使用者重跑**：`npm run check` +
-> `npx vitest --project=unit --run tests/unit/summarize.test.ts`（預期 14/14）+
-> `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`。
+> **恢復點（最新）**：**N4 ✅ 完成並確認**（使用者重跑全綠）+ **N5 已實做、待使用者確認**
+> （§3.19）：新設定 `contextSummaryMode`（SELECT：`prefix-stable` /
+> `transcript`、預設 prefix-stable）——summary 的 prompt 模式開放給 user
+> 選（使用者要求：該給選擇權 + 為後續 summary 選項（如獨立 model/
+> endpoint）預留 config 空間）；`toSummaryMode()` 純函式 coerce（未知值
+> 回 default）；3 個呼叫點（compactConversation / summarizeRegion /
+> in-loop compactBetweenTurns）各加 `mode: toSummaryMode(
+> config.contextSummaryMode)`；unit `summarize` +2 支（`toSummaryMode`
+> 兩支）。
+> **待使用者跑**：`npm run check` +
+> `npx vitest --project=unit --run tests/unit/summarize.test.ts`（預期 16/16）+
+> `npx vitest --project=client --run tests/client/settings-registry-invariants.svelte.test.ts`
+> （registry 新增條目的全 key 迴歸）。
 > 確認後剩：Phase 1 的 5.8 手動驗收（見 §4 清單）+ Phase 3 可選後續
-> （兩段式 summary / token 校準 / per-conversation 覆蓋 / 合併重摘要提示，
-> 05-§1）。
+> （兩段式 summary / token 校準 / per-conversation 覆蓋 / 合併重摘要提示 /
+> summary 獨立 model，05-§1）。
 >
-> 此前（已確認）：§2t 版面輪手動驗證通過（PC 頂端區塊版面、長對話
-> Back to top 平滑回頂、mobile 第一視口 + 無水平溢出）+ §2s 第 3 輪 mobile
-> 寬度修復（`w-full`）一併通過。
+> 此前（已確認）：N4 prefix-stable summary 模式（§3.18：第一輪 13/14 的
+> test bug 已修、重跑全綠）；§2t 版面輪手動驗證通過（PC 頂端區塊版面、長
+> 對話 Back to top 平滑回頂、mobile 第一視口 + 無水平溢出）+ §2s 第 3 輪
+> mobile 寬度修復（`w-full`）一併通過。
 
 ## 1. 進度總覽
 
@@ -35,7 +34,7 @@
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
-| 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | 🚧 N1 ✅ 完成並確認（§3.13：改 n_ctx × %）；N2 ✅ 完成並確認（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；N3 ✅ 完成並確認（§3.15：手動壓縮 Stop 鍵）；**N4 第一輪 13/14、test bug 已修、待重跑確認**（§3.18：prefix-stable default + 附件原樣送 + reasoning 跟隨主送出開關） |
+| 下一輪 — 5 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式 / N5 summary mode 設定，§5c） | 🚧 N1 ✅ 完成並確認（§3.13：改 n_ctx × %）；N2 ✅ 完成並確認（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；N3 ✅ 完成並確認（§3.15：手動壓縮 Stop 鍵）；N4 ✅ 完成並確認（§3.18：prefix-stable default + 附件原樣送 + reasoning 跟隨主送出開關；第一輪 test bug 已修、重跑全綠）；**N5 已實做、待使用者確認**（§3.19：`contextSummaryMode` SELECT 設定） |
 | Context Inspector UI 修復（水平溢出 + header 重疊，§2s/§3.16） | ✅ 完成並確認（第 3 輪 `w-full` mobile 寬度修復已通過手動驗證） |
 | Context Inspector 版面：Advanced 整塊上移 + Back to top（§2t/§3.17） | ✅ 完成並確認（自動驗證 check + client 14/14 全綠；手動驗證通過：PC 頂端區塊版面 / 長對話跳頂 / mobile 第一視口 + 無水平溢出） |
 
@@ -970,9 +969,54 @@ KV cache 無法重用；且模型看不到原始訊息結構。N4 改送
 build 一個 `plan` 共用，split 呼叫用 `{ ...plan, isSplitTurn: true }`，prefix
 引用同一批訊息物件。實做（`summarize.ts`）零改動。
 
-**待重跑**：使用者跑 `npm run check` +
-`npx vitest --project=unit --run tests/unit/summarize.test.ts` +
-`npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`。
+**✅ 已確認**：使用者重跑 `npm run check` + unit `summarize`（14/14）+
+`compaction-policy`（30/30）全綠。
+
+### 3.19 N5 summary mode 設定 `contextSummaryMode`（完成、待使用者確認）
+
+**背景（使用者 2026-07-22 要求）**：N4 把 `SummaryMode` 做成 internal
+default（無 UI），但使用者認為該給選擇權——尤其 summary 後續可能增加選項
+（如用另一個 model / api endpoint 做 compact 而非當前任務的模型），所以
+mode 應進 config、預留空間。
+
+**決策**：
+- 新增 `contextSummaryMode`（SELECT：`prefix-stable` / `transcript`、預設
+  `prefix-stable`）——逃生門語義：server 拒絕 prefix-stable payload 時（§3.18
+  已知邊界：region 以 tool 結尾的 `[…, tool, user(指令)]` role 轉折）可切回
+  transcript；不是「推薦選項」，default 仍是 prefix-stable。
+- coerce 收斂在純函式 `toSummaryMode(value: unknown)`（`summarize.ts`）：
+  只有 `'transcript'` 字串回 transcript，其餘（undefined / 空 / 損壞的
+  localStorage 值）一律回 `prefix-stable`——呼叫點零判斷、default 單一來源。
+- 未做（刻意）：summary 獨立 model / endpoint 設定（N5 的動機之一，但屬於
+  新機制，留 Phase 3；config 空間已預留——新 key 照 `CONTEXT_*` 慣例加）。
+
+**實做**：
+- `summarize.ts`：`toSummaryMode()` 純函式；`SummarizeOptions.mode` JSDoc 補
+  「user-selectable via `contextSummaryMode`」。
+- `index.ts`（barrel）：export `toSummaryMode`。
+- `settings-keys.constants.ts`：`CONTEXT_SUMMARY_MODE: 'contextSummaryMode'`
+  （字母序插在 `CONTEXT_SUMMARY_MAX_TOKENS_PERCENT` 後）。
+- `settings.constants.ts`：registry +1 條目（General section，插在
+  `contextShowCompactionEntries` 與 `contextSummaryPrompt` 之間；SELECT、
+  無 dependsOn——手動/自動/in-loop 三個呼叫點都適用）；options 各帶 icon
+  （registry 型別 `SettingsEntry.options.icon` 必填：`Layers` =
+  prefix-stable、`FileText` = transcript）；lucide import 加 `FileText`、
+  `Layers`。`SETTING_CONFIG_DEFAULT` / `SettingsConfigType` 由 registry 派生，
+  零改動。
+- 呼叫端 3 處各加 `mode: toSummaryMode(config.contextSummaryMode)`
+  （`compactConversation` / `summarizeRegion` / in-loop
+  `compactBetweenTurns`；物件 key 字母序插在 `maxTokens` 與 `prompt` 間）；
+  兩 store 的 `$lib/services/context` import 各加 `toSummaryMode`。
+- 測試：unit `summarize.test.ts` +2 支（`toSummaryMode`：已知兩值原樣回、
+  未知/空/undefined 回 prefix-stable）。registry 全 key 迴歸靠既有 client
+  `settings-registry-invariants`（generic、自動涵蓋新 key）。
+- 文件：04-§4 設定表 +1 行；05-Phase 3 清單 +N5；README 停點。
+
+**待確認**：使用者跑 `npm run check` +
+`npx vitest --project=unit --run tests/unit/summarize.test.ts`（預期 16/16）+
+`npx vitest --project=client --run tests/client/settings-registry-invariants.svelte.test.ts`。
+手動：Settings → General → 「Summary mode」下拉（default 顯示
+「Prefix-stable (default)」；切 Transcript 後下一次 summary 呼叫走 v1 形狀）。
 
 ## 4. 驗證狀態（目前停在這）
 
@@ -1152,10 +1196,14 @@ build 一個 `plan` 共用，split 呼叫用 `{ ...plan, isSplitTurn: true }`，
   （**30/30**）+ unit `summarize`（**13/14**）。唯一失敗 = split-turn prefix
   比對（test bug：兩支 `makePlanWithHead()` → 隨機 id，mock pass-through 把 id
   送進 payload；見 §3.18 第一輪修復）。實做零改動、只修測試（共用同一 plan）。
-- **N4 待使用者重跑確認**：`npm run check` +
-  `npx vitest --project=unit --run tests/unit/summarize.test.ts`（預期 14/14）+
-  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`。
-- **下一步**：① 確認 N4（§3.18，上述 3 條指令）；② Phase 1 的 5.8 手動驗收（見上方清單）；③ Phase 3 可選後續（規劃見 05-§1）。
+- **N4 ✅ 完成並確認**：使用者重跑 `npm run check` + unit `summarize`（**14/14**）
+  + unit `compaction-policy`（**30/30**）全綠。
+- **N5 已實做、待使用者確認**（變更見 §3.19）：`contextSummaryMode`
+  SELECT 設定 + `toSummaryMode()` 純函式 + 3 個呼叫點透傳；unit
+  `summarize` +2 支。待使用者跑：`npm run check` +
+  `npx vitest --project=unit --run tests/unit/summarize.test.ts`（預期 16/16）+
+  `npx vitest --project=client --run tests/client/settings-registry-invariants.svelte.test.ts`。
+- **下一步**：① 確認 N5（§3.19，上述 3 條指令）；② Phase 1 的 5.8 手動驗收（見上方清單）；③ Phase 3 可選後續（規劃見 05-§1，含 summary 獨立 model）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -1398,7 +1446,7 @@ static async createCompactionMessage(params: {
   `KeyboardKey` enum 加 `I_UPPER`（字母序）。
 - client 測試：gauge 列 + 入口（看既有 client 測試結構決定掛哪）。
 
-## 5c. 下一輪執行清單（N1–N4 皆已完成；N4 待使用者確認，§3.18）
+## 5c. 下一輪執行清單（N1–N5；N1–N4 ✅ 完成並確認，N5 待使用者確認，§3.13–§3.19）
 
 > 來源：使用者 2026-07-21 要求（§3.12 修正後）。每項獨立可編譯、
 > 獨立可確認；順序建議 N1→N4（N1/N2 同動 settings 檔、可合併一次確認）。
@@ -1448,7 +1496,7 @@ static async createCompactionMessage(params: {
   `undefined`），不補這層 store 無法區分「已停止」vs「empty response」。
   unit +2 支（§3.15）。✅
 
-### N4 prefix-stable summary 模式（✅ 已實做、待使用者確認；明細見 §3.18）
+### N4 prefix-stable summary 模式（✅ 完成並確認；明細見 §3.18）
 - 設計：03-§2.1。payload = `[system（path 的 system head 原樣）, 被壓縮
   訊息逐則轉換（保留原 role/結構：user/assistant/tool、tool_calls、
   attachments）, user（要求壓縮的 prompt）]`。✅
@@ -1471,7 +1519,20 @@ static async createCompactionMessage(params: {
 - unit：prefix-stable payload 結構（system 第一、訊息順序與 role 保留、
   指令最後、split 變體只換指令）；transcript fallback 回歸；+ 無 head /
   自訂 prompt / excludeReasoning 透傳。第一輪 13/14（1 支 test bug 已修，
-  §3.18 第一輪修復），待重跑確認。
+  §3.18 第一輪修復），重跑 14/14 全綠。✅
+
+### N5 summary mode 設定 `contextSummaryMode`（✅ 已實做、待使用者確認；明細見 §3.19）
+- 動機（使用者 2026-07-22）：summary 的 prompt 模式該給 user 選擇權；
+  summary 後續可能增加選項（如獨立 model / api endpoint 做 compact），
+  mode 應進 config 預留空間。✅
+- 新設定 `contextSummaryMode`（SELECT：`prefix-stable` / `transcript`、預設
+  `prefix-stable`，General section）；逃生門語義（server 拒絕 prefix-stable
+  payload 時切回），default 不變。✅
+- `toSummaryMode(value)` 純函式 coerce（未知/損壞值 → `prefix-stable`）；
+  3 個呼叫點（compact / summarizeRegion / in-loop）各加
+  `mode: toSummaryMode(config.contextSummaryMode)`。✅
+- unit +2 支（`toSummaryMode`）；registry 全 key 迴歸靠既有 client
+  `settings-registry-invariants`。✅（待使用者跑確認）
 
 ## 6. 專案慣例 / 陷阱（Phase 1 寫碼前速讀）
 

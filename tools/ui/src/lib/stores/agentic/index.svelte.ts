@@ -36,6 +36,7 @@ import {
 	estimateApiMessageTokens,
 	planCompaction,
 	summarizeMessages,
+	toSummaryMode,
 	SUMMARY_CONTENT_PREFIX
 } from '$lib/services/context';
 import { DatabaseService } from '$lib/services/database.service';
@@ -528,6 +529,7 @@ class AgenticStore {
 			const summary = await summarizeMessages(plan, model || null, signal, {
 				excludeReasoning: config.excludeReasoningFromContext === true,
 				maxTokens: computeSummaryMaxTokens(nCtx, config.contextSummaryMaxTokensPercent),
+				mode: toSummaryMode(config.contextSummaryMode),
 				prompt: config.contextSummaryPrompt.trim() || undefined
 			});
 

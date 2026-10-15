@@ -75,6 +75,10 @@
 >    只有最後的壓縮 prompt 不同(KV 前綴重用);transcript 模式保留為
 >    fallback(設計見 03-§2.1;附件原樣送 + reasoning 跟隨主送出開關,
 >    完成並確認,見 06-status §3.18)。
+> 5. **N5** 新設定 `contextSummaryMode`(SELECT:`prefix-stable` /
+>    `transcript`,預設 prefix-stable):summary 的 prompt 模式開放給 user 選
+>    (逃生門:server 拒絕 prefix-stable payload 時可切回 transcript);
+>    3 個呼叫點經 `toSummaryMode()` 透傳(見 06-status §3.19)。
 
 - [ ] 兩段式 summary(兩次 LLM 呼叫再合併)取代單呼叫雙段 prompt
 - [ ] token 估計校準:用 `timings.prompt_n` 反推每則成本

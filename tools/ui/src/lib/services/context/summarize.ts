@@ -62,6 +62,15 @@ Be dense; drop small talk.`;
  */
 export type SummaryMode = 'prefix-stable' | 'transcript';
 
+/**
+ * Coerces a raw settings value (the `contextSummaryMode` config) into a valid
+ * {@link SummaryMode}; unknown or corrupted values fall back to the default
+ * `prefix-stable`.
+ */
+export function toSummaryMode(value: unknown): SummaryMode {
+	return value === 'transcript' ? 'transcript' : 'prefix-stable';
+}
+
 /** Options for {@link summarizeMessages}. */
 export interface SummarizeOptions {
 	/** Max tokens for the summary (default 1024). */
@@ -70,7 +79,10 @@ export interface SummarizeOptions {
 	temperature?: number;
 	/** Custom summary instruction; overrides the default / split-turn prompt. */
 	prompt?: string;
-	/** Prompt mode (default `'prefix-stable'`; `'transcript'` = v1 fallback). */
+	/**
+	 * Prompt mode (default `'prefix-stable'`; user-selectable via the
+	 * `contextSummaryMode` setting; `'transcript'` = v1 fallback).
+	 */
 	mode?: SummaryMode;
 	/**
 	 * When true, `reasoning_content` is stripped from the outgoing payload,
