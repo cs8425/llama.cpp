@@ -3,15 +3,20 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**N4 prefix-stable summary 模式已實做、待使用者確認**
-> （§3.18）：summary 呼叫改送「[system head（原樣）, 被壓訊息逐則轉換（原
-> role/結構、附件原樣送）, 指令（末尾 user)]」；`summarizeMessages` 加
-> `mode`（`'prefix-stable' | 'transcript'`，**default = prefix-stable**）+
-> `excludeReasoning`（跟隨 `excludeReasoningFromContext` 開關）；
-> `CompactionPlan` 加 `systemHead`；呼叫端 3 處各加 `excludeReasoning`（mode
-> 靠 default 零改動）；unit `summarize` +6、`compaction-policy` +2 斷言。
-> **待使用者跑**：`npm run check` +
-> `npx vitest --project=unit --run tests/unit/summarize.test.ts` +
+> **恢復點（最新）**：**N4 第一輪 13/14、唯一失敗已修（test bug）、待使用者重跑**
+> （§3.18）：N4 prefix-stable summary 模式已實做（summary 呼叫改送
+> 「[system head（原樣）, 被壓訊息逐則轉換（原 role/結構、附件原樣送）,
+> 指令（末尾 user)]」；`summarizeMessages` 加 `mode`（**default =
+> prefix-stable**）+ `excludeReasoning`（跟隨 `excludeReasoningFromContext`
+> 開關）；`CompactionPlan` 加 `systemHead`；呼叫端 3 處各加
+> `excludeReasoning`；unit `summarize` +6、`compaction-policy` +2 斷言）。
+> 使用者第一輪：`npm run check` + unit `compaction-policy`（30/30）全綠；
+> unit `summarize` **13/14**，唯一掛「split-turn prefix identical」——
+> **test bug、非實做 bug**（兩支 `makePlanWithHead()` 產生兩組隨機 id，mock
+> pass-through 把 id 原樣送進 payload，prefix 比對必然不等）；已改測試共用
+> 同一個 plan（實做零改動，見 §3.18 第一輪修復）。
+> **待使用者重跑**：`npm run check` +
+> `npx vitest --project=unit --run tests/unit/summarize.test.ts`（預期 14/14）+
 > `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`。
 > 確認後剩：Phase 1 的 5.8 手動驗收（見 §4 清單）+ Phase 3 可選後續
 > （兩段式 summary / token 校準 / per-conversation 覆蓋 / 合併重摘要提示，
@@ -30,7 +35,7 @@
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
-| 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | 🚧 N1 ✅ 完成並確認（§3.13：改 n_ctx × %）；N2 ✅ 完成並確認（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；N3 ✅ 完成並確認（§3.15：手動壓縮 Stop 鍵）；**N4 已實做、待使用者確認**（§3.18：prefix-stable default + 附件原樣送 + reasoning 跟隨主送出開關） |
+| 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | 🚧 N1 ✅ 完成並確認（§3.13：改 n_ctx × %）；N2 ✅ 完成並確認（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；N3 ✅ 完成並確認（§3.15：手動壓縮 Stop 鍵）；**N4 第一輪 13/14、test bug 已修、待重跑確認**（§3.18：prefix-stable default + 附件原樣送 + reasoning 跟隨主送出開關） |
 | Context Inspector UI 修復（水平溢出 + header 重疊，§2s/§3.16） | ✅ 完成並確認（第 3 輪 `w-full` mobile 寬度修復已通過手動驗證） |
 | Context Inspector 版面：Advanced 整塊上移 + Back to top（§2t/§3.17） | ✅ 完成並確認（自動驗證 check + client 14/14 全綠；手動驗證通過：PC 頂端區塊版面 / 長對話跳頂 / mobile 第一視口 + 無水平溢出） |
 
@@ -898,7 +903,7 @@ select + Compact/Expand/Re-summarize）上移到「Estimated send / % of n_ctx�
 sticky 方案（控制區恆駐頂端）：§2s 第 1–3 輪皆在處理 sticky 重疊 / 寬度
 回歸，且 mobile 上 ~300px 的 sticky 區塊會吃掉大半視口。
 
-### 3.18 N4 prefix-stable summary 模式（完成、待使用者確認）
+### 3.18 N4 prefix-stable summary 模式（完成、第一輪 test bug 已修、待重跑確認）
 
 **背景**：v1 transcript 模式把被壓訊息拍平成一段文字、指令當 system——
 同一 summarize 區的重複摘要（Re-summarize、同區再壓）前綴完全不同，
@@ -955,7 +960,17 @@ KV cache 無法重用；且模型看不到原始訊息結構。N4 改送
   的 role 轉折；個別嚴格的 chat template 若拒絕，summary 呼叫失敗 → 不建
   cmp、context 完整保留（與既有 fail-open 同路徑）。
 
-**待確認**：使用者跑 `npm run check` +
+**第一輪修復**（使用者第一輪 2026-07-22：`npm run check` + unit
+`compaction-policy`（30/30）全綠；unit `summarize` **13/14**）：唯一失敗是
+`split-turn variant only swaps the trailing instruction (prefix identical)`——
+**test bug、實做無誤**：測試對兩支呼叫各叫一次 `makePlanWithHead()`，而
+`message()` fixture 用 `m${Math.random()}` 隨機 id；mock 的
+`normalizeMessagesForApi` 是 pass-through，DB 訊息（含 `id`）原樣進 payload →
+兩次呼叫的 prefix id 不同，deep-equal 必然失敗。修復（只動測試）：該用例改
+build 一個 `plan` 共用，split 呼叫用 `{ ...plan, isSplitTurn: true }`，prefix
+引用同一批訊息物件。實做（`summarize.ts`）零改動。
+
+**待重跑**：使用者跑 `npm run check` +
 `npx vitest --project=unit --run tests/unit/summarize.test.ts` +
 `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`。
 
@@ -1133,12 +1148,12 @@ KV cache 無法重用；且模型看不到原始訊息結構。N4 改送
 - **Context Inspector 版面輪（§2t）手動驗證 ✅ 通過**（使用者 2026-07-22）：
   PC 頂端區塊版面、長對話 Back to top 平滑回頂、mobile 第一視口 + 無水平
   溢出（含 §2s 第 3 輪 `w-full` 一併通過）。§2t / §2s 完成。
-- **N4 prefix-stable summary 模式已實做、待使用者確認**（變更見 §3.18）：
-  `summarize.ts`（mode / excludeReasoning / prefix-stable payload）、
-  `types.ts`（`CompactionPlan.systemHead`）、`compaction-policy.ts`（plan 帶
-  head）、呼叫端 3 處、unit `summarize` +6 / `compaction-policy` +2 斷言。
-  待使用者跑：`npm run check` +
-  `npx vitest --project=unit --run tests/unit/summarize.test.ts` +
+- **N4 第一輪**：使用者跑 `npm run check`（全綠）+ unit `compaction-policy`
+  （**30/30**）+ unit `summarize`（**13/14**）。唯一失敗 = split-turn prefix
+  比對（test bug：兩支 `makePlanWithHead()` → 隨機 id，mock pass-through 把 id
+  送進 payload；見 §3.18 第一輪修復）。實做零改動、只修測試（共用同一 plan）。
+- **N4 待使用者重跑確認**：`npm run check` +
+  `npx vitest --project=unit --run tests/unit/summarize.test.ts`（預期 14/14）+
   `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`。
 - **下一步**：① 確認 N4（§3.18，上述 3 條指令）；② Phase 1 的 5.8 手動驗收（見上方清單）；③ Phase 3 可選後續（規劃見 05-§1）。
 
@@ -1455,7 +1470,8 @@ static async createCompactionMessage(params: {
   default 零改動）。✅
 - unit：prefix-stable payload 結構（system 第一、訊息順序與 role 保留、
   指令最後、split 變體只換指令）；transcript fallback 回歸；+ 無 head /
-  自訂 prompt / excludeReasoning 透傳。✅（待使用者跑確認）
+  自訂 prompt / excludeReasoning 透傳。第一輪 13/14（1 支 test bug 已修，
+  §3.18 第一輪修復），待重跑確認。
 
 ## 6. 專案慣例 / 陷阱（Phase 1 寫碼前速讀）
 

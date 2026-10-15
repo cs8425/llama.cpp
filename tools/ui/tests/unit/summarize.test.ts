@@ -220,11 +220,15 @@ describe('summarizeMessages (prefix-stable payload, N4)', () => {
 
 	it('split-turn variant only swaps the trailing instruction (prefix identical)', async () => {
 		vi.mocked(ChatService.sendMessage).mockResolvedValue('the summary');
+		// One shared plan for both calls: the point of the test is that only the
+		// trailing instruction differs, so the prefix must come from the same
+		// message objects (fresh plans would carry fresh random ids).
+		const plan = makePlanWithHead();
 
-		await summarizeMessages(makePlanWithHead(), null);
+		await summarizeMessages(plan, null);
 		const normal = lastSentMessages();
 
-		await summarizeMessages({ ...makePlanWithHead(), isSplitTurn: true }, null);
+		await summarizeMessages({ ...plan, isSplitTurn: true }, null);
 		const split = lastSentMessages();
 
 		expect(split.slice(0, -1)).toEqual(normal.slice(0, -1));

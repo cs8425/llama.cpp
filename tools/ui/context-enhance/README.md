@@ -11,10 +11,11 @@
 > §2p–§2r）。剩：5.8 手動驗收 + Phase 3 可選後續（**N1 ✅ 完成並確認**；
 > **N2 ✅ 完成並確認**（threshold 預設 80→70 + `contextKeepTargetPercent`，
 > 見 06-status §3.14）；**N3 ✅ 完成並確認**（手動壓縮 [Stop] 鍵，見
-> 06-status §3.15）；**N4 ✅ 已實做、待確認**（prefix-stable summary
+> 06-status §3.15）；**N4 第一輪 13/14、test bug 已修、待重跑確認**（prefix-stable summary
 > 模式設為 default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status
 > §3.18））。
-> **目前停點**：N4 已實做、**待使用者跑 `npm run check` + unit 確認**；
+> **目前停點**：N4 第一輪 unit `summarize` 13/14（唯一失敗為 test 的隨機 id
+> 問題，已修、實做零改動），**待使用者重跑 `npm run check` + unit 確認**；
 > 此前 Context Inspector 版面輪（Advanced 上移 + Back to top）與 mobile
 > 寬度修復已手動驗證通過。
 
