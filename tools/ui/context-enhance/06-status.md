@@ -4,11 +4,19 @@
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
 > **恢復點（最新）**：**Context Inspector 版面：Advanced 整塊上移 + 跳回頂端
-> 已實做、待使用者驗證**（§2t / §3.17）：Advanced 整塊（boundary select +
+> 第一輪 13/14 → Back to top 測試已修、待使用者重跑**（§2t / §3.17）：
+> Advanced 整塊（boundary select +
 > Compact now/Expand/Re-summarize，compacting → Stop）移到 Estimated send ctx
 > 條附近、紅警告條的重複 Compact 按鈕移除、最底部加 [Back to top]
 > （`Dialog.Content` `bind:ref` + `scrollTo({ top: 0, behavior: 'smooth' })`）。
-> 待跑：`npm run check` + client `context-inspector`（13 支 = 既有 10 + 新 3）+
+> 第一輪（使用者跑）：client `context-inspector` **13/14**——唯一掛
+> 「Back to top scrolls the dialog content back to the top」：browser 測試環境
+> 獨派掛載元件、**app 的 Tailwind CSS 未載入**（只有 `+layout.svelte` import
+> `app.css`）→ `Dialog.Content` 的 `overflow-y-auto` class 無效、元素非 scroll
+> container、`scrollTop` 永遠 0。元件行為正確（production class 在）；**測試端
+> 修復**：明確設 `style.overflowY = 'auto'`（mirror production class）+ 限高
+> 200px → 80px（不依賴內容高度估算），元件零改動。
+> 待跑：`npm run check` + client `context-inspector`（**14 支**）+
 > 手動（PC：頂端區塊版面；長對話跳頂；mobile：第一視口 + 無水平溢出回歸）。
 > 此前待驗：§2s 第 3 輪 mobile 寬度修復（`w-full`）也待驗證（可一併驗）。
 > 下一輪：① 確認本版面輪（§2t）+ §2s 第 3 輪；② 依 §5c 做
@@ -25,7 +33,7 @@
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
 | 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | 🚧 N1 ✅ 完成並確認（§3.13：改 n_ctx × %）；N2 ✅ 完成並確認（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；**N3 ✅ 完成並確認**（§3.15：手動壓縮 Stop 鍵，check + unit `summarize` + client `context-inspector`/`chat-message-compaction` 全綠）；N4 ⬜ 未實做 |
 | Context Inspector UI 修復（水平溢出 + header 重疊，§2s/§3.16） | 🚧 第 1 輪 ✅ PC 確認；第 2 輪 ✅ mobile 不超出但 dialog 塌到 ~50vw 很窄 → 第 3 輪（`w-full`，md 以下）**待驗證** |
-| Context Inspector 版面：Advanced 整塊上移 + Back to top（§2t/§3.17） | 🚧 已實做、**待驗證**（check + client 13 支 + 手動） |
+| Context Inspector 版面：Advanced 整塊上移 + Back to top（§2t/§3.17） | 🚧 第一輪 13/14（掛的那支 = 測試環境無 CSS → `scrollTop` 不可設，已測試端修復）；**待重跑**（check + client 14 支 + 手動） |
 
 ## 2. Phase 0 已交付檔案
 
@@ -620,9 +628,18 @@ shrink-to-fit 異常仍在，改明確寫 `w-[min(100vw,42rem)]`。
 - 無純邏輯變更 → 無新 unit。
 
 ### 驗證狀態
-- ⬜ 待使用者驗證：
+- 第一輪（使用者跑）：client `context-inspector` **13/14**——唯一掛
+  「Back to top scrolls the dialog content back to the top」
+  （`expect(content.scrollTop).toBeGreaterThan(0)` 實得 0）。根因：browser
+  測試環境用 `vitest-browser-svelte` 獨派掛載元件，app 的 Tailwind CSS 未載入
+  （只由 `src/routes/+layout.svelte` import `app.css`）→ `Dialog.Content` 的
+  `overflow-y-auto` class 無效、元素非 scroll container、`scrollTop` 永遠 0
+  （非元件 bug；production 有 class）。**測試端修復**：明確設
+  `content.style.overflowY = 'auto'`（mirror production class）+ 限高
+  200px → 80px（不依賴內容高度估算）；元件零改動。
+- ⬜ 待使用者驗證（重跑）：
   1. `npm run check`
-  2. `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`（13 支）
+  2. `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`（14 支）
   3. 手動 PC：inspector 開框即見 Advanced 區塊（ctx 條正下方）：boundary select +
      Compact/Expand/Re-summarize；payload 列在下方；最底部 Back to top。
   4. 手動：長對話捲到底 → Back to top → 平滑回頂。
@@ -1039,7 +1056,14 @@ sticky 方案（控制區恆駐頂端）：§2s 第 1–3 輪皆在處理 sticky
   `npm run check` +
   `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
   + mobile 手動（滿寬、可讀、無水平 scroll）+ PC 回歸（不變，清單見 §2s）。
-- **下一步**：① 確認 Context Inspector UI mobile 寬度修復（§2s 第 3 輪）；② 依 §5c 做 N4（prefix-stable summary 模式、設為 default）；③ Phase 1 的 5.8 手動驗收（見上方清單）；④ Phase 3 可選後續（規劃見 05-§1）。
+- **Context Inspector 版面輪（§2t）第一輪**：使用者跑 client `context-inspector`
+  （**13/14**）——唯一掛「Back to top scrolls the dialog content back to the
+  top」（`expect(content.scrollTop).toBeGreaterThan(0)` 實得 0）。根因（§2t 驗證
+  狀態）：browser 測試環境獨立掛載元件、app Tailwind CSS 未載入 →
+  `Dialog.Content` 非 scroll container、`scrollTop` 不可設；非元件 bug。
+  已測試端修復（`style.overflowY = 'auto'` + 限高 80px；元件零改動）。
+  待使用者重跑：`npm run check` + client `context-inspector`（14 支）。
+- **下一步**：① 確認 Context Inspector 版面輪（§2t，含 Back to top 測試修復重跑）+ UI mobile 寬度修復（§2s 第 3 輪）；② 依 §5c 做 N4（prefix-stable summary 模式、設為 default）；③ Phase 1 的 5.8 手動驗收（見上方清單）；④ Phase 3 可選後續（規劃見 05-§1）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 

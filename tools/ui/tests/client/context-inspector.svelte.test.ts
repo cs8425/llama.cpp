@@ -548,8 +548,13 @@ describe('DialogContextInspector (layout: controls on top, back to top)', () => 
 		const content = document.querySelector<HTMLDivElement>('[role="dialog"][data-slot="dialog-content"]');
 		expect(content).not.toBeNull();
 
-		// force the content to overflow so there is a scroll position to reset
-		content!.style.maxHeight = '200px';
+		// The app's Tailwind CSS (overflow-y-auto on the dialog content) is not
+		// loaded in the browser test environment, so make the element a scroll
+		// container explicitly — mirroring the production class — and force an
+		// overflow (80px is below any rendered content height) so there is a
+		// scroll position to reset.
+		content!.style.overflowY = 'auto';
+		content!.style.maxHeight = '80px';
 		content!.scrollTop = content!.scrollHeight;
 		expect(content!.scrollTop).toBeGreaterThan(0);
 
