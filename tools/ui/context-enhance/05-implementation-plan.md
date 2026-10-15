@@ -48,9 +48,9 @@
       （P2.5 完成並確認:client 10/10 + inspector 10/10 回歸 + check 全綠
       ——見 06-status §2o）
 - [x] gauge「Compacted: … saved」列 + 進行中狀態
-      （P2.6 已實做、待編譯確認——見 06-status §2p）
+      （P2.6 完成並確認——見 06-status §2p/§2q/§2r）
 - [x] 快捷鍵 `Shift+Ctrl/Cmd+I` + 快捷鍵說明表登記
-      （P2.6 已實做、待編譯確認——見 06-status §2p；本 app 無獨立快捷鍵
+      （P2.6 完成並確認——見 06-status §2p/§2q/§2r；本 app 無獨立快捷鍵
       說明 dialog，登記 = Eye 按鈕 tooltip 帶快捷鍵）
 
 ✅ 驗收:長對話(或測試用低 threshold)自動壓縮發生一次且只發生一次;
@@ -64,7 +64,7 @@
 >    見 06-status §3.13）。
 > 2. **N2** ✅ 新設定 `contextKeepTargetPercent`(INPUT 10–90,預設 50)——
 >    compact target 從固定 50% 常數(`KEEP_TARGET_FRACTION`)提出来給
->    user 自訂(已實做、待編譯確認,見 06-status §5c)。
+>    user 自訂(完成並確認,見 06-status §3.14/§5c)。
 > 3. **N3** 手動壓縮 [Stop] 按鈕——`compacting` 期間可中斷 summary 呼叫
 >    (不建 cmp、toast「已停止」、fail-open);in-loop 沿用 flow abort。
 > 4. **N4** prefix-stable summary 模式(新增、**設為 default**):
