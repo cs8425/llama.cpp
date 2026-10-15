@@ -154,7 +154,8 @@ Split user-message span (one span exceeds budget):
 
 ```
 budget = keepBudgetTokens
-        # 建議 = n_ctx × (1 - threshold%) - summaryReserve(≈ summary max_tokens × 1.5)
+        # = n_ctx × 0.5 - summaryReserve(≈ summary max_tokens × 1.5),下限 n_ctx × 0.1
+        # (trigger threshold 只決定「何時檢查」,不參與 budget — 見下方解耦說明)
 
 valid(j) = path[j].role ∈ {user, assistant}
 
@@ -170,6 +171,12 @@ valid(j) = path[j].role ∈ {user, assistant}
 
 - 階段 1 優先的理由:邊界切讓 summary 涵蓋「完整回合」,語義最乾淨;
   split 切是預算逼出來的退路。
+- **threshold 與 keep target 解耦(已修正)**:`threshold` 是純觸發點
+  (ctx 到這個 % 才檢查,見 §6);keep target 固定 **50% n_ctx**(扣 summary
+  reserve,下限 10%)。舊公式 `n_ctx × (1 − threshold%)` 把兩者反相耦合
+  (門檻越低 → 保留越多 → 可 summarize 區越小),1% 門檻 = 保留 99% →
+  要 ctx > ~99% n_ctx 才可能產生 plan,自動壓縮等於停用,與 threshold 的
+  慣例語義相反(修正記錄見 06-status §3.12)。
 - 巨幅單一 user 訊息(開頭就超 budget)會自然落到階段 2
   (user 訊息本身被 summarize),或階段 3(連 split 都放不下)。
 - 巨幅 tool result(例:讀了 1MB 檔案)是 split 切的典型獲益場景:
@@ -252,10 +259,13 @@ onFlowComplete / onComplete(且無 stream 在跑):
              ?? estimate(path)        # 沒 timings 時用估計
   if autoCompactionEnabled
      && n_ctx 已知
-     && lastPrompt ≥ n_ctx × threshold%(預設 80%)
+     && lastPrompt ≥ n_ctx × threshold%(預設 80%)   # threshold = 純觸發點
      && planCompaction(path) 有有效斷點:
        → 執行壓縮(§5)
 ```
+
+- **語義**:`threshold` = 純觸發點(「ctx 到這個 % 才檢查」);「壓到多小」
+  由 §3.3 的固定 keep target(50% n_ctx)決定,與 threshold 無關。
 
 - agentic flow:兩個觸發點(都非 streaming 中):
   1. **turn 之間**(迴圈內):每 turn 的 tool results 落 DB 後、

@@ -22,6 +22,21 @@ const CHARS_PER_TOKEN = 4;
  * worth the summary round-trip (02-data-model §3.3 example value).
  */
 export const MIN_SUMMARIZE_TOKENS = 2000;
+/**
+ * Fraction of n_ctx the kept suffix may occupy after a compaction. Deliberately
+ * decoupled from the trigger threshold: the threshold only decides WHEN the
+ * auto check runs (last prompt ≥ threshold% of n_ctx); this target decides
+ * how much context survives a compaction. (Coupling the two — the old
+ * `n_ctx × (1 − threshold%)` formula — made low thresholds degenerate: a 1%
+ * threshold kept 99%, so nothing could be summarized until the context was
+ * nearly full.)
+ */
+const KEEP_TARGET_FRACTION = 0.5;
+/**
+ * Floor for the keep budget (fraction of n_ctx) so small models with a large
+ * summary reserve don't get a non-positive budget.
+ */
+const KEEP_BUDGET_FLOOR_FRACTION = 0.1;
 
 function textTokens(text: string | undefined | null): number {
 	if (!text) return 0;
@@ -152,25 +167,30 @@ function isCuttable(message: DatabaseMessage): boolean {
 /**
  * The context settings that shape the compaction budget. A structural pick
  * (no settings import) so the policy stays store-free and unit-testable.
+ * Note: the trigger threshold is intentionally NOT here — it gates WHEN the
+ * auto check runs (the stores' threshold check) and never shapes the budget.
  */
 export interface CompactionSettings {
-	contextCompactionThreshold: number;
 	contextKeepMinMessages: number;
 	contextKeepMinUserTurns: number;
 	contextSummaryMaxTokens: number;
 }
 
 /**
- * Compaction budget for a known n_ctx (02-data-model §3.3): the kept suffix
- * must fit under `n_ctx × (1 − threshold%)` minus a reserve for the summary
- * itself (≈ 1.5 × the summary's max tokens, so summary + kept stay under the
- * threshold line).
+ * Compaction budget for a known n_ctx (02-data-model §3.3). The kept suffix
+ * must fit under a fixed 50% of n_ctx minus a reserve for the summary itself
+ * (≈ 1.5 × the summary's max tokens), floored at 10% of n_ctx. The threshold
+ * only decides WHEN the auto check runs, never how much context survives —
+ * see the note on {@link KEEP_TARGET_FRACTION}.
  */
 export function computeCompactionBudget(nCtx: number, settings: CompactionSettings): CompactionBudget {
 	const summaryReserve = settings.contextSummaryMaxTokens * 1.5;
 
 	return {
-		keepBudgetTokens: Math.floor(nCtx * (1 - settings.contextCompactionThreshold / 100) - summaryReserve),
+		keepBudgetTokens: Math.max(
+			Math.floor(nCtx * KEEP_TARGET_FRACTION) - summaryReserve,
+			Math.floor(nCtx * KEEP_BUDGET_FLOOR_FRACTION)
+		),
 		minKeptMessages: settings.contextKeepMinMessages,
 		minKeptUserTurns: settings.contextKeepMinUserTurns,
 		minSummarizeTokens: MIN_SUMMARIZE_TOKENS

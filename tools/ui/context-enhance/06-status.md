@@ -3,13 +3,17 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**P2.6 ✅ 完成並確認——Phase 2 完成**。
-> 使用者重跑第二輪的 5 條指令全綠：`npm run check` + unit
-> `compaction-policy` + client `context-gauge-compaction`（**8/8**）+ 回歸
-> `context-panel-mobile` / `context-inspector`。第二輪 2 支 strict mode
-> violation 已修（測試端：`.last()` 取內層 `Button`，見 §2r）；元件/store 零改動。
-> 接下來：① Phase 1 的 5.8 手動驗收（三入口已齊、現在可驗；清單見 §4）；
-> ② Phase 3 可選後續（規劃見 05-§1）。無未決實做項。
+> **恢復點（最新）**：**threshold 語義修正已實做（§3.12）——待使用者編譯確認**。
+> 背景：使用者實測「auto 1%、ctx 3% 無反應」+ 手動 Compact now →
+> `No range to compact`。實做與 02-§3.3 舊公式一致（非實做 bug），但公式
+> 把觸發點與 keep target 反相耦合（1% 門檻 = 保留 99% → 自動壓縮等於停用）。
+> 修正：`computeCompactionBudget` 解耦——keep target 固定 50% n_ctx（扣
+> summary reserve、下限 10%），threshold 只剩純觸發語義（store 兩處 gate
+> 本就是純觸發、零改動）+ unit budget 段 2→4 支 + 文件更新（02-§3.3/§6、
+> 04-§4、本檔）。store/UI 零改動。
+> 重跑：`npm run check` +
+> `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（26 支預期）。
+> 全綠後：① Phase 1 的 5.8 手動驗收（清單見 §4）；② Phase 3 可選後續。
 
 ## 1. 進度總覽
 
@@ -19,6 +23,7 @@
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
+| 設計修正 — threshold 觸發語義解耦（§3.12） | 🚧 已實做、待編譯確認（code + unit + 文件） |
 
 ## 2. Phase 0 已交付檔案
 
@@ -612,6 +617,37 @@ builder 保持 WYSIWYG（送出 = 節點存的 content）。Phase 1 的
 list 中（branch/regenerate 後的路徑），非 active 對話不渲染 list，故無跨路徑解析問題。
 boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的 fail-open 行為對應。
 
+### 3.12 threshold 語義修正：觸發點與 keep target 解耦
+**背景**：使用者實測——auto 設 1%、ctx 到 3%（5,229 / 262,144 tokens）無任何反應；
+手動 Compact now → `No range to compact`。對照代碼：實做與 02-§3.3 舊公式
+`keepBudget = floor(n_ctx × (1 − threshold%) − summaryReserve)` 完全一致
+（**非實做 bug**），但公式本身把觸發點與保留目標**反相耦合**：threshold 越低
+→ keep budget 越大 → 可 summarize 區越小。1% 門檻 = 保留 99% n_ctx → 要
+ctx > ~99.2% n_ctx（keep budget + minSummarizeTokens）才可能產生 plan，
+自動壓縮（含 in-loop）等於停用——與 threshold 的慣例語義（「ctx 到這個點
+觸發壓縮」）完全相反。使用者確認要改成慣例語義。
+
+**修正**（`computeCompactionBudget`，`services/context/compaction-policy.ts`）：
+- keep target 固定 **50% n_ctx**（新常數 `KEEP_TARGET_FRACTION = 0.5`）−
+  summary reserve（1.5 × summaryMaxTokens），下限 **10% n_ctx**
+  （`KEEP_BUDGET_FLOOR_FRACTION = 0.1`，防小模型負 budget）。
+- `CompactionSettings` 移除 `contextCompactionThreshold`（budget 不再讀它；
+  兩處 store 呼叫端傳整包 `config` 變數，structural typing 不受影響）。
+- threshold gate（`stores/chat/index.svelte.ts` auto 門檻檢查、
+  `stores/agentic/index.svelte.ts` `compactBetweenTurns`）**本就是純觸發，零改動**——
+  現在 threshold 的語義就是「ctx 到這個 % 才檢查」。
+- unit：`compaction-policy.test.ts` budget 段 2→4 支（50% 公式 / 與 threshold
+  無關 / 10% floor / min 透傳）。
+- 文件：02-§3.3 公式 + 解耦說明、02-§6 語義註、04-§4 設定表描述。
+
+**行為變更**：
+- 低 threshold（1%）：「1% 開始檢查」+ ctx 長過 ~50% n_ctx 後才有非空
+  summarize 區 → 真正開始壓縮（舊公式：~99.2% 才動）。
+- 預設 80%：觸發點不變；keep 從 20% n_ctx − reserve 變 50% n_ctx − reserve
+  → 同一次壓縮保留得更多（壓得較溫和），但觸發後行為可預期。
+- 任何 threshold：壓縮後 payload ≈ ≤ 50% n_ctx + summary（+ system head），
+  與 threshold 數值無關。
+
 ## 4. 驗證狀態（目前停在這）
 
 - Phase 0：使用者已跑 `npm run check` + 4 支 unit，**全綠**。
@@ -743,8 +779,9 @@ boundary 失效（`-1`）時顯示 amber 警告而非靜默——與 builder 的
   `context-gauge-compaction`（**8/8**）+ 回歸 `context-panel-mobile` /
   `context-inspector`。**P2.6 完成、Phase 2 完成**（變更見 §2p；第一輪修復
   §2q；第二輪修復 §2r）。
-- **下一步**：① Phase 1 的 5.8 手動驗收（見上方清單；三入口已齊、現在可驗）；
-  ② Phase 3 可選後續（規劃見 05-§1）。無未決實做項。
+- **下一步**：① threshold 語義修正的編譯確認（§3.12：`npm run check` +
+  unit `compaction-policy`，26 支預期）；② Phase 1 的 5.8 手動驗收
+  （見上方清單；三入口已齊、現在可驗）；③ Phase 3 可選後續（規劃見 05-§1）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 

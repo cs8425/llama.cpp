@@ -173,17 +173,34 @@ describe('estimateApiMessageTokens', () => {
 
 describe('computeCompactionBudget', () => {
 	const settings: CompactionSettings = {
-		contextCompactionThreshold: 80,
 		contextKeepMinMessages: 2,
 		contextKeepMinUserTurns: 4,
 		contextSummaryMaxTokens: 1024
 	};
 
-	it('derives the keep budget from n_ctx, threshold and the summary reserve', () => {
-		// 32768 × (1 − 0.8) = 6553.6 → 6553; reserve = 1024 × 1.5 = 1536
+	it('derives the keep budget from n_ctx and the summary reserve (50% target)', () => {
+		// 32768 × 0.5 = 16384; reserve = 1024 × 1.5 = 1536
 		const budget = computeCompactionBudget(32768, settings);
 
-		expect(budget.keepBudgetTokens).toBe(6553 - 1536);
+		expect(budget.keepBudgetTokens).toBe(16384 - 1536);
+	});
+
+	it('is independent of the trigger threshold', () => {
+		// the threshold only decides WHEN the auto check runs, never how much
+		// context survives — the two must not be coupled (02-data-model §3.3)
+		const low = { ...settings, contextCompactionThreshold: 1 };
+		const high = { ...settings, contextCompactionThreshold: 90 };
+
+		expect(computeCompactionBudget(32768, low).keepBudgetTokens).toBe(
+			computeCompactionBudget(32768, high).keepBudgetTokens
+		);
+	});
+
+	it('floors the keep budget at 10% of n_ctx for small models', () => {
+		// 2048 × 0.5 = 1024; reserve 1536 → 1024 − 1536 < 0 → floor 2048 × 0.1 = 204
+		const budget = computeCompactionBudget(2048, settings);
+
+		expect(budget.keepBudgetTokens).toBe(204);
 	});
 
 	it('passes the min limits through and pins minSummarizeTokens', () => {
