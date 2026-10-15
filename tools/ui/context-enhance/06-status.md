@@ -3,17 +3,15 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**threshold 語義修正已實做（§3.12）——待使用者編譯確認**。
-> 背景：使用者實測「auto 1%、ctx 3% 無反應」+ 手動 Compact now →
-> `No range to compact`。實做與 02-§3.3 舊公式一致（非實做 bug），但公式
-> 把觸發點與 keep target 反相耦合（1% 門檻 = 保留 99% → 自動壓縮等於停用）。
-> 修正：`computeCompactionBudget` 解耦——keep target 固定 50% n_ctx（扣
-> summary reserve、下限 10%），threshold 只剩純觸發語義（store 兩處 gate
-> 本就是純觸發、零改動）+ unit budget 段 2→4 支 + 文件更新（02-§3.3/§6、
-> 04-§4、本檔）。store/UI 零改動。
-> 重跑：`npm run check` +
-> `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（26 支預期）。
-> 全綠後：① Phase 1 的 5.8 手動驗收（清單見 §4）；② Phase 3 可選後續。
+> **恢復點（最新）**：**下一輪 4 項增強已寫入文件（規劃定、未實做）**：
+> N1 `contextSummaryMaxTokens` 上限 4096→65536；N2 新設定
+> `contextKeepTargetPercent`（compact target 提出来給 user 自訂）；
+> N3 手動壓縮 [Stop] 按鈕；N4 prefix-stable summary 模式（設為 default）。
+> 文件已同步：03-§2.1（summary 模式）、04-§2.2/§4（停止鍵 + 設定表）、
+> 05-§1 Phase 3（下一輪 N1–N4）、本檔 §5c。**未改任何 code**。
+> 另：§3.12 threshold 語義修正仍待使用者編譯確認（`npm run check` +
+> unit `compaction-policy`，26 支預期）。
+> 下一輪：依 §5c 實做 N1→N4（每項獨立可編譯確認）。
 
 ## 1. 進度總覽
 
@@ -24,6 +22,7 @@
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | 🚧 已實做、待編譯確認（code + unit + 文件） |
+| 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | ⬜ 規劃定（文件已寫、未實做） |
 
 ## 2. Phase 0 已交付檔案
 
@@ -780,8 +779,9 @@ ctx > ~99.2% n_ctx（keep budget + minSummarizeTokens）才可能產生 plan，
   `context-inspector`。**P2.6 完成、Phase 2 完成**（變更見 §2p；第一輪修復
   §2q；第二輪修復 §2r）。
 - **下一步**：① threshold 語義修正的編譯確認（§3.12：`npm run check` +
-  unit `compaction-policy`，26 支預期）；② Phase 1 的 5.8 手動驗收
-  （見上方清單；三入口已齊、現在可驗）；③ Phase 3 可選後續（規劃見 05-§1）。
+  unit `compaction-policy`，26 支預期）；② 下一輪 4 項增強（§5c：N1–N4，
+  規劃已定、未實做）；③ Phase 1 的 5.8 手動驗收（見上方清單）；
+  ④ Phase 3 可選後續（規劃見 05-§1）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -1023,6 +1023,68 @@ static async createCompactionMessage(params: {
   （hook 內直接動 store，同 new-chat 模式；loading 中 / 無 active conv 不動作）；
   `KeyboardKey` enum 加 `I_UPPER`（字母序）。
 - client 測試：gauge 列 + 入口（看既有 client 測試結構決定掛哪）。
+
+## 5c. 下一輪執行清單（規劃已定；下輪實做，目前零 code 改動）
+
+> 來源：使用者 2026-07-21 要求（§3.12 修正後）。每項獨立可編譯、
+> 獨立可確認；順序建議 N1→N4（N1/N2 同動 settings 檔、可合併一次確認）。
+
+### N1 `contextSummaryMaxTokens` 上限放寬（4096 → 65536）
+- `settings.constants.ts` registry：`max: 4096` → `65536`（min 128 不動）。
+- 理由：agentic 長線跑的被摘要區隨便破 80k tokens，4k summary 上限
+  不夠（摘要要能涵蓋長 turn 的 tool 交換）。
+- `summarize.ts` 的 `max_tokens` 已透傳 `contextSummaryMaxTokens`，零 code
+  改動（只動 registry clamp）。
+- 連動效應：`computeCompactionBudget` 的 `summaryReserve`（1.5 ×
+  summaryMaxTokens）隨之變大 → keep budget 變小；10% n_ctx floor
+  （§3.12）已擋住負值。實做時確認 65536 × 1.5 在小 n_ctx 模型下
+  floor 行為正常。
+
+### N2 新設定 `contextKeepTargetPercent`（compact target 自訂）
+- 新 key `CONTEXT_KEEP_TARGET_PERCENT`（`contextKeepTargetPercent`）+
+  registry：INPUT(10–90)、預設 `50`（General section，字母序在
+  `contextKeepMinMessages` 後）。
+- `compaction-policy.ts`：`CompactionSettings` 加 `contextKeepTargetPercent`；
+  `computeCompactionBudget` 把 `KEEP_TARGET_FRACTION`（固定 0.5）改成
+  `settings.contextKeepTargetPercent / 100`；`KEEP_BUDGET_FLOOR_FRACTION`
+  （10% n_ctx floor）保留不動。
+- 兩處 store 呼叫端已傳整包 `config` → 零改動。
+- unit：budget 用例改參數化 target（50% 公式 / 自訂 target / 與 threshold
+  無關 / floor）。
+- 文件：04-§4 已預寫；02-§3.3 公式 `n_ctx × 0.5` → `n_ctx × keepTarget%`。
+
+### N3 手動壓縮 [Stop] 按鈕
+- `chatStore`：`compactConversation` 建 `AbortController`（$state 或
+  private 欄位）、signal 傳 `summarizeMessages`；新 public `stopCompaction()`
+  （abort → summarizeMessages throw → 走既有 fail-open：不建 cmp、
+  toast「已停止壓縮」、`compacting = false`）。
+- 同樣的 signal 套用到 `recompactConversationEntry` 與
+  `moveCompactionBoundary`（後移重摘要）；`compactBetweenTurns`
+  （in-loop）沿用既有 flow abort signal，不另加。
+- UI：`compacting === true` 時 inspector 的 [Compact now] / [重新摘要]
+  與 cmp row 動作列變 [Stop]（呼叫 `stopCompaction()`）；gauge 的
+  「Compacting context…」列不動。
+- 現行行為對照：`compacting` 時全部 disabled、只能等（04-§2.2 已註記）。
+- client 測試：inspector + cmp row 各加 stop 用例（spy `stopCompaction`）。
+
+### N4 prefix-stable summary 模式（新增、設為 default）
+- 設計：03-§2.1。payload = `[system（path 的 system head 原樣）, 被壓縮
+  訊息逐則轉換（保留原 role/結構：user/assistant/tool、tool_calls、
+  attachments）, user（要求壓縮的 prompt）]`。
+- 關鍵約束：前綴（system + 被壓縮訊息）完全一致、只有最後的壓縮 prompt
+  不同（default / 自訂 `contextSummaryPrompt`、正常 / split-turn 變體只換
+  最後一則）→ 同一 summarize 區的重複摘要（Re-summarize 等）可重用
+  KV cache 前綴。
+- `summarize.ts`：`summarizeMessages` 加 mode 參數
+  （`'prefix-stable' | 'transcript'`，**default = prefix-stable**）；v1
+  transcript 模式（`buildSummaryTranscript` 扁平文字）保留為 fallback。
+- 指令內容不變（`DEFAULT_SUMMARY_PROMPT` / `SPLIT_TURN_SUMMARY_PROMPT` /
+  自訂），位置從「system 位」移到「末尾 user 訊息」。
+- 未決（實做時定）：附件在 prefix 模式的原樣送 vs 佔位符——原樣送則
+  summary 呼叫 prompt 含圖片 tokens（配合 N1 上限）；佔位符則前綴與
+  主對話 payload 不完全同形。
+- unit：prefix-stable payload 結構（system 第一、訊息順序與 role 保留、
+  指令最後、split 變體只換指令）；transcript fallback 回歸。
 
 ## 6. 專案慣例 / 陷阱（Phase 1 寫碼前速讀）
 

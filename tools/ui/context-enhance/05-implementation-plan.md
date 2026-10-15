@@ -58,6 +58,19 @@
 
 ### Phase 3 —(可選,後續)
 
+> **下一輪(規劃已定、未實做;明細見 06-status §5c,依序 N1→N4)**:
+> 1. **N1** `contextSummaryMaxTokens` 上限 4096 → **65536**(agentic 長線
+>    跑的被摘要區隨便破 80k,4k 上限不夠)。
+> 2. **N2** 新設定 `contextKeepTargetPercent`(INPUT 10–90,預設 50)——
+>    compact target 從固定 50% 常數(`KEEP_TARGET_FRACTION`)提出来給
+>    user 自訂。
+> 3. **N3** 手動壓縮 [Stop] 按鈕——`compacting` 期間可中斷 summary 呼叫
+>    (不建 cmp、toast「已停止」、fail-open);in-loop 沿用 flow abort。
+> 4. **N4** prefix-stable summary 模式(新增、**設為 default**):
+>    `[system, 被壓縮訊息原文, 要求壓縮的 prompt]`,前綴完全一致、
+>    只有最後的壓縮 prompt 不同(KV 前綴重用);transcript 模式保留為
+>    fallback(設計見 03-§2.1)。
+
 - [ ] 兩段式 summary(兩次 LLM 呼叫再合併)取代單呼叫雙段 prompt
 - [ ] token 估計校準:用 `timings.prompt_n` 反推每則成本
 - [ ] per-conversation 覆蓋(「此對話停用自動壓縮」,
