@@ -3,14 +3,16 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**N1 完成並確認**（check + unit 29/29 全綠，§3.13）：
-> summary 上限 = n_ctx × `contextSummaryMaxTokensPercent`（INPUT 10–90，
-> 預設 70；128k → 91750、256k → 183500）；舊 key `contextSummaryMaxTokens`
-> 移除（不 migration，舊值丟棄、回預設 70）。
-> N2–N4 未實做（明細 §5c）。§3.12 threshold 語義修正、N1 皆已確認。
-> 下一輪：依 §5c 做 **N2**（`contextKeepTargetPercent`：固定 50% 的
-> `KEEP_TARGET_FRACTION` 提出來給 user 自訂）→ N3（Stop 鍵）→
-> N4（prefix-stable summary 模式、設為 default）。
+> **恢復點（最新）**：**N2 已實做、待編譯確認**（§5c N2 + §3.14）：
+> ① `contextCompactionThreshold` 預設 80 → **70**（純預設值變更）；
+> ② 新設定 `contextKeepTargetPercent`（INPUT 10–90，預設 50）——compact
+> target 從固定 50% 常數 `KEEP_TARGET_FRACTION` 提出來給 user 自訂
+> （`computeCompactionBudget` 改讀 `settings.contextKeepTargetPercent / 100`；
+> 10% n_ctx floor 不動）。待使用者跑：`npm run check` +
+> `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`。
+> N3–N4 未實做（明細 §5c）。§3.12、N1、§3.13 皆已確認。
+> 下一輪：使用者確認 N2 後 → **N3**（Stop 鍵）→
+> **N4**（prefix-stable summary 模式、設為 default）。
 
 ## 1. 進度總覽
 
@@ -21,7 +23,7 @@
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
-| 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | 🚧 N1 ✅ 完成並確認（§3.13：改 n_ctx × %）；N2–N4 ⬜ 未實做 |
+| 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | 🚧 N1 ✅ 完成並確認（§3.13：改 n_ctx × %）；**N2 ✅ 已實做、待編譯確認**（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；N3–N4 ⬜ 未實做 |
 
 ## 2. Phase 0 已交付檔案
 
@@ -679,6 +681,48 @@ kept + 70% summary cap + 20% system headroom < n_ctx ✓。意義：壓縮後只
 想留更多可調低 percent（20% → keep 20%）；N2 的 keep target 在 percent ≥ 33%
 時會被 floor 蓋過（target 要生效需 percent < target/1.5）。
 
+### 3.14 threshold 預設 80→70 + N2 `contextKeepTargetPercent`（使用者要求，已實做、待編譯確認）
+
+**背景**：① 使用者要求 `contextCompactionThreshold` 預設值改 **70**（原 80）；
+② 依 §5c N2 把固定 50% 的 keep target（`KEEP_TARGET_FRACTION`）提出來給
+user 自訂。
+
+**實做**（已改完、待編譯確認）：
+- `settings.constants.ts`：threshold 條目 `defaultValue: 80` → `70`；同條目
+  help 順手修正（舊句「The remainder is the keep budget」是 §3.12 解耦前的
+  舊語義，現改「Only decides when the check runs; … set by the keep target
+  and the summary cap」）；新條目 `contextKeepTargetPercent`（INPUT 10–90、
+  `isPositiveInteger`、預設 `50`、label「Keep target (% of n_ctx)」，General
+  section 放在 `contextKeepMinMessages` 後）。
+- `settings-keys.constants.ts`：新 key `CONTEXT_KEEP_TARGET_PERCENT`
+  （字母序在 `CONTEXT_KEEP_MIN_USER_TURNS` 後）。
+- `compaction-policy.ts`：`CompactionSettings` 加 `contextKeepTargetPercent`
+  （字母序）；`KEEP_TARGET_FRACTION` 常數移除；`computeCompactionBudget`
+  改 `Math.floor((nCtx × settings.contextKeepTargetPercent) / 100) −
+  summaryReserve`（預設 50 時與舊 `nCtx × 0.5` 逐位元一致）；
+  `KEEP_BUDGET_FLOOR_FRACTION`（10% floor）不動。
+- 兩處 store 呼叫端（`chatStore.compactConversation`、
+  `agenticStore.compactBetweenTurns`）傳整包 `config` → **零改動**
+  （`SettingsConfigType` 由 registry 派生，自動含新 key）。
+- unit（`tests/unit/compaction-policy.test.ts`）：base fixture 加
+  `contextKeepTargetPercent: 50`；新增「uses the configured keep target
+  percent」一支（30% target：20000 × 0.3 = 6000 − 2100 reserve）。原
+  budget 4 支（50% 公式 / 與 threshold 無關 / reserve 壓過 floor / 大模型
+  @70% 落 floor）不変。
+
+**行為變更**：
+- threshold 預設 70：自動壓縮檢查提早 10 個點觸發（keep budget 不受影響，
+  觸發與 keep 早已解耦，§3.12）。
+- keep target 預設 50：與舊固定 50% 常數行為**完全一致**（逐位元）；
+  user 調高（例如 70）可保留更多近期上下文——但受 §3.13 的 floor 交互
+  限制（summary percent ≥ 33% 時 keep 恆落 10% floor，target 只在小 cap
+  時生效）。
+- 既有 user 的 localStorage 值不受影響（只改 registry 預設；舊值保留，
+  新 key 首次落預設 50）。
+
+**待確認**：`npm run check` + `npx vitest --project=unit --run
+tests/unit/compaction-policy.test.ts`（30 支：原 29 + 新 1）。
+
 ## 4. 驗證狀態（目前停在這）
 
 - Phase 0：使用者已跑 `npm run check` + 4 支 unit，**全綠**。
@@ -815,9 +859,13 @@ kept + 70% summary cap + 20% system headroom < n_ctx ✓。意義：壓縮後只
 - **N1 ✅ 完成並確認**（變更見 §3.13）：summary 上限改 n_ctx ×
   `contextSummaryMaxTokensPercent`（預設 70，舊固定 key 移除）。使用者跑
   `npm run check` + unit `compaction-policy`（**29/29**），全綠。
-- **下一步**：① 依 §5c 做 N2（`contextKeepTargetPercent`；N2 的 keep target
-  與 N1 的 percent 在 budget 公式有交互，見 §3.13）→ N3 → N4；
-  ② Phase 1 的 5.8 手動驗收（見上方清單）；③ Phase 3 可選後續（規劃見 05-§1）。
+- **N2 已實做、待編譯確認**（變更見 §3.14）：threshold 預設 80→70 +
+  新設定 `contextKeepTargetPercent`（預設 50）。待使用者跑：
+  `npm run check` +
+  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`
+  （預期 30/30：原 29 + 新 1）。
+- **下一步**：① 使用者確認 N2（check + unit 30/30）→ 依 §5c 做 N3（Stop 鍵）
+  → N4；② Phase 1 的 5.8 手動驗收（見上方清單）；③ Phase 3 可選後續（規劃見 05-§1）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -1074,18 +1122,20 @@ static async createCompactionMessage(params: {
   （70% 時 keep budget 落 10% floor，明細 §3.13）。
 - ✅ 確認：`npm run check` + unit `compaction-policy`（29/29 全綠）。
 
-### N2 新設定 `contextKeepTargetPercent`（compact target 自訂）
+### N2 新設定 `contextKeepTargetPercent`（✅ 已實做、待編譯確認；明細見 §3.14）
 - 新 key `CONTEXT_KEEP_TARGET_PERCENT`（`contextKeepTargetPercent`）+
   registry：INPUT(10–90)、預設 `50`（General section，字母序在
-  `contextKeepMinMessages` 後）。
+  `contextKeepMinMessages` 後）。✅
 - `compaction-policy.ts`：`CompactionSettings` 加 `contextKeepTargetPercent`；
   `computeCompactionBudget` 把 `KEEP_TARGET_FRACTION`（固定 0.5）改成
-  `settings.contextKeepTargetPercent / 100`；`KEEP_BUDGET_FLOOR_FRACTION`
-  （10% n_ctx floor）保留不動。
-- 兩處 store 呼叫端已傳整包 `config` → 零改動。
-- unit：budget 用例改參數化 target（50% 公式 / 自訂 target / 與 threshold
-  無關 / floor）。
-- 文件：04-§4 已預寫；02-§3.3 公式 `n_ctx × 0.5` → `n_ctx × keepTarget%`。
+  `settings.contextKeepTargetPercent / 100`（常數已移除）；
+  `KEEP_BUDGET_FLOOR_FRACTION`（10% n_ctx floor）保留不動。✅
+- 兩處 store 呼叫端已傳整包 `config` → 零改動。✅
+- unit：budget 用例參數化 target（base fixture 加 `contextKeepTargetPercent: 50`；
+  新增自訂 target 30% 一支；50% 公式 / 與 threshold 無關 / floor 三支不變）。✅
+- 文件：04-§4 設定表已更新；02-§3.3 公式 `n_ctx × 0.5` →
+  `n_ctx × contextKeepTargetPercent%`。✅
+- 另：`contextCompactionThreshold` 預設 80 → 70（使用者要求，同批）。✅
 
 ### N3 手動壓縮 [Stop] 按鈕
 - `chatStore`：`compactConversation` 建 `AbortController`（$state 或

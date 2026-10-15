@@ -188,6 +188,7 @@ describe('computeCompactionBudget', () => {
 	const settings: CompactionSettings = {
 		contextKeepMinMessages: 2,
 		contextKeepMinUserTurns: 4,
+		contextKeepTargetPercent: 50,
 		contextSummaryMaxTokensPercent: 7
 	};
 
@@ -196,6 +197,13 @@ describe('computeCompactionBudget', () => {
 		const budget = computeCompactionBudget(20000, settings);
 
 		expect(budget.keepBudgetTokens).toBe(10000 - 2100);
+	});
+
+	it('uses the configured keep target percent', () => {
+		// 20000 × 0.3 = 6000; summary max = 20000 × 7% = 1400; reserve = 2100
+		const budget = computeCompactionBudget(20000, { ...settings, contextKeepTargetPercent: 30 });
+
+		expect(budget.keepBudgetTokens).toBe(6000 - 2100);
 	});
 
 	it('is independent of the trigger threshold', () => {

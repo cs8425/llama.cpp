@@ -154,7 +154,7 @@ Split user-message span (one span exceeds budget):
 
 ```
 budget = keepBudgetTokens
-        # = n_ctx × 0.5 - summaryReserve(≈ summary max_tokens × 1.5),下限 n_ctx × 0.1
+        # = n_ctx × contextKeepTargetPercent%(預設 50) - summaryReserve(≈ summary max_tokens × 1.5),下限 n_ctx × 0.1
         # summary max_tokens = n_ctx × contextSummaryMaxTokensPercent%(預設 70%;
         # 70% 時 reserve 壓過 50% target → keep 恆落 10% 下限,見 06-status §3.13)
         # (trigger threshold 只決定「何時檢查」,不參與 budget — 見下方解耦說明)
@@ -174,7 +174,8 @@ valid(j) = path[j].role ∈ {user, assistant}
 - 階段 1 優先的理由:邊界切讓 summary 涵蓋「完整回合」,語義最乾淨;
   split 切是預算逼出來的退路。
 - **threshold 與 keep target 解耦(已修正)**:`threshold` 是純觸發點
-  (ctx 到這個 % 才檢查,見 §6);keep target 固定 **50% n_ctx**(扣 summary
+  (ctx 到這個 % 才檢查,見 §6);keep target = **`contextKeepTargetPercent`%
+  n_ctx**(預設 50、user 可自訂,INPUT 10–90,見 06-status §5c N2;扣 summary
   reserve,下限 10%)。舊公式 `n_ctx × (1 − threshold%)` 把兩者反相耦合
   (門檻越低 → 保留越多 → 可 summarize 區越小),1% 門檻 = 保留 99% →
   要 ctx > ~99% n_ctx 才可能產生 plan,自動壓縮等於停用,與 threshold 的

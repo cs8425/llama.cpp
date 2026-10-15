@@ -17,6 +17,7 @@ export const SETTINGS_KEYS = {
 	CONTEXT_COMPACTION_THRESHOLD: 'contextCompactionThreshold',
 	CONTEXT_KEEP_MIN_MESSAGES: 'contextKeepMinMessages',
 	CONTEXT_KEEP_MIN_USER_TURNS: 'contextKeepMinUserTurns',
+	CONTEXT_KEEP_TARGET_PERCENT: 'contextKeepTargetPercent',
 	CONTEXT_SHOW_COMPACTION_ENTRIES: 'contextShowCompactionEntries',
 	CONTEXT_SUMMARY_MAX_TOKENS_PERCENT: 'contextSummaryMaxTokensPercent',
 	CONTEXT_SUMMARY_PROMPT: 'contextSummaryPrompt',

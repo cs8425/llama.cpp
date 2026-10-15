@@ -8,7 +8,9 @@
 > [06-status.md](./06-status.md)（Phase 0 完成；Phase 1 5.1–5.7 完成並確認、
 > 剩 5.8 手動驗收（三入口已齊、現在可驗）；**Phase 2 P2.1–P2.6 全部完成並
 > 確認**（client suite 全綠 + `npm run check` 全綠，見 06-status 恢復點 /
-> §2p–§2r）。剩：5.8 手動驗收 + Phase 3 可選後續）。
+> §2p–§2r）。剩：5.8 手動驗收 + Phase 3 可選後續（**N1 ✅ 完成並確認**；
+> **N2 ✅ 已實做、待編譯確認**（threshold 預設 80→70 + `contextKeepTargetPercent`，
+> 見 06-status §3.14）；N3–N4 未實做）。
 
 ## 目錄
 

@@ -62,9 +62,9 @@
 > 1. **N1** ✅ summary 上限 = n_ctx × %（新設定 `contextSummaryMaxTokensPercent`
 >    預設 70：128k → ~91k、256k → ~183k；舊固定 key 移除——完成並確認，
 >    見 06-status §3.13）。
-> 2. **N2** 新設定 `contextKeepTargetPercent`(INPUT 10–90,預設 50)——
+> 2. **N2** ✅ 新設定 `contextKeepTargetPercent`(INPUT 10–90,預設 50)——
 >    compact target 從固定 50% 常數(`KEEP_TARGET_FRACTION`)提出来給
->    user 自訂。
+>    user 自訂(已實做、待編譯確認,見 06-status §5c)。
 > 3. **N3** 手動壓縮 [Stop] 按鈕——`compacting` 期間可中斷 summary 呼叫
 >    (不建 cmp、toast「已停止」、fail-open);in-loop 沿用 flow abort。
 > 4. **N4** prefix-stable summary 模式(新增、**設為 default**):

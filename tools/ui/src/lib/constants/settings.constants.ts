@@ -207,9 +207,9 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 				type: SettingsFieldType.CHECKBOX
 			},
 			{
-				defaultValue: 80,
+				defaultValue: 70,
 				dependsOn: SETTINGS_KEYS.CONTEXT_AUTO_COMPACTION,
-				help: 'Compact once the last prompt reaches this percentage of the model context (n_ctx). The remainder is the keep budget for recent messages.',
+				help: 'Compact once the last prompt reaches this percentage of the model context (n_ctx). Only decides when the check runs; how much context survives is set by the keep target and the summary cap.',
 				isPositiveInteger: true,
 				key: SETTINGS_KEYS.CONTEXT_COMPACTION_THRESHOLD,
 				label: 'Compaction threshold (%)',
@@ -235,6 +235,16 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 				label: 'Keep minimum messages',
 				max: 50,
 				min: 2,
+				type: SettingsFieldType.INPUT
+			},
+			{
+				defaultValue: 50,
+				help: 'How much of the model context (n_ctx) to keep after a compaction, as a percentage: the kept recent messages must fit under this, minus a reserve for the summary itself (floored at 10% of n_ctx).',
+				isPositiveInteger: true,
+				key: SETTINGS_KEYS.CONTEXT_KEEP_TARGET_PERCENT,
+				label: 'Keep target (% of n_ctx)',
+				max: 90,
+				min: 10,
 				type: SettingsFieldType.INPUT
 			},
 			{
