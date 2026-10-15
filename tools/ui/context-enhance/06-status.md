@@ -3,15 +3,20 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**N3 完成並確認**（§5c N3 + §3.15；使用者跑 4 條
-> 指令全綠：`npm run check` + unit `summarize` + client `context-inspector`
-> + client `chat-message-compaction`）：手動壓縮 [Stop] 鍵——
-> `compacting` 期間可中斷 summary 呼叫（`chatStore.stopCompaction()` abort
-> → `summarizeMessages` 丟 `AbortError` → 既有 fail-open：不建 cmp、
-> toast「Compaction stopped」）；inspector 與 cmp row 的動作列在
-> `compacting` 時換成單一 [Stop] 按鈕；in-loop 沿用 flow abort（未動）。
-> N1、N2 皆已確認（§3.13/§3.14）。N4 未實做（明細 §5c）。
-> 下一輪：依 §5c 做 **N4**（prefix-stable summary 模式、設為 default）。
+> **恢復點（最新）**：**Context Inspector UI 修復第 3 輪（mobile 寬度）待
+> 使用者驗證**（§2s / §3.16）：inspector「收合列長文把整個 dialog 撐出超長
+> 水平 scroll」+「sticky 標題重疊」兩案。第 1 輪（C 預覽截 150 字元 + A
+> `overflow-x-hidden` + header 只留 X、標題/描述移到 body 頂部 + 兩 `ul`
+> `max-w-2xl`）已確認 check + client 10/10 全綠、PC 正常；第 2 輪（`min-w-0`
+> 系列）已確認 mobile 不再超出，**但 dialog 塌到 ~50vw 很窄**（fixed 元素
+> shrink-to-fit 的可用空間 = 視口 − 50% left offset = 50vw，min-content 歸零後
+> 寬度塌到 50vw）→ 第 3 輪 `Dialog.Content` 加 `w-full`（md 以下；md+
+> 由 base `md:w-auto` 勝出、PC 行為不變）。待跑：`npm run check` + client
+> `context-inspector` + mobile 手動（滿寬可讀）+ PC 回歸。
+> 此前：N3 完成並確認（§5c N3 + §3.15）、N1/N2 皆已確認（§3.13/§3.14）。
+> N4 未實做（明細 §5c）。
+> 下一輪：① 確認 inspector UI mobile 寬度修復（§2s 第 3 輪）；② 依 §5c 做
+> **N4**（prefix-stable summary 模式、設為 default）。
 
 ## 1. 進度總覽
 
@@ -23,6 +28,7 @@
 | Phase 3 — 可選後續 | ⬜ |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
 | 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | 🚧 N1 ✅ 完成並確認（§3.13：改 n_ctx × %）；N2 ✅ 完成並確認（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；**N3 ✅ 完成並確認**（§3.15：手動壓縮 Stop 鍵，check + unit `summarize` + client `context-inspector`/`chat-message-compaction` 全綠）；N4 ⬜ 未實做 |
+| Context Inspector UI 修復（水平溢出 + header 重疊，§2s/§3.16） | 🚧 第 1 輪 ✅ PC 確認；第 2 輪 ✅ mobile 不超出但 dialog 塌到 ~50vw 很窄 → 第 3 輪（`w-full`，md 以下）**待驗證** |
 
 ## 2. Phase 0 已交付檔案
 
@@ -530,6 +536,70 @@ role 查這些按鈕所以沒浮出。
 2 支 form 入口）+ 回歸 `context-panel-mobile` / `context-inspector`。
 **P2.6 確認、Phase 2 完成**（剩 Phase 1 的 5.8 手動驗收 + Phase 3 可選後續）。
 
+## 2s. Context Inspector UI 修復：水平溢出 + header 重疊（第 1–2 輪已確認；第 3 輪 mobile 寬度待驗證）
+
+### 症狀（使用者實測回報）
+1. **水平溢出**：收合（未點擊）狀態下，長訊息（tool result 可達數萬字元）的
+   單行預覽把**整個 dialog** 撐出超長水平 scrollbar；列文字硬切在 dialog
+   右緣、無 ellipsis。
+2. **header 重疊**：垂直捲動時 body 內容從 sticky 標題/描述背後透出
+   （共用 `dialog-header.svelte` 是 `bg-background md:bg-transparent`）。
+
+### 根因
+- dialog content 是 `display: grid` + `overflow-y-auto`（CSS 規定此時
+  `overflow-x` compute 成 `auto`）。收合列是 `white-space: nowrap` 單行；
+  該行的 min-content 經 grid item / flex-column item 的 automatic minimum
+  size（`min-width: auto`）一層層往上撐 → grid auto column 寬於 dialog →
+  水平 scroll。
+- `max-w-2xl`（42rem）壓在 `ul` 上 **PC 有效**（42rem < dialog 內寬 720px，
+  且 `max-width` 同時夾住該元素的 min-content 貢獻）；**mobile 無效**：
+  672px > 螢幕寬，且 `max-width: 100%` 這種百分比在 intrinsic sizing 階段
+  解析不到（父層寬度正在被計算）→ 正解是 `min-w-0` 把 automatic minimum
+  歸零。
+- 重疊是獨立問題：sticky header 透明背景，與水平溢出無關。
+
+### 變更（單檔 `DialogContextInspector.svelte`，邏輯零改動）
+1. **C 資料層**：`PREVIEW_MAX_LENGTH = 150` + `clampPreview()`；
+   `apiPreviewText()`（payload 列）/ `dbPreviewText()`（Compacted out 列）
+   超 150 字元截斷 + `…`。全文不受影響（展開列 `fullText()`、Copy JSON）。
+2. **A dialog 層**：`Dialog.Content` 加 `overflow-x-hidden`（與 base
+   `overflow-y-auto` 不衝突）。
+3. **header 結構（使用者指定，見 §3.16）**：`Dialog.Header` 只留 X
+   （透明、sticky 恆駐右上角）；`Dialog.Title` + `Dialog.Description` 移到
+   `Dialog.Content` 最前面（body 頂部、隨捲動）。a11y 不受影響（bits-ui
+   走 id 接 `aria-labelledby` / `aria-describedby`）。
+4. **列表寬度**：payload `ul` 與 Compacted out `ul` 皆 `max-w-2xl`
+   （= `var(--container-2xl)` 42rem；PC 視覺上限、兩列表寬度一致）。
+5. **第 2 輪 mobile 修復**：`min-w-0` 加在 grid item
+   （`div.flex.min-w-0.flex-col.gap-4`）、兩支 `ul`、兩組 `li`——
+   automatic minimum size 歸零，列表在任何 viewport 都不再把 dialog 撐寬；
+   mobile 時 `ul` 拉滿 dialog 內寬（`max-w-2xl` 變 non-binding）。
+6. **第 3 輪 mobile 寬度修復（本輪）**：`Dialog.Content` 加 `w-full`
+   （md 以下生效；md+ 由 base 的 `md:w-auto` 勝出、PC 行為不變）。
+   根因：dialog 是 `fixed + width: auto`（shrink-to-fit），而 fixed 元素的
+   可用空間 = 視口寬 − left offset（50%）= **50vw**；第 2 輪 `min-w-0`
+   把 min-content 歸零後，shrink-to-fit = min(max(min-content, 50vw),
+   max-content) 塌到 50vw（375px 手機 → ~187px，與實測相符）。PC 此前
+   「正常」也是 50vw（桌面 ≈ 720–768px，接近預期寬度）。`w-full` 給明確
+   寬度（100vw，再被 `max-w-full` / `sm:max-w-2xl` 夾住）。
+
+### 驗證狀態
+- **第 1 輪（變更 1–4）✅ 使用者已確認**：`npm run check` + client
+  `context-inspector`（**10/10**）全綠；實測 PC 正常、mobile 超寬。
+- **第 2 輪（變更 5）✅ 使用者已確認**：`npm run check` + client 全綠；
+  實測 mobile 不再超出，**但 dialog 變很窄（~50vw）難以閱讀**（根因見
+  變更 6）。
+- **第 3 輪（變更 6）⬜ 待使用者驗證**：
+  1. `npm run check`
+  2. `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
+  3. 手動 mobile：dialog **滿寬**（375px 手機 = 全螢幕寬）、列表 100% 內寬、
+     長列 ellipsis 正常、無水平 scroll、可讀。
+  4. 手動 PC 回歸：不變（md+ 由 `md:w-auto` 勝出、~50vw 且被 48rem 夾住）。
+
+### 若第 3 輪 mobile 仍 NG
+檢查 devtools 的 dialog computed width（應為 100vw / 被 max-w 夾住）；若
+shrink-to-fit 異常仍在，改明確寫 `w-[min(100vw,42rem)]`。
+
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
 ### 3.1 既有 broken state：`ChatRole` / `ChatMessageType` 原本未定義
@@ -762,6 +832,14 @@ user 自訂。
 `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
 + `npx vitest --project=client --run tests/client/chat-message-compaction.svelte.test.ts`。
 
+### 3.16 Inspector header 結構變更（使用者指定，§2s）
+04-§2.2 原設計標題/描述在 sticky header 內。實做改為：**header 只留 X**
+（透明背景、sticky），`Dialog.Title` + `Dialog.Description` 移到 body 最前面
+（隨捲動）。動因：inspector 是會垂直捲動的高 dialog，共用 header 的
+`md:bg-transparent` 讓捲動內容從標題背後透出重疊；不透明背景（E1）可解但
+使用者偏好只留 X。a11y 無影響（bits-ui 的 Title/Description 走 id 接
+`aria-labelledby` / `aria-describedby`，與 DOM 位置無關）。
+
 ## 4. 驗證狀態（目前停在這）
 
 - Phase 0：使用者已跑 `npm run check` + 4 支 unit，**全綠**。
@@ -909,7 +987,20 @@ user 自訂。
   `summarizeMessages` abort 時丟真 `AbortError`）。使用者跑 4 條指令全綠：
   `npm run check` + unit `summarize`（8/8：原 6 + 新 2）+ client
   `context-inspector` + client `chat-message-compaction`。
-- **下一步**：① 依 §5c 做 N4（prefix-stable summary 模式、設為 default）；② Phase 1 的 5.8 手動驗收（見上方清單）；③ Phase 3 可選後續（規劃見 05-§1）。
+- **Context Inspector UI 修復第 1 輪（§2s）✅ PC 確認 / mobile NG**：使用者
+  跑 `npm run check` + client `context-inspector`（**10/10**）全綠；實測
+  PC 正常、mobile 超寬（dialog `max-w-full`、`ul` `max-w-2xl` 672px >
+  螢幕寬）→ 第 2 輪已改（`min-w-0`：grid item + 兩 `ul` + 兩組 `li`）。
+- **Context Inspector UI 修復第 2 輪（mobile 溢出）✅ 確認 / 新症狀**：使用者
+  跑 `npm run check` + client 全綠；實測 mobile 不再超出，**但 dialog 變很窄
+  （~50vw）難以閱讀** → 第 3 輪已改（`Dialog.Content` 加 `w-full`，md 以下；
+  根因：fixed 元素 shrink-to-fit 可用空間 = 視口 − 50% left offset = 50vw，
+  min-content 歸零後寬度塌到 50vw）。
+- **Context Inspector UI 修復第 3 輪（mobile 寬度）⬜ 待使用者驗證**：重跑
+  `npm run check` +
+  `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
+  + mobile 手動（滿寬、可讀、無水平 scroll）+ PC 回歸（不變，清單見 §2s）。
+- **下一步**：① 確認 Context Inspector UI mobile 寬度修復（§2s 第 3 輪）；② 依 §5c 做 N4（prefix-stable summary 模式、設為 default）；③ Phase 1 的 5.8 手動驗收（見上方清單）；④ Phase 3 可選後續（規劃見 05-§1）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 

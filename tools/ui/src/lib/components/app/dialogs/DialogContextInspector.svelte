@@ -513,7 +513,7 @@
 </script>
 
 <Dialog.Root onOpenChange={handleOpenChange} {open}>
-	<Dialog.Content class="overflow-x-hidden sm:max-w-2xl md:max-w-3xl">
+	<Dialog.Content class="overflow-x-hidden w-full sm:max-w-2xl md:max-w-3xl">
 		<Dialog.Header />
 
 		<div class="flex flex-col gap-2">
@@ -535,7 +535,7 @@
 				Building payload…
 			</div>
 		{:else}
-			<div class="flex flex-col gap-4">
+			<div class="flex min-w-0 flex-col gap-4">
 				<div class="flex flex-col gap-2">
 					<div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
 						<span>
@@ -635,9 +635,9 @@
 						</Button>
 					</div>
 
-					<ul class="max-w-2xl flex flex-col divide-y divide-border/40 rounded-md border border-border/50">
+					<ul class="max-w-2xl min-w-0 flex flex-col divide-y divide-border/40 rounded-md border border-border/50">
 						{#each payloadRows as row, index (index)}
-							<li>
+							<li class="min-w-0">
 								<div class="flex items-start gap-1">
 									<button
 										aria-expanded={expandedRow === index}
@@ -725,9 +725,9 @@
 							</span>
 						</h3>
 
-						<ul class="opacity-60 flex flex-col divide-y divide-border/30 rounded-md border border-border/40">
+						<ul class="opacity-60 max-w-2xl min-w-0 flex flex-col divide-y divide-border/30 rounded-md border border-border/40">
 							{#each droppedRows as row (row.message.id)}
-								<li class="flex items-start gap-2 px-3 py-1.5">
+								<li class="min-w-0 flex items-start gap-2 px-3 py-1.5">
 									<span class="text-muted-foreground font-mono shrink-0 pt-0.5 text-[10px]">
 										#{row.index}
 									</span>
