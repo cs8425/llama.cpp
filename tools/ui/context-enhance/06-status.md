@@ -3,19 +3,15 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**Context Inspector UI 修復第 3 輪（mobile 寬度）待
-> 使用者驗證**（§2s / §3.16）：inspector「收合列長文把整個 dialog 撐出超長
-> 水平 scroll」+「sticky 標題重疊」兩案。第 1 輪（C 預覽截 150 字元 + A
-> `overflow-x-hidden` + header 只留 X、標題/描述移到 body 頂部 + 兩 `ul`
-> `max-w-2xl`）已確認 check + client 10/10 全綠、PC 正常；第 2 輪（`min-w-0`
-> 系列）已確認 mobile 不再超出，**但 dialog 塌到 ~50vw 很窄**（fixed 元素
-> shrink-to-fit 的可用空間 = 視口 − 50% left offset = 50vw，min-content 歸零後
-> 寬度塌到 50vw）→ 第 3 輪 `Dialog.Content` 加 `w-full`（md 以下；md+
-> 由 base `md:w-auto` 勝出、PC 行為不變）。待跑：`npm run check` + client
-> `context-inspector` + mobile 手動（滿寬可讀）+ PC 回歸。
-> 此前：N3 完成並確認（§5c N3 + §3.15）、N1/N2 皆已確認（§3.13/§3.14）。
-> N4 未實做（明細 §5c）。
-> 下一輪：① 確認 inspector UI mobile 寬度修復（§2s 第 3 輪）；② 依 §5c 做
+> **恢復點（最新）**：**Context Inspector 版面：Advanced 整塊上移 + 跳回頂端
+> 已實做、待使用者驗證**（§2t / §3.17）：Advanced 整塊（boundary select +
+> Compact now/Expand/Re-summarize，compacting → Stop）移到 Estimated send ctx
+> 條附近、紅警告條的重複 Compact 按鈕移除、最底部加 [Back to top]
+> （`Dialog.Content` `bind:ref` + `scrollTo({ top: 0, behavior: 'smooth' })`）。
+> 待跑：`npm run check` + client `context-inspector`（13 支 = 既有 10 + 新 3）+
+> 手動（PC：頂端區塊版面；長對話跳頂；mobile：第一視口 + 無水平溢出回歸）。
+> 此前待驗：§2s 第 3 輪 mobile 寬度修復（`w-full`）也待驗證（可一併驗）。
+> 下一輪：① 確認本版面輪（§2t）+ §2s 第 3 輪；② 依 §5c 做
 > **N4**（prefix-stable summary 模式、設為 default）。
 
 ## 1. 進度總覽
@@ -29,6 +25,7 @@
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
 | 下一輪 — 4 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式，§5c） | 🚧 N1 ✅ 完成並確認（§3.13：改 n_ctx × %）；N2 ✅ 完成並確認（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；**N3 ✅ 完成並確認**（§3.15：手動壓縮 Stop 鍵，check + unit `summarize` + client `context-inspector`/`chat-message-compaction` 全綠）；N4 ⬜ 未實做 |
 | Context Inspector UI 修復（水平溢出 + header 重疊，§2s/§3.16） | 🚧 第 1 輪 ✅ PC 確認；第 2 輪 ✅ mobile 不超出但 dialog 塌到 ~50vw 很窄 → 第 3 輪（`w-full`，md 以下）**待驗證** |
+| Context Inspector 版面：Advanced 整塊上移 + Back to top（§2t/§3.17） | 🚧 已實做、**待驗證**（check + client 13 支 + 手動） |
 
 ## 2. Phase 0 已交付檔案
 
@@ -600,6 +597,38 @@ role 查這些按鈕所以沒浮出。
 檢查 devtools 的 dialog computed width（應為 100vw / 被 max-w 夾住）；若
 shrink-to-fit 異常仍在，改明確寫 `w-[min(100vw,42rem)]`。
 
+## 2t. Context Inspector 版面：Advanced 整塊上移 + 跳回頂端（使用者指定，已實做待驗證）
+
+### 使用者要求
+- 手動壓縮等動作在 dialog 最底部，長 payload 列要捲到底才碰得到主要動作 →
+  **Advanced 整塊上移**（不是只搬 Compact 按鈕），靠近「已使用 ctx」
+  （Estimated send / % of n_ctx 區塊）。
+- 最底下加**快速跳回頂端**按鈕。
+
+### 變更（2 檔，邏輯零改動）
+
+| 檔案 | 改動 |
+| ---- | ---- |
+| `DialogContextInspector.svelte` | ① Advanced 整塊（heading + boundary `Select` + 動作列 [Compact now]/[Expand]/[Re-summarize]，compacting → [Stop]）**純平移**到紅警告 / compacting 狀態列**之後**、「Actual payload」**之前**（其餘區塊相對順序不變）；② 紅 boundary 失效警告條**移除**內含的 [Compact now] 按鈕（頂端區塊是唯一入口，警告文字保留、`flex flex-1` 包裝層簡化為 `span`）；③ 新增 `contentEl = $state<HTMLDivElement \| null>` + `Dialog.Content` `bind:ref`（shadcn 包裝元件的 `ref` 本來就是 `$bindable`，bits-ui ref 型別 = `HTMLAttributes<HTMLDivElement>['ref']`，型別安全）；④ 新增 `scrollToTop()`（`contentEl?.scrollTo({ top: 0, behavior: 'smooth' })`）+ 最底部置中 outline [Back to top] 按鈕（`ArrowUpToLine`，本機 lucide v1.46.0 有），只在 result 分支渲染；⑤ JSDoc 補新版面說明 |
+| `tests/client/context-inspector.svelte.test.ts` | 新增 describe（3 支）：全 dialog 只有一個「Compact now」且位於「Actual payload」h3 **之前**（`compareDocumentPosition` DOM 順序）；boundary 失效警告條為純文字（無 button）且全 dialog 只有一個 Compact；Back to top 存在、點擊後 content `scrollTop` 回到 0（測試內把 content 限高 200px 製造 overflow，smooth scroll 用 `waitFor` 等 settle） |
+
+### 行為不變項
+- store 方法 / I7 guard / `actionsBlocked` / `refreshTick` 全數不動；
+  compacting 仍是「動作列變 [Stop] + 狀態列」（現在位於頂端）。
+- 既有 10 支 client 用例皆位置無關（文字搜尋按鈕）→ 預期照綠（含
+  compacting 用例：Stop 存在、Compact/Expand/Re-summarize 為 null）。
+- 無純邏輯變更 → 無新 unit。
+
+### 驗證狀態
+- ⬜ 待使用者驗證：
+  1. `npm run check`
+  2. `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`（13 支）
+  3. 手動 PC：inspector 開框即見 Advanced 區塊（ctx 條正下方）：boundary select +
+     Compact/Expand/Re-summarize；payload 列在下方；最底部 Back to top。
+  4. 手動：長對話捲到底 → Back to top → 平滑回頂。
+  5. 手動 mobile：頂端區較高（title + ctx + Advanced ≈ 300px）、payload 在
+     第一視口之下、跳頂可用；**無水平溢出**（§2s 修復回歸確認）。
+
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
 ### 3.1 既有 broken state：`ChatRole` / `ChatMessageType` 原本未定義
@@ -839,6 +868,16 @@ user 自訂。
 `md:bg-transparent` 讓捲動內容從標題背後透出重疊；不透明背景（E1）可解但
 使用者偏好只留 X。a11y 無影響（bits-ui 的 Title/Description 走 id 接
 `aria-labelledby` / `aria-describedby`，與 DOM 位置無關）。
+
+### 3.17 Advanced 整塊上移 + Back to top（使用者指定，§2t）
+04-§2.2 原設計把動作列放在 dialog 最底部（Advanced 區）。使用者回饋：長
+payload 列時主要動作（手動壓縮）離第一視口太遠 → Advanced **整塊**（boundary
+select + Compact/Expand/Re-summarize）上移到「Estimated send / % of n_ctx」
+附近，最底部加 Back to top。實做為純平移（其餘區塊相對順序不變）+ 警告條
+重複 Compact 按鈕移除 + `Dialog.Content` `bind:ref`（元件本來就支援
+`$bindable` ref）+ `scrollTo({ top: 0, behavior: 'smooth' })`。**不採用**
+sticky 方案（控制區恆駐頂端）：§2s 第 1–3 輪皆在處理 sticky 重疊 / 寬度
+回歸，且 mobile 上 ~300px 的 sticky 區塊會吃掉大半視口。
 
 ## 4. 驗證狀態（目前停在這）
 

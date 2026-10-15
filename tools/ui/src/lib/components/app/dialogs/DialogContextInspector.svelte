@@ -11,12 +11,20 @@
 	 * kept-from boundary, compact now, expand (restore) and re-summarize —
 	 * all through chatStore.
 	 *
+	 * Layout: the action controls (the Advanced block — boundary select,
+	 * Compact now, Expand, Re-summarize) sit at the top, right below the
+	 * context-usage block, so the primary decision (is the context too full,
+	 * should I compact) is made next to the number that motivates it. The
+	 * payload list is the read-only scroll area; a Back to top button at the
+	 * bottom returns the scroll container (Dialog.Content) to the top.
+	 *
 	 * The payload is rebuilt on open, after every action and whenever the
 	 * active path changes while the dialog is open (the store actions mirror
 	 * into activeMessages; the refresh tick makes the rebuild explicit).
 	 */
 	import {
 		AlertTriangle,
+		ArrowUpToLine,
 		Braces,
 		Check,
 		Copy,
@@ -58,6 +66,7 @@
 	let { onOpenChange, open = $bindable(false) }: Props = $props();
 
 	let building = $state(false);
+	let contentEl = $state<HTMLDivElement | null>(null);
 	let copied = $state(false);
 	let draftSummary = $state('');
 	let editingSummary = $state(false);
@@ -237,6 +246,13 @@
 	// effect above already tracks); the tick makes the re-fetch explicit.
 	function refreshPayload() {
 		refreshTick++;
+	}
+
+	// The controls live at the top of the dialog, so long payload lists push
+	// the bottom of the content well below the fold; a single tap returns the
+	// scroll container (Dialog.Content) to the top.
+	function scrollToTop() {
+		contentEl?.scrollTo({ top: 0, behavior: 'smooth' });
 	}
 
 	async function handleCompactNow() {
@@ -513,7 +529,7 @@
 </script>
 
 <Dialog.Root onOpenChange={handleOpenChange} {open}>
-	<Dialog.Content class="overflow-x-hidden w-full sm:max-w-2xl md:max-w-3xl">
+	<Dialog.Content bind:ref={contentEl} class="overflow-x-hidden w-full sm:max-w-2xl md:max-w-3xl">
 		<Dialog.Header />
 
 		<div class="flex flex-col gap-2">
@@ -584,22 +600,10 @@
 					>
 						<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
 
-						<div class="flex flex-1 flex-col gap-2">
-							<span>
-								The compaction boundary no longer exists on this path, so the full context
-								is being sent. Consider re-compacting.
-							</span>
-
-							<Button
-								class="h-7 w-fit gap-1 px-2 text-xs"
-								disabled={actionsBlocked}
-								onclick={handleCompactNow}
-							>
-								<Shrink class="h-3.5 w-3.5" />
-
-								Compact now
-							</Button>
-						</div>
+						<span>
+							The compaction boundary no longer exists on this path, so the full context
+							is being sent. Consider re-compacting.
+						</span>
 					</div>
 				{/if}
 
@@ -613,6 +617,93 @@
 						Compacting context…
 					</div>
 				{/if}
+
+				<div class="flex flex-col gap-3 border-t border-border/50 pt-3">
+					<h3 class="text-sm font-medium">Advanced</h3>
+
+					{#if result.compaction}
+						<div class="flex flex-col gap-1.5">
+							<span class="text-xs text-muted-foreground">Kept from (boundary)</span>
+
+							<Select.Root
+								onValueChange={handleBoundaryChange}
+								type="single"
+								value={selectedBoundary}
+							>
+								<Select.Trigger
+									aria-label="Kept from boundary"
+									class="w-full justify-start text-xs"
+									disabled={actionsBlocked || !result.compaction.boundaryValid}
+									size="sm"
+								>
+									{selectedBoundaryLabel}
+								</Select.Trigger>
+
+								<Select.Content>
+									{#if userBoundaryOptions.length > 0}
+										<Select.Group>
+											<Select.GroupHeading>Turn boundaries (user)</Select.GroupHeading>
+
+											{#each userBoundaryOptions as option (option.id)}
+												<Select.Item label={option.label} value={option.id} />
+											{/each}
+										</Select.Group>
+									{/if}
+
+									{#if assistantBoundaryOptions.length > 0}
+										<Select.Group>
+											<Select.GroupHeading>Within a turn (assistant)</Select.GroupHeading>
+
+											{#each assistantBoundaryOptions as option (option.id)}
+												<Select.Item label={option.label} value={option.id} />
+											{/each}
+										</Select.Group>
+									{/if}
+								</Select.Content>
+							</Select.Root>
+						</div>
+					{/if}
+
+					<div class="flex flex-wrap gap-2">
+						{#if compacting}
+							<Button class="h-7 gap-1 px-2 text-xs" onclick={handleStopCompaction} variant="destructive">
+								<Square class="h-3.5 w-3.5" />
+
+								Stop
+							</Button>
+						{:else}
+							<Button class="h-7 gap-1 px-2 text-xs" disabled={actionsBlocked} onclick={handleCompactNow}>
+								<Shrink class="h-3.5 w-3.5" />
+
+								Compact now
+							</Button>
+
+							{#if result.compaction}
+								<Button
+									class="h-7 gap-1 px-2 text-xs"
+									disabled={actionsBlocked}
+									onclick={requestExpand}
+									variant="outline"
+								>
+									<UnfoldVertical class="h-3.5 w-3.5" />
+
+									Expand
+								</Button>
+
+								<Button
+									class="h-7 gap-1 px-2 text-xs"
+									disabled={actionsBlocked || !result.compaction.boundaryValid}
+									onclick={handleRecompact}
+									variant="outline"
+								>
+									<RefreshCw class="h-3.5 w-3.5" />
+
+									Re-summarize
+								</Button>
+							{/if}
+						{/if}
+					</div>
+				</div>
 
 				<div class="flex flex-col gap-2">
 					<div class="flex items-center justify-between gap-2">
@@ -747,91 +838,12 @@
 					</div>
 				{/if}
 
-				<div class="flex flex-col gap-3 border-t border-border/50 pt-3">
-					<h3 class="text-sm font-medium">Advanced</h3>
+				<div class="flex justify-center">
+					<Button class="h-7 gap-1 px-2 text-xs" variant="outline" onclick={scrollToTop}>
+						<ArrowUpToLine class="h-3.5 w-3.5" />
 
-					{#if result.compaction}
-						<div class="flex flex-col gap-1.5">
-							<span class="text-xs text-muted-foreground">Kept from (boundary)</span>
-
-							<Select.Root
-								onValueChange={handleBoundaryChange}
-								type="single"
-								value={selectedBoundary}
-							>
-								<Select.Trigger
-									aria-label="Kept from boundary"
-									class="w-full justify-start text-xs"
-									disabled={actionsBlocked || !result.compaction.boundaryValid}
-									size="sm"
-								>
-									{selectedBoundaryLabel}
-								</Select.Trigger>
-
-								<Select.Content>
-									{#if userBoundaryOptions.length > 0}
-										<Select.Group>
-											<Select.GroupHeading>Turn boundaries (user)</Select.GroupHeading>
-
-											{#each userBoundaryOptions as option (option.id)}
-												<Select.Item label={option.label} value={option.id} />
-											{/each}
-										</Select.Group>
-									{/if}
-
-									{#if assistantBoundaryOptions.length > 0}
-										<Select.Group>
-											<Select.GroupHeading>Within a turn (assistant)</Select.GroupHeading>
-
-											{#each assistantBoundaryOptions as option (option.id)}
-												<Select.Item label={option.label} value={option.id} />
-											{/each}
-										</Select.Group>
-									{/if}
-								</Select.Content>
-							</Select.Root>
-						</div>
-					{/if}
-
-					<div class="flex flex-wrap gap-2">
-						{#if compacting}
-							<Button class="h-7 gap-1 px-2 text-xs" onclick={handleStopCompaction} variant="destructive">
-								<Square class="h-3.5 w-3.5" />
-
-								Stop
-							</Button>
-						{:else}
-							<Button class="h-7 gap-1 px-2 text-xs" disabled={actionsBlocked} onclick={handleCompactNow}>
-								<Shrink class="h-3.5 w-3.5" />
-
-								Compact now
-							</Button>
-
-							{#if result.compaction}
-								<Button
-									class="h-7 gap-1 px-2 text-xs"
-									disabled={actionsBlocked}
-									onclick={requestExpand}
-									variant="outline"
-								>
-									<UnfoldVertical class="h-3.5 w-3.5" />
-
-									Expand
-								</Button>
-
-								<Button
-									class="h-7 gap-1 px-2 text-xs"
-									disabled={actionsBlocked || !result.compaction.boundaryValid}
-									onclick={handleRecompact}
-									variant="outline"
-								>
-									<RefreshCw class="h-3.5 w-3.5" />
-
-									Re-summarize
-								</Button>
-							{/if}
-						{/if}
-					</div>
+						Back to top
+					</Button>
 				</div>
 			</div>
 		{/if}

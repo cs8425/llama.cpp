@@ -9,6 +9,11 @@
 // confirmation) and Re-summarize; while `contextStatsStore.compacting` the
 // spinner row shows and every action is disabled.
 //
+// Layout round: the whole Advanced controls block sits at the top (below the
+// context-usage block, above the payload list) with exactly one Compact now
+// control in the dialog (the boundary warning no longer carries its own), and
+// a Back to top button at the bottom returns the scroll container to the top.
+//
 // Run: npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts
 
 import DialogContextInspector from '$lib/components/app/dialogs/DialogContextInspector.svelte';
@@ -470,6 +475,89 @@ describe('DialogContextInspector (actions, Phase 2 P2.4)', () => {
 		await userEvent.click(findDialogButton('Stop')!);
 
 		expect(stopSpy).toHaveBeenCalledTimes(1);
+
+		unmount();
+	});
+});
+
+describe('DialogContextInspector (layout: controls on top, back to top)', () => {
+	it('keeps a single Compact now control above the payload list', async () => {
+		buildCompactedFixture();
+		setActiveConversation();
+
+		const { unmount } = await openInspector();
+
+		// exactly one compact control in the whole dialog (the boundary warning
+		// no longer carries its own copy)
+		const compactButtons = dialogButtons().filter(
+			(button) => button.textContent?.trim() === 'Compact now'
+		);
+
+		expect(compactButtons).toHaveLength(1);
+
+		// the controls section sits above the payload list in document order
+		const payloadHeading = [...document.querySelectorAll<HTMLElement>('[role="dialog"] h3')].find(
+			(el) => el.textContent?.includes('Actual payload')
+		);
+
+		expect(payloadHeading).not.toBeNull();
+		expect(compactButtons[0].compareDocumentPosition(payloadHeading!) & Node.DOCUMENT_POSITION_FOLLOWING)
+			.toBeTruthy();
+
+		unmount();
+	});
+
+	it('shows the boundary warning without a duplicate compact action', async () => {
+		const system = makeMessage({ content: 'You are helpful.', role: MessageRole.SYSTEM, type: MessageType.SYSTEM });
+		const user = makeMessage({ content: 'early question' });
+		const assistant = makeMessage({ content: 'early answer', role: MessageRole.ASSISTANT });
+		const cmp = makeCompaction({
+			compactionMeta: {
+				estimatedTokensBefore: 500,
+				firstKeptMessageId: 'missing-id',
+				summarizedCount: 2
+			}
+		});
+
+		conversationsStore.activeMessages = [system, user, assistant, cmp];
+		setActiveConversation();
+
+		const { unmount } = await openInspector();
+
+		const alert = document.querySelector<HTMLElement>('[role="dialog"] [role="alert"]');
+
+		expect(alert).not.toBeNull();
+		expect(alert?.textContent).toContain('no longer exists');
+		// the warning is text-only — the single compact action lives in the
+		// Advanced block at the top
+		expect(alert?.querySelector('button')).toBeNull();
+		expect(dialogButtons().filter((button) => button.textContent?.trim() === 'Compact now')).toHaveLength(1);
+
+		unmount();
+	});
+
+	it('Back to top scrolls the dialog content back to the top', async () => {
+		buildCompactedFixture();
+		setActiveConversation();
+
+		const { unmount } = await openInspector();
+
+		const backToTop = findDialogButton('Back to top');
+		expect(backToTop).not.toBeNull();
+
+		const content = document.querySelector<HTMLDivElement>('[role="dialog"][data-slot="dialog-content"]');
+		expect(content).not.toBeNull();
+
+		// force the content to overflow so there is a scroll position to reset
+		content!.style.maxHeight = '200px';
+		content!.scrollTop = content!.scrollHeight;
+		expect(content!.scrollTop).toBeGreaterThan(0);
+
+		await userEvent.click(backToTop!);
+
+		// smooth scrolling animates; wait for it to settle at the top
+		await waitFor(() => (content!.scrollTop === 0 ? content : null));
+		expect(content!.scrollTop).toBe(0);
 
 		unmount();
 	});
