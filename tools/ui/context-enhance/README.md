@@ -12,6 +12,9 @@
 > **N2 ✅ 完成並確認**（threshold 預設 80→70 + `contextKeepTargetPercent`，
 > 見 06-status §3.14）；**N3 ✅ 完成並確認**（手動壓縮 [Stop] 鍵，見
 > 06-status §3.15）；N4 未實做）。
+> **目前停點**：Context Inspector 版面「Advanced 整塊上移 + Back to top」
+> **已實做、待使用者驗證**（見 06-status 恢復點 / §2t / §3.17）；
+> §2s 第 3 輪 mobile 寬度修復（`w-full`）也待驗證。
 
 ## 目錄
 
