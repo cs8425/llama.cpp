@@ -56,6 +56,50 @@
 ✅ 驗收:長對話(或測試用低 threshold)自動壓縮發生一次且只發生一次;
 編輯 summary 後下一輪 payload 即變;Expand 後 context 完整還原。
 
+### v3 — 實際 token 計數 + compact 成功判定(設計確認 2026-10-16,未實做)
+
+> 背景:自動壓縮從未觸發(262.14K/262.14K 案例)——根因是舊 budget 公式
+> (summary max 70% × 1.5 = 105% n_ctx 的 reserve)把 keepBudget 壓死在 10% floor,
+> planCompaction 回 null、auto 路徑完全靜默。根因分析與決策記錄見
+> 06-status §3.20。設計:02-§3.3/§3.4/§6(v3)、03-§3/§4.2/§4.4(v3)。
+
+- [ ] `compaction-policy.ts` `computeCompactionBudget`:`keepBudgetTokens =
+      floor(nCtx × contextKeepTargetPercent%)`——移除 summaryReserve(× 1.5)與
+      10% floor;`computeSummaryMaxTokens` 不再進 budget(只留在 summary 呼叫的
+      max_tokens)
+- [ ] `estimateTokens` / `estimateApiMessageTokens`:文字部分(content / toolCalls /
+      reasoning / attachment text / PDF text)char/4 → **UTF-8 byte 數**
+      (保守上限:切點 fit 偏向「多留」);image 1000 / audio-video 3000 不變
+- [ ] `chat.service.ts`:`ApiChatCompletionResponse` 補 `timings` 欄位;
+      `handleNonStreamResponse` 解析 `data.timings` 傳給 `onComplete`
+      (summary 呼叫實際 completion tokens 的來源)
+- [ ] `summarize.ts`:`summarizeMessages` 回傳 `string` → `{ content: string;
+      tokens: number | null }`(tokens = 回應 timings 的 completion tokens;
+      server 沒回 → null → 成功判定改 `byteLen(content)` 代入)
+- [ ] 成功判定 + 重試迴圈(compactConversation / compactBetweenTurns / 手動
+      re-summarize 共用):`headBytes + (summaryTokens ?? byteLen(summary)) ≤
+      keepTarget% × n_ctx`;超標 → 重發同一 request,總嘗試次數 =
+      `contextSummaryMaxAttempts`(新設定,預設 3;1 = 總共一次;≤ 0 = 無限;
+      registry 需要允許 0 的 validator)
+- [ ] `AgenticGates`:新增 compaction-decision gate
+      (`requestCompactionDecision` / `resolveCompactionDecision` /
+      `getPendingCompactionDecision`,同 requestContinue 的 Promise + pending
+      state 模式;abort = skip)
+- [ ] `agenticStore`:public wrapper(request/resolve/getPending)+
+      `compactBetweenTurns` 接成功判定/重試/gate
+- [ ] `chatStore.compactConversation`:接成功判定/重試/gate
+- [ ] `ChatCompactionDecisionCard.svelte`:確認卡片(與 agentic continue 卡片
+      同風格):顯示當前 compact 完的 token 數(head + summary,實際值/byte 數)
+      vs keepTarget% 目標 + [使用這次壓完] [重壓] [這次不壓];
+      掛法:in-loop = agentic 訊息內(與 continue 卡片同位);
+      flow 之間 = 訊息列尾端獨立 row
+- [ ] unit tests:byte 計數(CJK / ASCII / 附件);budget 簡化公式;
+      成功判定邊界(≤ / >);重試次數(1 / 3 / ≤ 0);summaryTokens null → byteLen
+- [ ] client tests:卡片三選項 resolve gate;abort = skip
+
+✅ 驗收:長對話(262K 級)自動壓縮真的會發生;超標場景(小 keepTarget)走
+重試 → gate 三選項;無 cmp 對話行為不變。
+
 ### Phase 3 —(可選,後續)
 
 > **下一輪(規劃已定;N1–N5 ✅ 全部完成並確認,明細見 06-status §3.13–§3.19,依序 N1→N5)**:
@@ -81,7 +125,9 @@
 >    3 個呼叫點經 `toSummaryMode()` 透傳(完成並確認,見 06-status §3.19)。
 
 - [ ] 兩段式 summary(兩次 LLM 呼叫再合併)取代單呼叫雙段 prompt
-- [ ] token 估計校準:用 `timings.prompt_n` 反推每則成本
+- [x] ~~token 估計校準:用 `timings.prompt_n` 反推每則成本~~ → 被 v3 取代
+      (2026-10-16):需要精確的兩個決策點(觸發、成功判定)直接用 API 實際值,
+      切點用 byte 數,不再需要逐則成本校準
 - [ ] per-conversation 覆蓋(「此對話停用自動壓縮」,
       放 `ConversationPreferences`)
 - [ ] 舊 cmp 落在 kept 區時的「合併重摘要」提示

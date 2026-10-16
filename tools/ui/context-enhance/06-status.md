@@ -3,10 +3,17 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**N1–N5 全部完成並確認**（2026-07-22）——context
+> **恢復點（最新）**：**v3 重設計已確認、未實做**（2026-10-16）——「自動壓縮
+> 從未觸發」根因已定位（舊 budget 公式把 keepBudget 壓死在 10% floor，
+> planCompaction → null、auto 路徑靜默，分析見 §3.20），修正設計（實際 token
+> 計數 + compact 成功判定 + 超標重試/user gate）經使用者 A–E 五點確認；
+> 文件 02/03/05 已同步 v3；下一步 = 使用者確認文件 → 實做 → 使用者自行
+> check + unit 驗證。
+>
+> 此前恢復點：**N1–N5 全部完成並確認**（2026-07-22）——context
 > enhance 的「下一輪增強」全數落地；剩：Phase 1 的 5.8 手動驗收（見 §4
-> 清單）+ Phase 3 可選後續（兩段式 summary / token 校準 / per-conversation
-> 覆蓋 / 合併重摘要提示 / summary 獨立 model，05-§1）。
+> 清單）+ Phase 3 可選後續（兩段式 summary / per-conversation 覆蓋 /
+> 合併重摘要提示 / summary 獨立 model，05-§1；token 校準已被 v3 取代）。
 >
 > **N5 明細**（§3.19，✅ 已確認）：新設定 `contextSummaryMode`（SELECT：
 > `prefix-stable` / `transcript`、預設 prefix-stable）——summary 的 prompt
@@ -32,6 +39,7 @@
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
+| v3 重設計 — 實際 token 計數 + compact 成功判定 + 超標重試/gate（§3.20） | 🚧 設計已確認（2026-10-16），未實做 |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
 | 下一輪 — 5 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式 / N5 summary mode 設定，§5c） | ✅ **N1–N5 全部完成並確認**：N1（§3.13：改 n_ctx × %）；N2（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；N3（§3.15：手動壓縮 Stop 鍵）；N4（§3.18：prefix-stable default + 附件原樣送 + reasoning 跟隨主送出開關；第一輪 test bug 已修、重跑全綠）；N5（§3.19：`contextSummaryMode` SELECT 設定） |
 | Context Inspector UI 修復（水平溢出 + header 重疊，§2s/§3.16） | ✅ 完成並確認（第 3 輪 `w-full` mobile 寬度修復已通過手動驗證） |
@@ -1015,6 +1023,63 @@ mode 應進 config、預留空間。
 `npx vitest --project=unit --run tests/unit/summarize.test.ts`（16/16）+
 `npx vitest --project=client --run tests/client/settings-registry-invariants.svelte.test.ts`
 全綠。
+
+### 3.20 v3 重設計：實際 token 計數 + compact 成功判定 + 超標重試/user gate（設計已確認，未實做）
+
+**背景（2026-10-16 使用者報告）**：Context 面板 262.14K / 262.14K（100%），
+Inspector 顯示 Estimated send 175,490（66.9%），但自動壓縮**從未觸發**。
+設定：keep min user turns 1 / min messages 2 / keep target 40% / summary max 70% /
+auto on / in-loop on / threshold 50%。
+
+**根因分析（代碼核實 + 數值模擬驗證）**：
+1. 三個觸發點都在（非 agentic onComplete 末 / agentic flow 結束 / in-loop
+   turn 之間），I7 guard 不會擋（`isRunning` 在 finally 已清）。
+2. threshold gate 應通過（gauge ~100%，prompt_n 實際值 ≥ 50% × 262,144）。
+3. **`computeCompactionBudget` 把 keepBudget 壓死在 10% floor（26,214）**：
+   summaryReserve = 183,500（70% n_ctx）× 1.5 = 275,250 = **105% n_ctx**，
+   大於任何 keep target（40% = 104,857 → 104,857 − 275,250 < 0 → floor）。
+   keep target 設 40~90% 全部無效。
+4. `planCompaction` 需要「kept suffix ≤ 26,214 est.」的切點：agentic 尾端
+   （最後一個 turn 的 tool results）遠超 26K est. → 邊界切與 split 切都被擋
+   → **回 null**。
+5. auto 模式 plan = null 時**完全靜默**（無 toast / log / gauge 指示）→
+   「從未觸發」且無任何回饋。
+   旁證：gauge 的 `contextUsed = prompt_n + cache_n + predicted_n` 重複計算
+   cache（llama.cpp 的 prompt_n 已含 cached tokens）；char/4 對 CJK 低估 ~1.5×
+   （262K 實際 vs 175K 估計）。
+
+**使用者決策（2026-10-16，A–E）**：
+- **A**：觸發 = 當前 context 超過 `contextCompactionThreshold × n_ctx` 就執行
+  裁切；**移除所有 keepBudget 的過度設計**（×1.5 reserve、10% floor）。
+  planCompaction 算法本體不變（兩階段 / I4 / I5 / minSummarizeTokens），其
+  budget 輸入 = 裸的 `keepTarget% × n_ctx`。
+- **B**：超標 gate 三選項：**使用這次壓完（use it）/ 重壓（retry）/ 這次不壓
+  （skip）**。
+- **C**：新設定重試次數：**預設 3，3 = 共 3 次；1 = 總共一次；≤ 0 = 無限重試**。
+- **D**：flow 之間的超標確認卡片 = **與 agentic 卡片同風格**（in-loop 掛
+  agentic 訊息內；flow 之間掛訊息列尾端獨立 row）。
+- **E**：**沒有 API 回傳準確 token 數時，直接用 byte 數**（UTF-8），
+  不做 char/4 自己估算。
+
+**v3 設計摘要**（詳見 02-§3.3/§3.4/§6、03-§3/§4.2/§4.4、05-v3 清單）：
+- token 計數：API 有實際值用實際值（觸發 = prompt_n；成功判定 = summary 回應
+  的 completion tokens）；沒有 → UTF-8 byte 數（保守上限）。
+- 裁切：budget = keepTarget% × n_ctx（裸值）；算法不變。
+- 成功判定（新）：`system head（byte 數）+ summary（API 實際 tokens）≤
+  keepTarget% × n_ctx`；kept 區不進判定（已由切點約束）。
+- 超標：重發同一 request（`contextSummaryMaxAttempts`，預設 3 共計；≤ 0 =
+  無限）→ 仍超 → gate 問 user（同 maxTurns/tool 確認機制，abort = skip）。
+  手動路徑（Compact now / Re-summarize / 斷點後移）同走此流程。
+- 必要前置：非 streaming 回應補解析 `timings`（現況 `handleNonStreamResponse`
+  不解析、`ApiChatCompletionResponse` 無 `timings` 欄位）。
+- `summarizeMessages` 回傳改 `{ content, tokens }`（tokens = null 時成功判定
+  改 byteLen(content) 代入）。
+- 作廢：原 Phase 3「token 估計校準（prompt_n 反推每則成本）」——v3 在兩個
+  需要精確的決策點直接用 API 實際值，切點用 byte 數，不再需要。
+
+**狀態**：設計已確認；02/03/05 文件已同步；**未實做**。實做清單見 05-v3；
+完成後使用者自行 `npm run check` + unit（compaction-policy / summarize / 
+context-builder）+ client（settings-registry-invariants + 新卡片測試）驗證。
 
 ## 4. 驗證狀態（目前停在這）
 

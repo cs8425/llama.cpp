@@ -150,53 +150,62 @@ Split user-message span (one span exceeds budget):
 > Pi 規範中的 BashExecution / custom_message / branch_summary 在我們
 > 的型別系統中沒有對應物;上表即本專案的完整合法集合。
 
-### 3.3 選點演算法(兩階段,優先邊界切)
+### 3.3 選點演算法(兩階段,優先邊界切;v3:budget = 裸 keep target)
 
 ```
-budget = keepBudgetTokens
-        # = n_ctx × contextKeepTargetPercent%(預設 50) - summaryReserve(≈ summary max_tokens × 1.5),下限 n_ctx × 0.1
-        # summary max_tokens = n_ctx × contextSummaryMaxTokensPercent%(預設 70%;
-        # 70% 時 reserve 壓過 50% target → keep 恆落 10% 下限,見 06-status §3.13)
-        # (trigger threshold 只決定「何時檢查」,不參與 budget — 見下方解耦說明)
+budget = keepBudgetTokens = n_ctx × contextKeepTargetPercent%(user 設定值,例 40)
+        # v3(2026-10-16,使用者確認 A):移除舊的「- summaryReserve(≈ summary
+        # max_tokens × 1.5),下限 n_ctx × 0.1」公式——那是過度設計:summary max 70%
+        # 時 reserve = 105% n_ctx,壓過任何 keep target,budget 恆落 10% floor,
+        # planCompaction 回 null、自動壓縮從未觸發(根因分析見 06-status §3.20)。
+        # (trigger threshold 只決定「何時檢查」,不參與 budget — 見 §6)
 
 valid(j) = path[j].role ∈ {user, assistant}
 
-1. 找最小 j 使 valid(j)、estimate(path[j..end]) ≤ budget 且 path[j].role == 'user'
+1. 找最小 j 使 valid(j)、count(path[j..end]) ≤ budget 且 path[j].role == 'user'
    → 找到:一般壓縮(cut 在 span 邊界)
-2. 否則找最小 j 使 valid(j) 且 estimate(path[j..end]) ≤ budget
+2. 否則找最小 j 使 valid(j) 且 count(path[j..end]) ≤ budget
    → 找到:split span 壓縮(isSplitTurn = true)
-3. 都沒有 → null(不壓),gauge 顯示警告
+3. 都沒有 → null(不壓)
 4. 對 1/2 的結果再檢查:
-   - summarize 區(1..j)estimate < minSummarizeTokens(例:2k)→ null
+   - summarize 區(1..j)count < minSummarizeTokens(2k,byte 數)→ null
    - I5:邊界切 → kept 區 user 訊息數 ≥ N;split 切 → kept 區訊息數 ≥ M(預設 2)
 ```
 
 - 階段 1 優先的理由:邊界切讓 summary 涵蓋「完整回合」,語義最乾淨;
   split 切是預算逼出來的退路。
-- **threshold 與 keep target 解耦(已修正)**:`threshold` 是純觸發點
-  (ctx 到這個 % 才檢查,見 §6);keep target = **`contextKeepTargetPercent`%
-  n_ctx**(預設 50、user 可自訂,INPUT 10–90,見 06-status §5c N2;扣 summary
-  reserve,下限 10%)。舊公式 `n_ctx × (1 − threshold%)` 把兩者反相耦合
-  (門檻越低 → 保留越多 → 可 summarize 區越小),1% 門檻 = 保留 99% →
-  要 ctx > ~99% n_ctx 才可能產生 plan,自動壓縮等於停用,與 threshold 的
-  慣例語義相反(修正記錄見 06-status §3.12)。
+- **threshold 與 keep target 解耦(v3 最終版)**:`threshold` 是純觸發點
+  (ctx 超過這個 % 才檢查,見 §6);budget = **裸的 `contextKeepTargetPercent`%
+  × n_ctx**(user 可自訂,INPUT 10–90)。v3 移除 summaryReserve(summary max × 1.5)
+  與 10% floor——summary 的大小不再「預先保留」,改由 §6 的**事後成功判定**
+  用 API 實際 token 數約束。舊公式 `n_ctx × (1 − threshold%)`(§3.12 已修)與
+  reserve/floor 公式(§3.13/§3.14 曾實做)皆作廢,記錄見 06-status §3.20。
 - 巨幅單一 user 訊息(開頭就超 budget)會自然落到階段 2
   (user 訊息本身被 summarize),或階段 3(連 split 都放不下)。
 - 巨幅 tool result(例:讀了 1MB 檔案)是 split 切的典型獲益場景:
   切點可以落在該 tool result **之後**的 assistant 上,把它整段 drop。
 
-### 3.4 估計值(第一版,故意簡單)
+### 3.4 token 計數(v3:API 實際值優先,否則 UTF-8 byte 數)
 
-```
-estimate(msg) = len(content)/4
-              + Σ attachments:  image ≈ 1000 tokens/張(粗估)
-                               text/pdf ≈ len/4
-                               audio/video ≈ 固定 3000
-              + toolCalls JSON len/4
+計數規則(所有決策點同源;v3,2026-10-16 使用者確認 E):
+
+1. **API 有實際 token 數時用實際值**:
+   - 觸發判定:最後一則 assistant 的 `timings.prompt_n`(該輪全量 prompt 實際大小)
+   - compact 成功判定:summary 呼叫回應 `timings` 的 completion tokens(§6)
+2. **沒有 API 實際值時,直接用 UTF-8 byte 數**(不做 char/4 估算):
+   ```
+   count(msg) = byteLen(content)
+              + Σ attachments:  image = 1000(固定)
+                               text/pdf = byteLen(content)
+                               audio/video = 3000(固定)
+              + byteLen(toolCalls JSON)
+              + byteLen(reasoningContent)
 ```
 
-> 校準升級路徑(Phase 3):每則 assistant 的 `timings.prompt_n` 是「該輪全量
-> prompt 的真實值」,可用它反推每則訊息的平均成本,取代 char/4。第一版不需要。
+> v1 的 char/4(`len/4`)作廢:對 CJK 低估 ~1.5–4×,且與舊 budget 公式疊加
+> 讓行為不可預測(06-status §3.20)。原 Phase 3 規劃的「token 估計校準:
+> 用 `timings.prompt_n` 反推每則成本」不再需要——v3 在兩個需要精確的決策點
+> (觸發、成功判定)直接用 API 實際值,切點用 byte 數。
 
 ## 4. 邊界情境行為表
 
@@ -217,6 +226,9 @@ estimate(msg) = len(content)/4
 | 移動斷點(kept 變長/變短) | 變長(斷點前移):只更新 `firstKeptMessageId`(舊 summary 多涵蓋一點,無害)。變短(斷點後移):新 drop 的訊息未被 summary 涵蓋 → UI 必須提示「重新產生 summary」並執行,否則資料靜默遺失 | — |
 | 對話 import(含 cmp) | JSONL 原樣進 DB;`type` 欄位被舊版解析器忽略時,按 role=user 顯示 | §1.2 |
 | 新對話第一則訊息 | 不可能觸發(可 summarize 區不足 minSummarizeTokens) | policy |
+| compact 結果超標（head + summary > keepTarget% × n_ctx） | 重發同一 request（`contextSummaryMaxAttempts`，預設 3 次總計；1 = 一次；≤0 = 無限）→ 仍超 → gate 問 user：[使用這次壓完 / 重壓 / 這次不壓]；use it = 建 cmp（接受超標 summary）；retry = 嘗試次數重新計算後重跑；skip = 不建 cmp、維持全量 context | §6（v3） |
+| gate 等待期間 abort（flow stop / Stop 鍵） | 等同 skip（fail-open），不建 cmp | §6（v3） |
+| server 沒回 summary 的 token 數 | 成功判定改用 `byteLen(summary content)` 代入（E：無 API 數 → byte 數） | §3.4/§6（v3） |
 
 ## 5. Summary 產生(簡單版)
 
@@ -270,27 +282,53 @@ estimate(msg) = len(content)/4
   維持全量 context(安全方向)。
 - **UI 回饋**:進行中在 gauge / 訊息列顯示「Compacting context…」。
 
-## 6. 自動觸發條件
+## 6. 自動觸發與 compact 成功判定(v3)
 
 ```
-onFlowComplete / onComplete(且無 stream 在跑):
+onFlowComplete / onComplete(且無 stream 在跑)/ agentic turn 之間:
   lastPrompt = 最後一則 assistant 的 timings.prompt_n
-             ?? estimate(path)        # 沒 timings 時用估計
+              ?? count(path)               # 沒 timings 時用 byte 數
   if autoCompactionEnabled
      && n_ctx 已知
-     && lastPrompt ≥ n_ctx × threshold%(預設 80%)   # threshold = 純觸發點
-     && planCompaction(path) 有有效斷點:
-       → 執行壓縮(§5)
+     && lastPrompt > n_ctx × threshold%            # threshold = 純觸發點(「超過」)
+     && planCompaction(path, budget) 有有效斷點:   # budget = keepTarget% × n_ctx(§3.3)
+        → 執行壓縮:
+            1. summarize(max_tokens = summaryMax% × n_ctx,不變)
+            2. 成功判定(新):
+               summaryTokens = summary 回應的實際 completion tokens(API)
+                               # server 沒回時 → byteLen(summary content)
+               headBytes     = system head 的 byte 數(無獨立 API 數)
+               headBytes + summaryTokens ≤ keepTarget% × n_ctx ?
+                 是 → 建 cmp,完成
+                 否 → 重發同一個 compact request
+                      (總嘗試次數 = contextSummaryMaxAttempts,預設 3;
+                       1 = 總共一次;≤ 0 = 無限)
+                      仍超 → 停下,gate 問 user(同 maxTurns/tool 確認機制):
+                        顯示:當前 compact 完的 token 數(head + summary,
+                              實際值/byte 數)vs keepTarget% 目標
+                        [使用這次壓完 (use it)] → 建 cmp(接受超標 summary)
+                        [重壓 (retry)]          → 重跑 summary 迴圈
+                                                  (嘗試次數重新計算)
+                        [這次不壓 (skip)]       → 不建 cmp,維持全量 context
 ```
 
-- **語義**:`threshold` = 純觸發點(「ctx 到這個 % 才檢查」);「壓到多小」
-  由 §3.3 的固定 keep target(50% n_ctx)決定,與 threshold 無關。
+- **觸發**:`threshold` = 純觸發點(「超過這個 % 才檢查」),用 API 實際 `prompt_n`。
+- **成功判定**:「壓到多小」用**事後實際數字**判定——`system head + summary ≤
+  keepTarget% × n_ctx`。summary 的 token 數是 API 回應的實際值(需要非 streaming
+  路徑解析 `timings`,見 03-§3);head 無獨立 API 數,用 byte 數(靜態小文字,
+  誤差可忽略)。**kept 區不進成功判定**——它已由切點(§3.3)約束在 keepTarget% 內。
+- **超標處理**:server 有強制 `max_tokens`,summary 本身不會超過它;超標只可能
+  來自 summary 真的太長(模型寫太多)→ 重發同一個 request 幾次(stochastic)
+  通常可解;仍超則交給 user 決(三選項)。in-loop 時 flow 暫停等 user
+  (同 maxTurns);abort(flow stop / Stop 鍵)= skip(fail-open)。
+- **手動路徑**(Compact now / Re-summarize / 斷點後移重摘要)走同一條
+  「summarize → 成功判定 → 重試 → gate」流程。
 
 - agentic flow:兩個觸發點(都非 streaming 中):
   1. **turn 之間**(迴圈內):每 turn 的 tool results 落 DB 後、
      下一 turn 送出前檢查。這是 split span 的主要動機 —
      「兩次 user 訊息之間」的爆炸就發生在這裡。
-     流程:plan(用該 conv 的 DB 路徑)→ summarize → 建 cmp
+     流程:plan(用該 conv 的 DB 路徑)→ summarize → 成功判定/重試/gate → 建 cmp
      (parent = 最後一則)→ 用 builder 重建 `sessionMessages` → 續跑。
      summary 呼叫失敗/超時 → 跳過,續跑(fail-open)。
   2. `onFlowComplete` 時:同 flow 之間規則。

@@ -15,11 +15,14 @@
 > default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status §3.18）；
 > **N5 ✅ 完成並確認**（新設定 `contextSummaryMode`：summary 的 prompt
 > 模式開放給 user 選，見 06-status §3.19））。
-> **目前停點**：N1–N5 全部完成並確認（N5 = `contextSummaryMode` SELECT
+> **目前停點**：**v3 重設計已確認、未實做**（2026-10-16）——「自動壓縮從未觸發」
+> 根因已定位（舊 budget 公式把 keepBudget 壓死在 10% floor，分析見 06-status
+> §3.20）；v3 = 實際 token 計數（API 實際值優先、否則 byte 數）+ compact 成功
+> 判定（head + summary ≤ keepTarget% n_ctx）+ 超標重試/user gate（三選項）；
+> 02/03/05 已同步。此前：N1–N5 全部完成並確認（N5 = `contextSummaryMode` SELECT
 > 設定 + `toSummaryMode()` + 3 個呼叫點透傳，unit 16/16 + client registry
 > 全綠）；剩 Phase 1 的 5.8 手動驗收 + Phase 3 可選後續（含 summary
-> 獨立 model / endpoint）。此前 Context Inspector 版面輪（Advanced 上移 +
-> Back to top）與 mobile 寬度修復已手動驗證通過。
+> 獨立 model / endpoint；token 校準已被 v3 取代）。
 
 ## 目錄
 
@@ -54,7 +57,10 @@
 5. **自動觸發**:flow 之間(用 server `timings.prompt_n` 對照
    `n_ctx × threshold%`),以及 **agentic 迴圈 turn 之間**(「兩次 user 訊息
    之間」的 context 爆炸就發生在迴圈內,只在 flow 結束後檢查來不及;
-   觸發點皆非 streaming 中)。
+   觸發點皆非 streaming 中)。**v3**:壓縮後用實際 token 數做成功判定
+   (`system head + summary ≤ keepTarget% × n_ctx`),超標則重試(次數可設,
+   預設 3 共計)再交給 user 決(使用/重壓/跳過,同 maxTurns 卡片機制)。
+   設計與根因分析見 06-status §3.20。
 6. **Inspector 永遠可用**(不受自動壓縮開關影響):顯示精確的 payload、
    可編輯 summary、可移動保留斷點(含 mid-turn 斷點)、可手動 compact / expand(還原)。
    入口放在 context gauge popup 裡 + 聊天表單 action + 鍵盤快捷鍵。
@@ -83,6 +89,7 @@ LLM 實際收到:  system │ [summary, role=user] │ usr │ ass │ tool │ 
 - ✅ 做:prefix 式 compaction(只 summarize 舊的前綴)、自動觸發(flow 之間 +
   agentic 迴圈 turn 之間)、inspector + 人工編輯、settings、preEncode 一致性、
   agentic flow 開始時套用、split user-message span(span 超預算時切在 span 內)。
-- ❌ 不做(留給後續):token 精算(先用 char/4 + 附件估計)、
-  兩段式 summary(兩次 LLM 呼叫再合併;v1 用單呼叫雙段 prompt)、
-  多 summary 合併策略(舊 cmp 直接落在 kept 區時按一般訊息送出即可)、server 端 compaction。
+- ❌ 不做(留給後續):兩段式 summary(兩次 LLM 呼叫再合併;v1 用單呼叫雙段
+  prompt)、多 summary 合併策略(舊 cmp 直接落在 kept 區時按一般訊息送出即可)、
+  server 端 compaction。（token 計數 v3 已定:API 實際值優先、否則 UTF-8
+  byte 數,見 02-§3.4）
