@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Loader2 } from '@lucide/svelte';
-	import { colorLevelBgClass, colorLevelTextClass } from './context-gauge';
+	import { colorLevelBgClass, colorLevelFromPercent, colorLevelTextClass } from './context-gauge';
 	import ContextGaugeDetails from './ContextGaugeDetails.svelte';
 	import ContextGaugeLoadModel from './ContextGaugeLoadModel.svelte';
 	import {
@@ -11,8 +11,8 @@
 	} from './gauge-popup.svelte';
 	import * as Drawer from '$lib/components/ui/drawer';
 	import { useContextGauge } from '$lib/hooks/use-context-gauge.svelte';
-	import { findLastCompactionEntry, estimateCompactionSavings } from '$lib/services/context';
-	import { chatStore, contextStatsStore, conversationsStore, deviceStore } from '$lib/stores';
+	import { computeEffectiveWindow, findLastCompactionEntry, estimateCompactionSavings, toCompactionMode } from '$lib/services/context';
+	import { chatStore, contextStatsStore, conversationsStore, deviceStore, settingsStore } from '$lib/stores';
 	import { formatNumber, formatParameters } from '$lib/utils/formatters';
 
 	const gauge = useContextGauge();
@@ -72,12 +72,51 @@
 
 		return { count: entry.compactionMeta.summarizedCount, saved };
 	});
+
+	// Dual mode (04-ui §3): while auto compaction is on, the gauge's
+	// denominator and trigger mark follow the active mode — A: the effective
+	// window (min(n_ctx, override)) with the trigger at window − keep; B:
+	// n_ctx with the trigger at threshold% × n_ctx. Off: n_ctx, no mark.
+	const gaugeTotal = $derived.by(() => {
+		const total = gauge.contextTotal;
+
+		if (total === null || total <= 0) return total;
+
+		if (!settingsStore.config.contextAutoCompaction) return total;
+
+		return toCompactionMode(settingsStore.config.contextCompactionMode) === 'recent-window'
+			? computeEffectiveWindow(total, settingsStore.config.contextMaxContextOverride)
+			: total;
+	});
+
+	const gaugePercent = $derived(
+		gaugeTotal !== null && gaugeTotal > 0
+			? Math.min(100, Math.round((gauge.contextUsed / gaugeTotal) * 100))
+			: null
+	);
+
+	const gaugeColorLevel = $derived(colorLevelFromPercent(gaugePercent));
+
+	const triggerBarPercent = $derived.by(() => {
+		const total = gauge.contextTotal;
+
+		if (total === null || total <= 0 || !settingsStore.config.contextAutoCompaction) return null;
+
+		if (toCompactionMode(settingsStore.config.contextCompactionMode) === 'recent-window') {
+			const window = computeEffectiveWindow(total, settingsStore.config.contextMaxContextOverride);
+			const point = window - settingsStore.config.contextKeepRecentTokens;
+
+			return point > 0 && point < window && gaugeTotal ? (point / gaugeTotal) * 100 : null;
+		}
+
+		return (total * settingsStore.config.contextCompactionThreshold) / 100;
+	});
 </script>
 
 {#snippet usage()}
 	<span class="font-mono text-muted-foreground">
 		{formatParameters(gauge.contextUsed)}
-		/ {gauge.contextTotal !== null ? formatParameters(gauge.contextTotal) : '-'}
+		/ {gaugeTotal !== null ? formatParameters(gaugeTotal) : '-'}
 	</span>
 {/snippet}
 
@@ -89,22 +128,30 @@
 			onLoad={gauge.loadModel}
 		/>
 	{:else if showProgressBar}
-		<div class="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+		<div class="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
 			<div
 				class="h-full rounded-full transition-all duration-300 {colorLevelBgClass(
-					gauge.colorLevel
+					gaugeColorLevel
 				)}"
-				style="width: {gauge.contextPercent}%"
+				style="width: {gaugePercent ?? 0}%"
 			></div>
+
+			{#if triggerBarPercent !== null}
+				<div
+					class="absolute top-0 h-full w-0.5 bg-foreground/40"
+					style="left: {triggerBarPercent}%"
+					title="Auto-compaction trigger"
+				></div>
+			{/if}
 		</div>
 
 		<div class="flex justify-between text-xs text-muted-foreground max-md:text-[13px]">
 			<span>
-				<span class={colorLevelTextClass(gauge.colorLevel)}>{gauge.contextPercent}%</span> used
+				<span class={colorLevelTextClass(gaugeColorLevel)}>{gaugePercent ?? 0}%</span> used
 			</span>
 
 			<span>
-				{formatParameters(gauge.contextAvailable ?? 0)} remaining
+				{formatParameters(Math.max(0, (gaugeTotal ?? 0) - gauge.contextUsed))} remaining
 			</span>
 		</div>
 	{:else}

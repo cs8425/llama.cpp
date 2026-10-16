@@ -511,6 +511,15 @@ export { default as ChatMessageActionCard } from './ChatMessages/ChatMessageActi
 export { default as ChatMessageActionCardContinueRequest } from './ChatMessages/ChatMessageActions/ChatMessageActionCard/ChatMessageActionCardContinueRequest.svelte';
 
 /**
+ * Over-target compaction decision card (shared by both modes, 02-data-model §6):
+ * shown when a compaction summary exceeds the mode target after the configured
+ * attempts. Three options: use this summary / re-compact / skip. Mounts inside
+ * the agentic message in-loop, or as an independent row at the end of the
+ * message list between flows / for manual actions.
+ */
+export { default as ChatCompactionDecisionCard } from './ChatMessages/ChatMessageActions/ChatMessageActionCard/ChatCompactionDecisionCard.svelte';
+
+/**
  * Action buttons toolbar for messages. Displays copy, edit, delete, and regenerate
  * buttons based on message role. Includes branching controls when message has siblings.
  * Shows delete confirmation dialog with cascade delete count. Handles raw output toggle

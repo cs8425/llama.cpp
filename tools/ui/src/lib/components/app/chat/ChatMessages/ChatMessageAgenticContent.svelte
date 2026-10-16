@@ -2,6 +2,7 @@
 	import ChatMessageToolCallBlock from './ChatMessage/ChatMessageToolCall/ChatMessageToolCallBlock.svelte';
 	import ChatMessageReasoningBlock from './ChatMessageReasoningBlock.svelte';
 	import {
+		ChatCompactionDecisionCard,
 		ChatMessageActionCardContinueRequest,
 		ChatMessageActionCardPermissionRequest,
 		ChatMessageStatistics,
@@ -9,6 +10,7 @@
 	} from '$lib/components/app';
 	import { AgenticSectionType, ChatMessageStatsView, ToolPermissionDecision } from '$lib/enums';
 	import { agenticStore, settingsStore } from '$lib/stores';
+	import type { CompactionDecision } from '$lib/services/context';
 	import type {
 		AgenticSection,
 		ChatMessageAgenticTimings,
@@ -87,6 +89,27 @@
 	function handleContinue(shouldContinue: boolean) {
 		continueDismissed = true;
 		agenticStore.resolveContinue(message.convId, shouldContinue);
+	}
+
+	// Over-target compaction gate (shared by both modes): in-loop the flow is
+	// paused, so the card mounts here, at the same spot as the continue card.
+	const pendingCompaction = $derived(
+		isStreaming && isLastAssistantMessage
+			? agenticStore.getPendingCompactionDecision(message.convId)
+			: null
+	);
+
+	// dismissal applies to the request object, so the next request (new
+	// identity) shows the card again without any reset bookkeeping
+	let dismissedCompaction: typeof pendingCompaction = $state(null);
+
+	const visibleCompaction = $derived(
+		pendingCompaction && dismissedCompaction !== pendingCompaction ? pendingCompaction : null
+	);
+
+	function handleCompactionDecision(decision: CompactionDecision) {
+		dismissedCompaction = pendingCompaction;
+		agenticStore.resolveCompactionDecision(message.convId, decision);
 	}
 
 	const sections = $derived(deriveAgenticSections(message, toolMessages, [], isStreaming));
@@ -243,6 +266,10 @@
 
 	{#if showContinue}
 		<ChatMessageActionCardContinueRequest onDecision={handleContinue} />
+	{/if}
+
+	{#if visibleCompaction}
+		<ChatCompactionDecisionCard onDecision={handleCompactionDecision} request={visibleCompaction} />
 	{/if}
 </div>
 

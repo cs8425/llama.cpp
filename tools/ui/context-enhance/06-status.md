@@ -3,7 +3,22 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**N6 完成並確認；下一步 = 雙 mode 實做**（2026-10-17）
+> **恢復點（最新）**：**雙 mode 實做（共用 + A + B）來源碼完成、unit/client 測試未寫，待使用者編譯驗證**（2026-10-17）
+> ——依 05-雙 mode 清單完成全部來源碼改動：共用基礎（timings 解析 /
+> `summarizeMessages` 回傳 `{content, tokens}` / byte 計數 / 共用超標機制
+> `summarizeWithRetry`（retry + gate）/ settings 鏈（`contextCompactionMode`
+> + `dependsOnValue` 新機制 + 4 新 key）/ `ChatCompactionDecisionCard` + 兩處掛法 /
+> gauge mode-aware）→ A（`planCompactionRecentWindow` + 觸發/判定 + gauge）→
+> B（`computeCompactionBudget` 新公式 + 觸發/判定）。**決策記錄與變更明細見
+> §3.23**。下一步：① unit 重寫（`compaction-policy.test.ts` byte 計數 + 新
+> suite；`summarize.test.ts` 新回傳型別 + `summarizeWithRetry`）；② client 新
+> `compaction-decision-card` suite；③ 使用者跑 `npm run check` + unit
+> （compaction-policy / summarize / context-builder）+ client（
+> settings-registry-invariants / compaction-decision-card / 回歸 3 支）；
+> ④ 全綠後勾 05-雙 mode 清單、更新 README 停點。另剩：Phase 1 的 5.8 手動
+> 驗收 + Phase 3 可選後續。
+>
+> 此前恢復點：**N6 完成並確認；下一步 = 雙 mode 實做**（2026-10-17）
 > ——N6（split 切允許空 kept，§3.21）使用者重跑 `npm run check` +
 > unit `compaction-policy` / `context-builder` + client 回歸 4 支（
 > `chat-message-compaction` / `context-inspector` / `context-gauge-compaction` /
@@ -62,7 +77,7 @@
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
-| 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22） | 🚧 規格定稿（2026-10-17），未實做；02/03/04/05 已同步；**下一步（見恢復點）** |
+| 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | 🚧 規格定稿（2026-10-17）；**來源碼完成（共用 + A + B，§3.23）、unit/client 測試未寫**，待使用者 check 驗證 |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
 | 下一輪 — 5 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式 / N5 summary mode 設定，§5c） | ✅ **N1–N5 全部完成並確認**：N1（§3.13：改 n_ctx × %）；N2（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；N3（§3.15：手動壓縮 Stop 鍵）；N4（§3.18：prefix-stable default + 附件原樣送 + reasoning 跟隨主送出開關；第一輪 test bug 已修、重跑全綠）；N5（§3.19：`contextSummaryMode` SELECT 設定） |
@@ -1225,6 +1240,108 @@ settings 鏈 / 卡片）→ A（planner + 觸發/判定 + gauge）→ B（budget
 觸發/判定）。完成後使用者跑 `npm run check` + unit（compaction-policy /
 summarize / context-builder + 新 planCompactionRecentWindow）+ client
 （settings-registry-invariants + 卡片測試 + 回歸）驗證。
+
+## 3.23 雙 mode 實做（共用 + A + B）（2026-10-17；來源碼完成、測試未寫，待編譯驗證）
+
+> 實做順序照 §3.22：共用基礎 → A → B。本輪一次完成三個層（同一個可編譯
+> 單位，末尾以使用者 check + 測試收口）。
+
+**決策（規劃未明定、實做時決定，已記錄）**：
+
+1. **settings 需要 `dependsOnValue` 新機制**：既有 `dependsOn` 是單層 truthy
+   檢查（`Boolean(localConfig[field.dependsOn])`），對 SELECT 型 mode 恆為
+   truthy → 無法表達「mode = A 才顯示」。新增 `SettingsFieldConfig.dependsOnValue?:
+   string`：有值時改為等值比較。`SettingsChatFields.svelte` 的檢查改為
+   `!field.dependsOn || (field.dependsOnValue != null ? localConfig[field.dependsOn] === field.dependsOnValue : Boolean(localConfig[field.dependsOn]))`；`toSettingsSection` 透傳。
+2. **共用超標機制放純核心（可單測）**：`summarizeWithRetry()` 在
+   `services/context/summarize.ts`，gate 以介面注入（`CompactionSummaryGate.
+   requestDecision`）→ 重試次數 / gate 互動可 unit 測；store 只負責把 gate
+   接到 `agenticStore.requestCompactionDecision`。
+3. **`SummarizeWithRetryOptions.compactionMode`**（非 `mode`）：`SummarizeOptions` 已有
+   `mode?: SummaryMode`（summary prompt 模式），同名會衝突。
+4. **卡片掛法兩處**：in-loop = `ChatMessageAgenticContent`（continue 卡片同位、
+   `isStreaming && isLastAssistantMessage` 守衛）；flow 之間 / 手動 =
+   `ChatMessages` 訊息列尾端獨立 row（`!agenticStore.isRunning(convId)` 守衛
+   防雙掛）。gate pending state 在 `AgenticGates`（agenticStore 擁有）——
+   chatStore 經 `agenticStore.requestCompactionDecision` 走同一個 gate。
+5. **gauge 只在 `contextAutoCompaction` 開時跟 mode 走**（關 = n_ctx、無觸發
+   標記）；觸發標記 = 進度條上的垂直刻度（`title="Auto-compaction trigger"`）。
+6. **`estimateTokens` / `estimateApiMessageTokens` 名稱保留**（05 清單如此），
+   文字部分 char/4 → UTF-8 byte（`TextEncoder`，新導出 `byteLength`）；image
+   1000 / audio-video 3000 不變；`MIN_SUMMARIZE_TOKENS = 2000` 現為 byte 語義。
+   `context-builder.test.ts` 的期望值用同一函式計算 → 自適應、零改動。
+7. **`CompactionSettings` 改收 `contextCompactionThreshold`**（B 的 budget =
+   差值公式需要）、移除 `contextSummaryMaxTokensPercent`（不再進 budget；
+   `computeSummaryMaxTokens` 只用於 summary 呼叫的 max_tokens）。
+
+**變更明細（18 檔）**：
+
+| 檔案 | 改動 |
+| ---- | ---- |
+| `src/lib/types/api.d.ts` | `ApiChatCompletionResponse` + `timings`（同 stream chunk 形狀；`predicted_n` = 實際 completion tokens） |
+| `src/lib/services/chat.service.ts` | `handleNonStreamResponse` 解析 `data.timings` 傳給 `onComplete`（原傳 `undefined`） |
+| `src/lib/services/context/types.ts` | + `CompactionMode`（'recent-window' \| 'threshold-target'）、`CompactionDecision`（'use' \| 'retry' \| 'skip'） |
+| `src/lib/services/context/compaction-policy.ts` | **重寫**：byte 計數（`byteLength` 導出）；`computeCompactionBudget` 新公式 `floor((threshold − keepTarget)/100 × nCtx)`（threshold ≤ keepTarget → 0；移除 summaryReserve × 1.5 與 10% floor）；`CompactionSettings` +threshold / −summaryMaxTokensPercent；`planCompaction` 邏輯不變（byte 化）；新 `toCompactionMode` / `computeEffectiveWindow` / `shouldTriggerCompaction`（A: `lastPrompt > window − keep`、`window − keep ≤ 0` 永不觸發；B: `> nCtx × threshold%`）/ `planCompactionRecentWindow`（pi walk：從尾端加 byte ≥ keep 停、交叉點以右最近合法切點、尾端全 tool → 最右合法切點、未達 → null、A 不產生空 kept、I5/minSummarize）/ `evaluateCompactionResult`（A: `head + summary + kept ≤ window − keep`；B: `head + summary ≤ keepTarget% × nCtx`）/ `resolveSummarySize`（tokens ?? byteLen）/ `nextCompactionStep`（≤0 = 無限） |
+| `src/lib/services/context/summarize.ts` | `summarizeMessages` 回傳 `string` → `SummaryResult { content, tokens }`（tokens 經 `onComplete` 抓 `timings.predicted_n`，server 沒回 → null）；新 `CompactionSummaryGate` / `SummarizeWithRetryOptions` / `summarizeWithRetry`（summarize → 判定 → retry × maxAttempts → gate；nCtx ≤ 0 → 不判定；無 gate → fail-open 接受） |
+| `src/lib/services/context/index.ts` | barrel 補全部新 export |
+| `src/lib/constants/settings-keys.constants.ts` | +4 key（字母序）：`CONTEXT_COMPACTION_MODE` / `CONTEXT_KEEP_RECENT_TOKENS` / `CONTEXT_MAX_CONTEXT_OVERRIDE` / `CONTEXT_SUMMARY_MAX_ATTEMPTS` |
+| `src/lib/constants/settings.constants.ts` | registry：mode SELECT（`recent-window` 預設、Clock/Gauge icons、dependsOn auto）+ A 兩欄（override 0 = 關 / keep 20000、dependsOn mode + dependsOnValue A）+ B 兩欄（threshold/keepTarget 的 dependsOn auto → mode + dependsOnValue B，help 更新）+ `contextSummaryMaxAttempts`（0–10、預設 3、dependsOn auto）；lucide +`Clock`/`Gauge`；`toSettingsSection` 透傳 `dependsOnValue` |
+| `src/lib/types/settings.d.ts` | `SettingsFieldConfig` + `dependsOnValue?: string` |
+| `src/lib/components/app/settings/SettingsChat/SettingsChatFields.svelte` | dependsOn 檢查支援 `dependsOnValue` 等值 |
+| `src/lib/stores/agentic/gates.svelte.ts` | + `CompactionDecisionRequest`（convId/mode/postSize/target/attempts）+ `requestCompactionDecision`（Promise + pending state；abort = 'skip'）/ `resolveCompactionDecision` / `getPendingCompactionDecision`；`clear()` 清 compaction state |
+| `src/lib/stores/agentic/index.svelte.ts` | +3 public wrapper（getPending/resolve/request）；`compactBetweenTurns` 雙 mode：`shouldTriggerCompaction` 取代舊 threshold 比較、plan 按 mode（A: `planCompactionRecentWindow` / B: `planCompaction`）、`summarizeWithRetry`（gate → `this.gates.requestCompactionDecision`）、null → return（skip）、`summary.content`、toast 用 `byteLength` |
+| `src/lib/stores/chat/index.svelte.ts` | `compactConversation` 雙 mode（同上 + null → toast 'Compaction skipped'）；新 private `runCompactionSummary`（接 `summarizeWithRetry`，gate → `agenticStore.requestCompactionDecision`）；`summarizeRegion` 拆 `buildRegionPlan` + `summarizeRegion`（回 `SummaryResult \| null`）；`recompactConversationEntry` / `moveCompactionBoundary`（後移）處理 null + `summary.content` |
+| `src/lib/components/app/chat/ChatMessages/ChatMessageActions/ChatMessageActionCard/ChatCompactionDecisionCard.svelte` | **新**：Scale icon；「~postSize of ~target allowed (after N attempts). Keep it?」+ [Use this summary] [Re-compact] [Skip]（continue 卡片同風格） |
+| `src/lib/components/app/chat/index.ts` | export `ChatCompactionDecisionCard` |
+| `src/lib/components/app/chat/ChatMessages/ChatMessageAgenticContent.svelte` | in-loop 掛卡片（`pendingCompaction` derived + identity 型 dismissal、同 continue 卡片模式） |
+| `src/lib/components/app/chat/ChatMessages/ChatMessages.svelte` | flow 之間 / 手動：訊息列尾端獨立 row（`!isRunning` 守衛） |
+| `src/lib/components/app/chat/ChatForm/ChatFormContextGauge/ContextGaugePopup.svelte` | mode-aware：`gaugeTotal`（auto 開 + A → `computeEffectiveWindow`；B/關 → n_ctx）、`gaugePercent` / `gaugeColorLevel`、`triggerBarPercent` 刻度（A: window−keep；B: threshold%）；usage() / 進度條 / remaining 全改 mode 值 |
+
+**已知風險（第一輪 check 重點盯）**：
+
+- Svelte strict mode：4 個新/改元件（card / agentic content / chat messages /
+  gauge popup）——歷輪 strict violation 都在測試端，但 `visibleCompaction` /
+  `pendingCompaction` 的 `$state(null)` 推斷類型需留意。
+- `SettingsChatFields` 的 `localConfig[field.dependsOn] === field.dependsOnValue`
+  比較（union 型別 vs string）應無問題，但 check 會驗。
+- `compactBetweenTurns` 的 gate 掛在 `this.gates`（非 public wrapper）——
+  同檔直接存取、無問題。
+- `ContextGaugePopup` 的 `gaugeTotal` derived 讀 `gauge.contextTotal`（getter）
+  + `settingsStore.config`——反應性應正常。
+
+**下一步（測試，本輪未做）**：
+
+1. `tests/unit/compaction-policy.test.ts` **重寫**：既有 estimate 用例全部改
+   byte 語義（T100 = 400 bytes）；`computeCompactionBudget` 改新公式（含
+   threshold ≤ keepTarget → 0）；`planCompaction` 既有 11 支的 budget 數值需
+   重調（byte 化後切點位置變，例：boundary 用例 budget 1400 → 6000、
+   minKeptUserTurns 用例 200 → 1000、split 用例 300 → 1000、never-cut-tool
+   200 → 1000、huge user 300 → 1000、minSummarize 改 budget 3000 + min 500、
+   no-system 400 → 1600、minKeptMessages floor 300 → 1000）；`estimateCompactionSavings`
+   fixture 數值重算（content y×800 = 800 bytes）；新 suite：`byteLength`（ASCII /
+   CJK 3 bytes/char / mixed / empty）、`planCompactionRecentWindow`（下限停止 /
+   交叉點 = tool → 右側最近 ass / 交叉點 = user / 未達 → null / A 不空 kept /
+   I5 兩下限 / minSummarize / 巨幅 tool result 保留整個後續 turn）、
+   `shouldTriggerCompaction`（A ≤/> 邊界 + window−keep ≤ 0 + override；B ≤/>）、
+   `evaluateCompactionResult`（A/B ≤/> 邊界 + override）、`computeEffectiveWindow`、
+   `toCompactionMode`、`resolveSummarySize`、`nextCompactionStep`（1/3/≤0）。
+2. `tests/unit/summarize.test.ts`：所有 `await summarizeMessages(...)` 改
+   `{ content, tokens }` 斷言；新：tokens 從 `onComplete` 的 timings 抓（mock
+   呼叫 `opts.onComplete?.('...', undefined, { predicted_n: 123 })`）/ server 沒
+   回 → null；新 `summarizeWithRetry` suite：within target 一次過 / over target
+   retry 到 maxAttempts 後無 gate 接受 / gate use / gate skip → null / gate
+   retry 重新計數後成功 / maxAttempts ≤ 0 無限 / mode A 的 kept bytes 進判定。
+3. `tests/client/compaction-decision-card.svelte.test.ts` **新**：卡片三選項
+   resolve gate（onDecision spy）+ `agenticStore` gate 層（request →
+   getPending 非 null → resolve('use') → promise 解 'use'；abort → 'skip'）。
+4. `settings-registry-invariants` 為 generic（iterates `SETTING_CONFIG_DEFAULT`）
+   → 新 key 自動覆蓋、預期零改動。
+5. 使用者跑：`npm run check` + unit（compaction-policy / summarize /
+   context-builder）+ client（settings-registry-invariants /
+   compaction-decision-card / 回歸 chat-message-compaction / context-inspector /
+   context-gauge-compaction）。
+6. 全綠 → 勾 05-雙 mode 清單（共用/A/B 三塊）、§3.22/§3.23 狀態改「完成並
+   確認」、README 停點更新（剩 5.8 手動驗收 + Phase 3 可選後續）。
 
 ## 4. 驗證狀態（目前停在這）
 

@@ -43,7 +43,9 @@
 </script>
 
 {#each fields as field (field.key)}
-	{#if !field.dependsOn || Boolean(localConfig[field.dependsOn])}
+	{#if !field.dependsOn || (field.dependsOnValue != null
+		? localConfig[field.dependsOn] === field.dependsOnValue
+		: Boolean(localConfig[field.dependsOn]))}
 		<div class={field.dependsOn ? 'space-y-2 pl-6' : 'space-y-2'}>
 			{#if field.type === SettingsFieldType.INPUT}
 				{@const currentValue = String(localConfig[field.key] ?? '')}

@@ -9,16 +9,42 @@
 
 import { ToolPermissionDecision } from '$lib/enums';
 // direct imports between stores, not via the barrel, to avoid circular deps
+import type { CompactionDecision, CompactionMode } from '$lib/services/context';
 import { permissionsStore } from '$lib/stores/permissions.svelte';
 import { toolsStore } from '$lib/stores/tools.svelte';
 import type { DatabaseMessageExtra, SteeringMessage } from '$lib/types';
 import { SvelteMap } from 'svelte/reactivity';
+
+/**
+ * The pending over-target compaction request (both modes; the shared gate,
+ * 02-data-model §6). The card displays `postSize` vs `target` and the
+ * attempts already made; the loop awaits the decision.
+ */
+export interface CompactionDecisionRequest {
+	convId: string;
+	/** The active mode (selects the card's target wording). */
+	mode: CompactionMode;
+	/** The post-compaction size the mode checks (A: head + summary + kept; B: head + summary). */
+	postSize: number;
+	/** The mode target (A: window − keep; B: keepTarget% × n_ctx). */
+	target: number;
+	/** Summary attempts already made (the card shows them). */
+	attempts: number;
+}
 
 export class AgenticGates {
 	/** Resolve functions for pending continue Promises; nothing derives from this map */
 	private continueResolvers = new SvelteMap<string, (shouldContinue: boolean) => void>();
 	/** Dedicated reactive state for pending continue requests (turn limit reached) */
 	private pendingContinueRequests = new SvelteMap<string, boolean>();
+
+	/** Resolve functions for pending compaction-decision Promises; nothing derives from this map */
+	private compactionDecisionResolvers = new SvelteMap<
+		string,
+		(decision: CompactionDecision) => void
+	>();
+	/** Dedicated reactive state for pending over-target compaction requests */
+	private pendingCompactionDecisions = new SvelteMap<string, CompactionDecisionRequest | null>();
 
 	/** Dedicated reactive state for pending permission requests (ensures immediate UI updates) */
 	private pendingPermissions = new SvelteMap<
@@ -39,6 +65,8 @@ export class AgenticGates {
 		this.permissionResolvers.delete(conversationId);
 		this.pendingContinueRequests.set(conversationId, false);
 		this.continueResolvers.delete(conversationId);
+		this.pendingCompactionDecisions.set(conversationId, null);
+		this.compactionDecisionResolvers.delete(conversationId);
 		this.steeringMessages.delete(conversationId);
 	}
 
@@ -65,6 +93,11 @@ export class AgenticGates {
 
 	getPendingContinueRequest(conversationId: string): boolean {
 		return this.pendingContinueRequests.get(conversationId) ?? false;
+	}
+
+	/** The pending over-target compaction request (the card's data), or null. */
+	getPendingCompactionDecision(conversationId: string): CompactionDecisionRequest | null {
+		return this.pendingCompactionDecisions.get(conversationId) ?? null;
 	}
 
 	getPendingPermissionRequest(
@@ -122,6 +155,49 @@ export class AgenticGates {
 						this.continueResolvers.delete(conversationId);
 						this.pendingContinueRequests.set(conversationId, false);
 						resolve(false);
+					}
+				},
+				{ once: true }
+			);
+		});
+	}
+
+	/**
+	 * Ask the user about an over-target compaction result (shared by both
+	 * modes, 02-data-model §6). The loop awaits the decision; an aborted
+	 * signal (flow stop / the stop-compaction controller) resolves as `skip`
+	 * (fail-open, no entry is created).
+	 */
+	async requestCompactionDecision(
+		request: CompactionDecisionRequest,
+		signal?: AbortSignal
+	): Promise<CompactionDecision> {
+		const { convId } = request;
+
+		this.pendingCompactionDecisions.set(convId, request);
+
+		return new Promise<CompactionDecision>((resolve) => {
+			if (signal?.aborted) {
+				this.pendingCompactionDecisions.set(convId, null);
+				resolve('skip');
+
+				return;
+			}
+
+			this.compactionDecisionResolvers.set(convId, (decision) => {
+				this.pendingCompactionDecisions.set(convId, null);
+				resolve(decision);
+			});
+
+			signal?.addEventListener(
+				'abort',
+				() => {
+					const resolver = this.compactionDecisionResolvers.get(convId);
+
+					if (resolver) {
+						this.compactionDecisionResolvers.delete(convId);
+						this.pendingCompactionDecisions.set(convId, null);
+						resolve('skip');
 					}
 				},
 				{ once: true }
@@ -194,6 +270,15 @@ export class AgenticGates {
 		if (resolver) {
 			this.continueResolvers.delete(conversationId);
 			resolver(shouldContinue);
+		}
+	}
+
+	resolveCompactionDecision(conversationId: string, decision: CompactionDecision): void {
+		const resolver = this.compactionDecisionResolvers.get(conversationId);
+
+		if (resolver) {
+			this.compactionDecisionResolvers.delete(conversationId);
+			resolver(decision);
 		}
 	}
 

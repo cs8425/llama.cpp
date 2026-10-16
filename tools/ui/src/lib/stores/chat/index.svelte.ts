@@ -20,14 +20,21 @@ import {
 import { ChatService } from '$lib/services/chat.service';
 import {
 	type CompactionPlan,
+	type SummaryResult,
 	SUMMARY_CONTENT_PREFIX,
+	byteLength,
 	computeCompactionBudget,
 	computeSummaryMaxTokens,
 	estimateTokens,
+	MIN_SUMMARIZE_TOKENS,
 	planCompaction,
-	summarizeMessages,
+	planCompactionRecentWindow,
+	shouldTriggerCompaction,
+	summarizeWithRetry,
+	toCompactionMode,
 	toSummaryMode
 } from '$lib/services/context';
+import type { CompactionMode } from '$lib/services/context';
 import { DatabaseService } from '$lib/services/database.service';
 // direct imports between stores, not via the barrel, to avoid circular deps
 import { agenticStore } from '$lib/stores/agentic/index.svelte';
@@ -571,10 +578,10 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			return;
 		}
 
-		const threshold = config.contextCompactionThreshold;
+		const mode: CompactionMode = toCompactionMode(config.contextCompactionMode);
 
-		// Auto compaction needs the master switch on AND the last prompt to
-		// have reached the threshold; the manual action skips both gates.
+		// Auto compaction needs the master switch on AND the mode-specific
+		// trigger crossed; the manual action skips both gates.
 		if (auto) {
 			if (!config.contextAutoCompaction) return;
 
@@ -593,10 +600,27 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			const effectiveLastPrompt =
 				lastPrompt ?? path.reduce((sum, message) => sum + estimateTokens(message), 0);
 
-			if (effectiveLastPrompt < nCtx * (threshold / 100)) return;
+			if (
+				!shouldTriggerCompaction(mode, {
+					contextCompactionThreshold: config.contextCompactionThreshold,
+					contextKeepRecentTokens: config.contextKeepRecentTokens,
+					contextMaxContextOverride: config.contextMaxContextOverride,
+					lastPrompt: effectiveLastPrompt,
+					nCtx
+				})
+			)
+				return;
 		}
 
-		const plan = planCompaction(path, computeCompactionBudget(nCtx, config));
+		const plan =
+			mode === 'recent-window'
+				? planCompactionRecentWindow(path, {
+						keepRecentTokens: config.contextKeepRecentTokens,
+						minKeptMessages: config.contextKeepMinMessages,
+						minKeptUserTurns: config.contextKeepMinUserTurns,
+						minSummarizeTokens: MIN_SUMMARIZE_TOKENS
+					})
+				: planCompaction(path, computeCompactionBudget(nCtx, config));
 
 		if (!plan) {
 			if (!auto) toast.info('No range to compact');
@@ -615,12 +639,25 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		this.compactionAbortController = abortController;
 
 		try {
-			const summary = await summarizeMessages(plan, model, abortController.signal, {
-				excludeReasoning: config.excludeReasoningFromContext === true,
-				maxTokens: computeSummaryMaxTokens(nCtx, config.contextSummaryMaxTokensPercent),
-				mode: toSummaryMode(config.contextSummaryMode),
-				prompt: config.contextSummaryPrompt.trim() || undefined
-			});
+			// The shared over-target mechanism (both modes): summarize →
+			// mode-specific success check → retry → user gate (the card mounts
+			// as an independent row at the end of the message list; the Stop
+			// button / an abort resolves it as skip).
+			const summary = await this.runCompactionSummary(
+				convId,
+				plan,
+				model,
+				nCtx,
+				mode,
+				config,
+				abortController.signal
+			);
+
+			if (!summary) {
+				toast.info('Compaction skipped');
+
+				return;
+			}
 
 			const cmp = await DatabaseService.createCompactionMessage({
 				compactionMeta: {
@@ -630,7 +667,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 					model: model ?? undefined,
 					summarizedCount: plan.toSummarize.length
 				},
-				content: `${SUMMARY_CONTENT_PREFIX} ${summary}`,
+				content: `${SUMMARY_CONTENT_PREFIX} ${summary.content}`,
 				convId,
 				parentId: path[path.length - 1].id
 			});
@@ -649,7 +686,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			// pay a full re-prompt on top of the summary call.
 			await this.triggerPreEncode(preCompactionPath, cmp, cmp.content, model);
 
-			const estimatedAfter = plan.estimatedTokensAfter + Math.ceil(cmp.content.length / 4);
+			const estimatedAfter = plan.estimatedTokensAfter + byteLength(cmp.content);
 
 			toast.success(`Context compacted: ~${plan.estimatedTokensBefore} → ~${estimatedAfter} tokens`);
 		} catch (error) {
@@ -836,6 +873,13 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				cmpId,
 				abortController.signal
 			);
+
+			if (!summary) {
+				toast.info('Compaction skipped');
+
+				return;
+			}
+
 			const model = this.resolveCompactionModel(path);
 			const updates = {
 				compactionMeta: {
@@ -844,7 +888,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 					estimatedTokensBefore: path.reduce((sum, message) => sum + estimateTokens(message), 0),
 					model: model ?? undefined
 				},
-				content: `${SUMMARY_CONTENT_PREFIX} ${summary}`
+				content: `${SUMMARY_CONTENT_PREFIX} ${summary.content}`
 			};
 
 			await DatabaseService.updateMessage(cmpId, updates);
@@ -933,6 +977,13 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				cmpId,
 				abortController.signal
 			);
+
+			if (!summary) {
+				toast.info('Compaction skipped');
+
+				return;
+			}
+
 			const model = this.resolveCompactionModel(path);
 			const updates = {
 				compactionMeta: {
@@ -940,7 +991,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 					estimatedTokensBefore: path.reduce((sum, message) => sum + estimateTokens(message), 0),
 					model: model ?? undefined
 				},
-				content: `${SUMMARY_CONTENT_PREFIX} ${summary}`
+				content: `${SUMMARY_CONTENT_PREFIX} ${summary.content}`
 			};
 
 			await DatabaseService.updateMessage(cmpId, updates);
@@ -1056,27 +1107,64 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 	}
 
 	/**
-	 * Shared summary call for the manual re-summarizations (recompact, backward
-	 * boundary move): resolves the model like compactConversation, applies the
-	 * configured summary options (maxTokens derived from the conversation's
-	 * n_ctx) and summarizes the region before `boundaryIndex` (the system-prompt
-	 * head and the entry node itself excluded — the summary being rewritten is
-	 * never part of its own input; with an empty-kept entry the window start
-	 * sits one past the entry, so the filter is what keeps it out).
-	 * `signal` carries the stop-compaction abort (N3).
+	 * The shared over-target mechanism for this store's compaction paths
+	 * (compact / recompact / backward boundary move; both modes): summarize →
+	 * mode-specific success check → retry (`contextSummaryMaxAttempts`) → user
+	 * gate (the card mounts as an independent row at the end of the message
+	 * list; the Stop button / an abort resolves it as skip).
+	 *
+	 * @returns The summary (success, or the user's "use it"), or null when the
+	 *   user skipped — the caller must NOT create/update the entry. Throws on
+	 *   summary-call failure / abort (the caller fails open).
 	 */
-	private async summarizeRegion(
+	private async runCompactionSummary(
 		convId: string,
+		plan: CompactionPlan,
+		model: string | null,
+		nCtx: number,
+		mode: CompactionMode,
+		config: typeof settingsStore.config,
+		signal: AbortSignal
+	): Promise<SummaryResult | null> {
+		return summarizeWithRetry(plan, model, signal, {
+			checkParams: {
+				contextKeepRecentTokens: config.contextKeepRecentTokens,
+				contextKeepTargetPercent: config.contextKeepTargetPercent,
+				contextMaxContextOverride: config.contextMaxContextOverride,
+				nCtx
+			},
+			compactionMode: mode,
+			excludeReasoning: config.excludeReasoningFromContext === true,
+			gate: {
+				requestDecision: (p) => agenticStore.requestCompactionDecision({ ...p, convId }, signal)
+			},
+			maxAttempts: config.contextSummaryMaxAttempts,
+			// unknown context size → summarizeMessages' built-in 1024 default
+			maxTokens:
+				nCtx > 0
+					? computeSummaryMaxTokens(nCtx, config.contextSummaryMaxTokensPercent)
+					: undefined,
+			mode: toSummaryMode(config.contextSummaryMode),
+			prompt: config.contextSummaryPrompt.trim() || undefined
+		});
+	}
+
+	/**
+	 * The compaction plan for a manual re-summarization region: everything
+	 * before `boundaryIndex` (the system-prompt head and the entry node itself
+	 * excluded — the summary being rewritten is never part of its own input;
+	 * with an empty-kept entry the window start sits one past the entry, so
+	 * the filter is what keeps it out).
+	 */
+	private buildRegionPlan(
 		path: DatabaseMessage[],
 		boundaryIndex: number,
 		isSplitTurn: boolean,
-		entryId: string,
-		signal?: AbortSignal
-	): Promise<string> {
+		entryId: string
+	): CompactionPlan {
 		const headLength = this.headLengthOf(path);
-		const config = settingsStore.config;
-		const nCtx = this.getContextSizeForConversation(convId, path);
-		const plan: CompactionPlan = {
+
+		return {
 			cutIndex: boundaryIndex,
 			estimatedTokensAfter: path
 				.slice(boundaryIndex)
@@ -1088,17 +1176,36 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			systemHead: headLength === 1 ? path[0] : null,
 			toSummarize: path.slice(headLength, boundaryIndex).filter((message) => message.id !== entryId)
 		};
+	}
 
-		return await summarizeMessages(plan, this.resolveCompactionModel(path), signal, {
-			excludeReasoning: config.excludeReasoningFromContext === true,
-			// unknown context size → summarizeMessages' built-in 1024 default
-			maxTokens:
-				nCtx && nCtx > 0
-					? computeSummaryMaxTokens(nCtx, config.contextSummaryMaxTokensPercent)
-					: undefined,
-			mode: toSummaryMode(config.contextSummaryMode),
-			prompt: config.contextSummaryPrompt.trim() || undefined
-		});
+	/**
+	 * Shared summary call for the manual re-summarizations (recompact, backward
+	 * boundary move): builds the region plan, resolves the model like
+	 * compactConversation and runs the shared over-target mechanism (both
+	 * modes). `signal` carries the stop-compaction abort (N3).
+	 * Returns null when the user skipped at the gate.
+	 */
+	private async summarizeRegion(
+		convId: string,
+		path: DatabaseMessage[],
+		boundaryIndex: number,
+		isSplitTurn: boolean,
+		entryId: string,
+		signal: AbortSignal
+	): Promise<SummaryResult | null> {
+		const config = settingsStore.config;
+		const nCtx = this.getContextSizeForConversation(convId, path);
+		const plan = this.buildRegionPlan(path, boundaryIndex, isSplitTurn, entryId);
+
+		return this.runCompactionSummary(
+			convId,
+			plan,
+			this.resolveCompactionModel(path),
+			nCtx ?? 0,
+			toCompactionMode(config.contextCompactionMode),
+			config,
+			signal
+		);
 	}
 
 	/**

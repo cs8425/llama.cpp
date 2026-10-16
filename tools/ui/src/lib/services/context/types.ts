@@ -10,6 +10,33 @@ import type { ApiChatMessageData } from '$lib/types/api';
 import type { DatabaseMessage } from '$lib/types/database';
 
 /**
+ * Compaction mode (`contextCompactionMode` setting, 2026-10-17 dual-mode spec,
+ * context-enhance/02 §3.3):
+ * - `recent-window` (A, **default**): keep the most recent messages verbatim
+ *   (at least `contextKeepRecentTokens` of byte count, walked back from the
+ *   last message) and summarize the rest; triggers at `window − keep`, where
+ *   window = min(n_ctx, `contextMaxContextOverride`);
+ * - `threshold-target` (B = v3 + N6): kept suffix ≤ (threshold − keepTarget)%
+ *   × n_ctx; success = head + summary ≤ keepTarget% × n_ctx.
+ *
+ * The mode only shapes the cut-point decision (trigger / planner / success
+ * check); existing compaction entries are mode-agnostic (the builder applies
+ * them the same way in both modes).
+ */
+export type CompactionMode = 'recent-window' | 'threshold-target';
+
+/**
+ * The user's answer to the over-target compaction gate (both modes share the
+ * mechanism; only the success formula differs, context-enhance/02 §6):
+ * - `use`: accept the over-target summary and create the entry;
+ * - `retry`: run the summary loop again with a fresh attempt counter;
+ * - `skip`: do not compact (the full context is kept).
+ * Aborting the flow / the stop-compaction controller while the gate is open
+ * resolves as `skip` (fail-open).
+ */
+export type CompactionDecision = 'use' | 'retry' | 'skip';
+
+/**
  * Budget and safety limits for compaction cut-point selection.
  */
 export interface CompactionBudget {

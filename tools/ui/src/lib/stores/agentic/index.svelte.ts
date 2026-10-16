@@ -31,20 +31,27 @@ import {
 import { ChatService } from '$lib/services';
 import {
 	buildLlmContext,
+	byteLength,
 	computeCompactionBudget,
 	computeSummaryMaxTokens,
 	estimateApiMessageTokens,
+	MIN_SUMMARIZE_TOKENS,
 	planCompaction,
-	summarizeMessages,
+	planCompactionRecentWindow,
+	shouldTriggerCompaction,
+	summarizeWithRetry,
+	toCompactionMode,
 	toSummaryMode,
 	SUMMARY_CONTENT_PREFIX
 } from '$lib/services/context';
+import type { CompactionDecision, CompactionMode } from '$lib/services/context';
 import { DatabaseService } from '$lib/services/database.service';
 import { ReadMediaService } from '$lib/services/read-media.service';
 import { SandboxService } from '$lib/services/sandbox.service';
 import { ToolsService } from '$lib/services/tools.service';
 // direct imports between stores, not via the barrel, to avoid circular deps
 import { AgenticGates } from '$lib/stores/agentic/gates.svelte';
+import type { CompactionDecisionRequest } from '$lib/stores/agentic/gates.svelte';
 import { contextStatsStore } from '$lib/stores/chat/context-stats.svelte';
 import { conversationsStore } from '$lib/stores/conversations/index.svelte';
 import { mcpStore } from '$lib/stores/mcp/index.svelte';
@@ -255,6 +262,11 @@ class AgenticStore {
 		return this.gates.getPendingContinueRequest(conversationId);
 	}
 
+	/** The pending over-target compaction request (the decision card's data), or null. */
+	getPendingCompactionDecision(conversationId: string): CompactionDecisionRequest | null {
+		return this.gates.getPendingCompactionDecision(conversationId);
+	}
+
 	getPendingPermissionRequest(
 		conversationId: string
 	): { toolName: string; serverLabel: string } | null {
@@ -310,6 +322,22 @@ class AgenticStore {
 
 	resolveContinue(conversationId: string, shouldContinue: boolean): void {
 		this.gates.resolveContinue(conversationId, shouldContinue);
+	}
+
+	resolveCompactionDecision(conversationId: string, decision: CompactionDecision): void {
+		this.gates.resolveCompactionDecision(conversationId, decision);
+	}
+
+	/**
+	 * Ask the user about an over-target compaction result (shared gate, both
+	 * modes): the agentic loop / between-flows / manual compaction awaits the
+	 * decision; an aborted signal resolves as `skip` (fail-open).
+	 */
+	async requestCompactionDecision(
+		request: CompactionDecisionRequest,
+		signal?: AbortSignal
+	): Promise<CompactionDecision> {
+		return this.gates.requestCompactionDecision(request, signal);
 	}
 
 	resolvePermission(conversationId: string, decision: ToolPermissionDecision): void {
@@ -510,9 +538,28 @@ class AgenticStore {
 				0
 			);
 
-		if (effectiveLastPrompt < nCtx * (config.contextCompactionThreshold / 100)) return;
+		const mode: CompactionMode = toCompactionMode(config.contextCompactionMode);
 
-		const plan = planCompaction(path, computeCompactionBudget(nCtx, config));
+		if (
+			!shouldTriggerCompaction(mode, {
+				contextCompactionThreshold: config.contextCompactionThreshold,
+				contextKeepRecentTokens: config.contextKeepRecentTokens,
+				contextMaxContextOverride: config.contextMaxContextOverride,
+				lastPrompt: effectiveLastPrompt,
+				nCtx
+			})
+		)
+			return;
+
+		const plan =
+			mode === 'recent-window'
+				? planCompactionRecentWindow(path, {
+						keepRecentTokens: config.contextKeepRecentTokens,
+						minKeptMessages: config.contextKeepMinMessages,
+						minKeptUserTurns: config.contextKeepMinUserTurns,
+						minSummarizeTokens: MIN_SUMMARIZE_TOKENS
+					})
+				: planCompaction(path, computeCompactionBudget(nCtx, config));
 
 		if (!plan) return;
 
@@ -524,14 +571,32 @@ class AgenticStore {
 		contextStatsStore.compacting = true;
 
 		try {
-			// The summary call shares the flow's model and abort signal: stopping
-			// the flow aborts a running summary, which fails open below.
-			const summary = await summarizeMessages(plan, model || null, signal, {
+			// The shared over-target mechanism (both modes): summarize →
+			// mode-specific success check → retry → user gate (the card mounts
+			// inside the agentic message; aborting the flow = skip). The summary
+			// call shares the flow's model and abort signal: stopping the flow
+			// aborts a running summary, which fails open below.
+			const summary = await summarizeWithRetry(plan, model || null, signal, {
+				checkParams: {
+					contextKeepRecentTokens: config.contextKeepRecentTokens,
+					contextKeepTargetPercent: config.contextKeepTargetPercent,
+					contextMaxContextOverride: config.contextMaxContextOverride,
+					nCtx
+				},
+				compactionMode: mode,
 				excludeReasoning: config.excludeReasoningFromContext === true,
+				gate: {
+					requestDecision: (p) =>
+						this.gates.requestCompactionDecision({ ...p, convId: conversationId }, signal)
+				},
+				maxAttempts: config.contextSummaryMaxAttempts,
 				maxTokens: computeSummaryMaxTokens(nCtx, config.contextSummaryMaxTokensPercent),
+				nCtx,
 				mode: toSummaryMode(config.contextSummaryMode),
 				prompt: config.contextSummaryPrompt.trim() || undefined
 			});
+
+			if (!summary) return; // the user skipped at the gate — no cmp
 
 			const cmp = await DatabaseService.createCompactionMessage({
 				compactionMeta: {
@@ -541,7 +606,7 @@ class AgenticStore {
 					model: model || undefined,
 					summarizedCount: plan.toSummarize.length
 				},
-				content: `${SUMMARY_CONTENT_PREFIX} ${summary}`,
+				content: `${SUMMARY_CONTENT_PREFIX} ${summary.content}`,
 				convId: conversationId,
 				parentId: path[path.length - 1].id
 			});
@@ -566,7 +631,7 @@ class AgenticStore {
 
 			sessionMessages.splice(0, sessionMessages.length, ...toAgenticMessages(messages));
 
-			const estimatedAfter = plan.estimatedTokensAfter + Math.ceil(cmp.content.length / 4);
+			const estimatedAfter = plan.estimatedTokensAfter + byteLength(cmp.content);
 
 			toast.success(`Context compacted: ~${plan.estimatedTokensBefore} → ~${estimatedAfter} tokens`);
 		} catch (error) {

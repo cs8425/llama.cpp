@@ -63,6 +63,12 @@ export interface SettingsFieldConfig {
 	min?: number;
 	max?: number;
 	dependsOn?: string;
+	/**
+	 * When set, the field is only rendered if `localConfig[dependsOn]` equals
+	 * this value (instead of the plain truthy check) — used for the dual-mode
+	 * compaction settings, where the A/B field groups hang off the mode SELECT.
+	 */
+	dependsOnValue?: string;
 	help?: string;
 	options?: Array<{ value: string; label: string; icon?: typeof Icon }>;
 	/** Options rendered for RADIO fields. Each entry maps a `value` (the radio's selected value) to the underlying config `key` whose boolean state mirrors it. */

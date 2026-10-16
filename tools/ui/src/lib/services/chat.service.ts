@@ -1509,6 +1509,10 @@ export class ChatService {
 			const content = data.choices[0]?.message?.content || '';
 			const reasoningContent = data.choices[0]?.message?.reasoning_content;
 			const toolCalls = data.choices[0]?.message?.tool_calls;
+			// The non-streaming response carries the whole completion's timings
+			// (prompt_n / predicted_n) — the actual token counts the compaction
+			// success check uses (context-enhance/02 §3.4).
+			const timings: ChatMessageTimings | undefined = data.timings
 
 			let serializedToolCalls: string | undefined;
 
@@ -1530,7 +1534,7 @@ export class ChatService {
 				throw noResponseError;
 			}
 
-			onComplete?.(content, reasoningContent, undefined, serializedToolCalls);
+			onComplete?.(content, reasoningContent, timings, serializedToolCalls);
 
 			return content;
 		} catch (error) {

@@ -1,59 +1,64 @@
 /**
- * Compaction policy: token estimation and cut-point selection.
+ * Compaction policy: size accounting and cut-point selection.
  *
  * Pure functions, no store imports. The policy decides "where to cut, and
- * whether to cut at all" ({@link planCompaction}); applying an existing
- * compaction entry to a payload is the builder's job (context-builder.ts).
+ * whether to cut at all" ({@link planCompaction} = mode B / upper bound,
+ * {@link planCompactionRecentWindow} = mode A / lower bound); applying an
+ * existing compaction entry to a payload is the builder's job
+ * (context-builder.ts).
+ *
+ * Size accounting (v3 / dual-mode, context-enhance/02 §3.4): when the API has
+ * an actual token count it is used at the precise decision points (trigger =
+ * `timings.prompt_n`, success check = the summary response's completion
+ * tokens); per-message there is no API value, so message costs are **UTF-8
+ * byte counts** (image = 1000, audio/video = 3000 flat). No derived
+ * proportions.
  */
 
 import { AttachmentType, ContentPartType, MessageRole } from '$lib/enums';
 import type { ApiChatMessageContentPart, ApiChatMessageData } from '$lib/types/api';
 import type { DatabaseMessage, DatabaseMessageExtra } from '$lib/types/database';
-import type { CompactionBudget, CompactionPlan } from './types';
+import type { CompactionBudget, CompactionMode, CompactionPlan } from './types';
 
 /** Rough cost of one image attachment (vision models encode ~1k tokens/image). */
 const TOKENS_PER_IMAGE = 1000;
 /** Rough flat cost of one audio or video attachment. */
 const TOKENS_PER_AUDIO_VIDEO = 3000;
-/** Characters per token for text. Deliberately simple (v1); see context-enhance/02 §3.4. */
-const CHARS_PER_TOKEN = 4;
 /**
- * Minimum estimated tokens in the summarize region for a compaction to be
- * worth the summary round-trip (02-data-model §3.3 example value).
+ * Minimum byte count in the summarize region for a compaction to be worth the
+ * summary round-trip (02-data-model §3.3; byte count since v3).
  */
 export const MIN_SUMMARIZE_TOKENS = 2000;
-/**
- * Floor for the keep budget (fraction of n_ctx) so small models with a large
- * summary reserve don't get a non-positive budget.
- */
-const KEEP_BUDGET_FLOOR_FRACTION = 0.1;
 
-function textTokens(text: string | undefined | null): number {
+const textEncoder = new TextEncoder();
+
+/** UTF-8 byte length of a string (0 for null/empty). */
+export function byteLength(text: string | undefined | null): number {
 	if (!text) return 0;
 
-	return Math.ceil(text.length / CHARS_PER_TOKEN);
+	return textEncoder.encode(text).length;
 }
 
 /**
- * Estimated token cost of a single database message (v1 heuristic):
- * content/4 + toolCalls JSON/4 + reasoning/4 + per-attachment flat/text costs.
- * The estimate only decides "where to cut"; it never decides "does it fit"
- * (the server is the source of truth for that).
+ * Byte cost of one database message (v3): content + toolCalls JSON +
+ * reasoning, each as UTF-8 bytes, plus per-attachment flat/text costs. The
+ * value only decides "where to cut"; it never decides "does it fit" (the
+ * server is the source of truth for that).
  */
 export function estimateTokens(message: DatabaseMessage): number {
-	let tokens = textTokens(message.content);
+	let bytes = byteLength(message.content);
 
-	tokens += textTokens(message.toolCalls);
-	tokens += textTokens(message.reasoningContent);
+	bytes += byteLength(message.toolCalls);
+	bytes += byteLength(message.reasoningContent);
 
 	for (const extra of message.extra ?? []) {
-		tokens += estimateAttachmentTokens(extra);
+		bytes += estimateAttachmentBytes(extra);
 	}
 
-	return tokens;
+	return bytes;
 }
 
-function estimateAttachmentTokens(extra: DatabaseMessageExtra): number {
+function estimateAttachmentBytes(extra: DatabaseMessageExtra): number {
 	switch (extra.type) {
 		case AttachmentType.IMAGE:
 			return TOKENS_PER_IMAGE;
@@ -64,44 +69,44 @@ function estimateAttachmentTokens(extra: DatabaseMessageExtra): number {
 			// Image-processed PDFs cost per page; text-extracted ones cost by text length.
 			return extra.processedAsImages && extra.images
 				? extra.images.length * TOKENS_PER_IMAGE
-				: textTokens(extra.content);
+				: byteLength(extra.content);
 		default:
 			// TEXT / LEGACY_CONTEXT / MCP_PROMPT / MCP_RESOURCE
-			return textTokens(extra.content);
+			return byteLength(extra.content);
 	}
 }
 
 /**
- * Estimated token cost of one converted API message. The inspector's payload
- * rows are in API form (the builder's output), not DB form, so they price the
- * content parts directly: text/4, one image part = 1000, audio/video parts =
- * 3000, tool calls by serialized length — the same heuristics as
+ * Byte cost of one converted API message. The inspector's payload rows are in
+ * API form (the builder's output), not DB form, so they price the content
+ * parts directly: text as UTF-8 bytes, one image part = 1000, audio/video
+ * parts = 3000, tool calls by serialized bytes — the same heuristics as
  * {@link estimateTokens}.
  */
 export function estimateApiMessageTokens(message: ApiChatMessageData): number {
-	let tokens = 0;
+	let bytes = 0;
 
 	if (typeof message.content === 'string') {
-		tokens += textTokens(message.content);
+		bytes += byteLength(message.content);
 	} else {
 		for (const part of message.content) {
-			tokens += estimateContentPartTokens(part);
+			bytes += estimateContentPartBytes(part);
 		}
 	}
 
 	if (message.tool_calls) {
-		tokens += textTokens(JSON.stringify(message.tool_calls));
+		bytes += byteLength(JSON.stringify(message.tool_calls));
 	}
 
-	tokens += textTokens(message.reasoning_content);
+	bytes += byteLength(message.reasoning_content);
 
-	return tokens;
+	return bytes;
 }
 
-function estimateContentPartTokens(part: ApiChatMessageContentPart): number {
+function estimateContentPartBytes(part: ApiChatMessageContentPart): number {
 	switch (part.type) {
 		case ContentPartType.TEXT:
-			return textTokens(part.text);
+			return byteLength(part.text);
 		case ContentPartType.IMAGE_URL:
 			return TOKENS_PER_IMAGE;
 		default:
@@ -161,44 +166,43 @@ function isCuttable(message: DatabaseMessage): boolean {
 }
 
 /**
- * The context settings that shape the compaction budget. A structural pick
- * (no settings import) so the policy stays store-free and unit-testable.
- * Note: the trigger threshold is intentionally NOT here — it gates WHEN the
- * auto check runs (the stores' threshold check) and never shapes the budget.
+ * The context settings that shape the compaction budget (mode B). A
+ * structural pick (no settings import) so the policy stays store-free and
+ * unit-testable. `contextCompactionThreshold` enters the budget as the
+ * post-compaction total cap (budget = threshold − keepTarget, §02-3.3.2)
+ * *and* gates when the auto check runs (the stores' trigger check).
  */
 export interface CompactionSettings {
+	contextCompactionThreshold: number;
 	contextKeepMinMessages: number;
 	contextKeepMinUserTurns: number;
 	contextKeepTargetPercent: number;
-	contextSummaryMaxTokensPercent: number;
 }
 
 /**
  * Max tokens for the summary LLM call: a percentage of the model context
  * (n_ctx) so the cap scales with the model — 70% of 128k ≈ 91750, of 256k ≈
- * 183500 — instead of a fixed number (06-status §3.13).
+ * 183500 — instead of a fixed number (06-status §3.13). Only used for the
+ * summary call's `max_tokens`, never for the budget (v3).
  */
 export function computeSummaryMaxTokens(nCtx: number, percent: number): number {
 	return Math.max(1, Math.floor((nCtx * percent) / 100));
 }
 
 /**
- * Compaction budget for a known n_ctx (02-data-model §3.3). The kept suffix
- * must fit under the configured keep target (default 50% of n_ctx) minus a
- * reserve for the summary itself (≈ 1.5 × the summary's max tokens, which is
- * a percentage of n_ctx — at the default 70% cap the keep budget lands on the
- * 10% floor: the safe worst case is 10% kept + 70% summary cap + headroom for
- * the system prompt), floored at 10% of n_ctx. The trigger threshold only
- * decides WHEN the auto check runs, never how much context survives.
+ * Compaction budget for a known n_ctx (mode B, v3 final, 02-data-model
+ * §3.3.2): the kept suffix must fit under the *difference* between the
+ * trigger threshold and the keep target — after compaction the total =
+ * (head + summary ≤ keepTarget%) + (kept ≤ threshold − keepTarget%) stays
+ * under the trigger point, so the check does not fire again immediately.
+ * `threshold ≤ keepTarget` (misconfiguration) → budget 0 → never compacts.
+ * The old summary reserve (× 1.5) and 10% floor are gone (06-status §3.20).
  */
 export function computeCompactionBudget(nCtx: number, settings: CompactionSettings): CompactionBudget {
-	const summaryReserve = computeSummaryMaxTokens(nCtx, settings.contextSummaryMaxTokensPercent) * 1.5;
+	const diff = settings.contextCompactionThreshold - settings.contextKeepTargetPercent;
 
 	return {
-		keepBudgetTokens: Math.max(
-			Math.floor((nCtx * settings.contextKeepTargetPercent) / 100) - summaryReserve,
-			Math.floor(nCtx * KEEP_BUDGET_FLOOR_FRACTION)
-		),
+		keepBudgetTokens: diff > 0 ? Math.floor((nCtx * diff) / 100) : 0,
 		minKeptMessages: settings.contextKeepMinMessages,
 		minKeptUserTurns: settings.contextKeepMinUserTurns,
 		minSummarizeTokens: MIN_SUMMARIZE_TOKENS
@@ -235,12 +239,12 @@ export function planCompaction(path: DatabaseMessage[], budget: CompactionBudget
 	const systemStart = path[0]?.role === MessageRole.SYSTEM ? 1 : 0;
 	const length = path.length;
 
-	// suffixEstimate[i] = estimated tokens of path[i..end]; the suffix shrinks
+	// suffixBytes[i] = byte count of path[i..end]; the suffix shrinks
 	// as i grows, so the first i whose suffix fits the budget keeps the most.
-	const suffixEstimate: number[] = new Array<number>(length + 1).fill(0);
+	const suffixBytes: number[] = new Array<number>(length + 1).fill(0);
 
 	for (let i = length - 1; i >= 0; i--) {
-		suffixEstimate[i] = suffixEstimate[i + 1] + estimateTokens(path[i]);
+		suffixBytes[i] = suffixBytes[i + 1] + estimateTokens(path[i]);
 	}
 
 	let cutIndex = -1;
@@ -250,7 +254,7 @@ export function planCompaction(path: DatabaseMessage[], budget: CompactionBudget
 	for (let j = systemStart; j < length; j++) {
 		if (path[j].role !== MessageRole.USER) continue;
 
-		if (suffixEstimate[j] > budget.keepBudgetTokens) continue;
+		if (suffixBytes[j] > budget.keepBudgetTokens) continue;
 
 		cutIndex = j;
 
@@ -265,7 +269,7 @@ export function planCompaction(path: DatabaseMessage[], budget: CompactionBudget
 		for (let j = systemStart; j <= length; j++) {
 			if (j < length && !isCuttable(path[j])) continue;
 
-			if (suffixEstimate[j] > budget.keepBudgetTokens) continue;
+			if (suffixBytes[j] > budget.keepBudgetTokens) continue;
 
 			cutIndex = j;
 			isSplitTurn = true;
@@ -277,9 +281,9 @@ export function planCompaction(path: DatabaseMessage[], budget: CompactionBudget
 	if (cutIndex === -1) return null;
 
 	const toSummarize = path.slice(systemStart, cutIndex);
-	const summarizeTokens = toSummarize.reduce((sum, m) => sum + estimateTokens(m), 0);
+	const summarizeBytes = toSummarize.reduce((sum, m) => sum + estimateTokens(m), 0);
 
-	if (summarizeTokens < budget.minSummarizeTokens) return null;
+	if (summarizeBytes < budget.minSummarizeTokens) return null;
 
 	const kept = path.slice(cutIndex);
 
@@ -291,16 +295,261 @@ export function planCompaction(path: DatabaseMessage[], budget: CompactionBudget
 		if (keptUserMessages < budget.minKeptUserTurns) return null;
 	}
 
-	const systemTokens = systemStart === 1 ? estimateTokens(path[0]) : 0;
+	const headBytes = systemStart === 1 ? estimateTokens(path[0]) : 0;
 
 	return {
 		cutIndex,
-		estimatedTokensAfter: systemTokens + suffixEstimate[cutIndex],
-		estimatedTokensBefore: suffixEstimate[0],
+		estimatedTokensAfter: headBytes + suffixBytes[cutIndex],
+		estimatedTokensBefore: suffixBytes[0],
 		firstKeptMessageId: cutIndex < length ? path[cutIndex].id : undefined,
 		isSplitTurn,
 		kept,
 		systemHead: systemStart === 1 ? path[0] : null,
 		toSummarize
 	};
+}
+
+/**
+ * Coerces a raw settings value (the `contextCompactionMode` config) into a
+ * valid {@link CompactionMode}; unknown or corrupted values fall back to the
+ * default `recent-window` (A).
+ */
+export function toCompactionMode(value: unknown): CompactionMode {
+	return value === 'threshold-target' ? 'threshold-target' : 'recent-window';
+}
+
+/**
+ * The effective context window for compaction decisions (mode A): the model
+ * n_ctx capped by the user override (`contextMaxContextOverride`, 0 = off).
+ * Only shapes trimming decisions — the outgoing payload is never
+ * hard-limited by it (02-data-model §3.3.1).
+ */
+export function computeEffectiveWindow(nCtx: number, maxContextOverride: number): number {
+	return maxContextOverride > 0 ? Math.min(nCtx, maxContextOverride) : nCtx;
+}
+
+/** Parameters for the mode-specific trigger check (02-data-model §6). */
+export interface CompactionTriggerParams {
+	/** The last full prompt size: `timings.prompt_n` when the server reported it, else the path's byte count. */
+	lastPrompt: number;
+	/** The model context size (n_ctx). */
+	nCtx: number;
+	/** `contextCompactionThreshold` (mode B, % of n_ctx). */
+	contextCompactionThreshold: number;
+	/** `contextMaxContextOverride` (mode A, 0 = off). */
+	contextMaxContextOverride: number;
+	/** `contextKeepRecentTokens` (mode A, byte count). */
+	contextKeepRecentTokens: number;
+}
+
+/**
+ * Whether the auto compaction check should run (mode-specific, 02-data-model
+ * §6). `lastPrompt` is the API's actual `prompt_n` when available, otherwise
+ * the byte count of the path.
+ * - A: `lastPrompt > window − keep`; `window − keep ≤ 0` → never triggers
+ *   (manual compaction is unaffected);
+ * - B: `lastPrompt > n_ctx × threshold%`.
+ */
+export function shouldTriggerCompaction(mode: CompactionMode, params: CompactionTriggerParams): boolean {
+	if (mode === 'recent-window') {
+		const window = computeEffectiveWindow(params.nCtx, params.contextMaxContextOverride);
+		const headroom = window - params.contextKeepRecentTokens;
+
+		return headroom > 0 && params.lastPrompt > headroom;
+	}
+
+	return params.lastPrompt > (params.nCtx * params.contextCompactionThreshold) / 100;
+}
+
+/** Options for {@link planCompactionRecentWindow} (mode A, 02-data-model §3.3.1). */
+export interface RecentWindowOptions {
+	/** Minimum recent context to keep verbatim, in byte count (the walk's stop point). */
+	keepRecentTokens: number;
+	/** Cut on a user message: minimum user messages that must stay in the kept region (I5). */
+	minKeptUserTurns: number;
+	/** Minimum total messages that must stay in the kept region (I5). */
+	minKeptMessages: number;
+	/** Minimum byte count in the summarize region; smaller regions are not worth a summary. */
+	minSummarizeTokens: number;
+}
+
+/**
+ * Mode A cut-point selection: the recent-window walk (pi reference,
+ * 02-data-model §3.3.1). Walks back from the last message accumulating
+ * per-message byte counts until ≥ `keepRecentTokens` (the crossing point),
+ * then cuts at the nearest legal cut point at/right of it.
+ *
+ * - crossing on a tool result → the cut moves right to the next user/
+ *   assistant message (a giant tool result therefore keeps the whole turn
+ *   that follows it);
+ * - no legal cut to the right (the tail is all tool results) → the
+ *   rightmost legal cut (keeps that assistant (tool_calls) + its tool
+ *   results — the most recent exchange);
+ * - the walk never reaches keep (whole path < keep) → null (nothing to do);
+ * - **never produces an empty kept**: the cut always lands on a user or
+ *   assistant message (kept ≥ 1).
+ *
+ * Then the safety checks: summarize region ≥ `minSummarizeTokens` (bytes),
+ * kept ≥ `minKeptMessages`, and — when the cut lands on a user message —
+ * kept user messages ≥ `minKeptUserTurns`.
+ *
+ * @param path - The full root→leaf path (system prompt at index 0 when present).
+ * @param opts - Keep lower bound and safety limits.
+ * @returns The plan, or null when no compaction should happen.
+ */
+export function planCompactionRecentWindow(
+	path: DatabaseMessage[],
+	opts: RecentWindowOptions
+): CompactionPlan | null {
+	if (path.length === 0) return null;
+
+	const systemStart = path[0]?.role === MessageRole.SYSTEM ? 1 : 0;
+	const length = path.length;
+
+	// Walk back from the last message; the system head is never part of the
+	// walk (it is always kept and priced separately in the success check).
+	let cumulative = 0;
+	let crossing = -1;
+
+	for (let i = length - 1; i >= systemStart; i--) {
+		cumulative += estimateTokens(path[i]);
+
+		if (cumulative >= opts.keepRecentTokens) {
+			crossing = i;
+
+			break;
+		}
+	}
+
+	if (crossing === -1) return null; // whole path < keep → not worth compacting
+
+	// Nearest legal cut at/right of the crossing point.
+	let cutIndex = -1;
+
+	for (let j = crossing; j < length; j++) {
+		if (isCuttable(path[j])) {
+			cutIndex = j;
+
+			break;
+		}
+	}
+
+	// The tail is all tool results: fall back to the rightmost legal cut,
+	// keeping that assistant (tool_calls) + its trailing tool results.
+	if (cutIndex === -1) {
+		for (let j = length - 1; j >= systemStart; j--) {
+			if (isCuttable(path[j])) {
+				cutIndex = j;
+
+				break;
+			}
+		}
+	}
+
+	if (cutIndex === -1) return null; // no legal cut at all (degenerate path)
+
+	const isSplitTurn = path[cutIndex].role === MessageRole.ASSISTANT;
+	const toSummarize = path.slice(systemStart, cutIndex);
+	const summarizeBytes = toSummarize.reduce((sum, m) => sum + estimateTokens(m), 0);
+
+	if (summarizeBytes < opts.minSummarizeTokens) return null;
+
+	const kept = path.slice(cutIndex);
+
+	if (kept.length < opts.minKeptMessages) return null;
+
+	if (!isSplitTurn) {
+		const keptUserMessages = kept.reduce((count, m) => count + (m.role === MessageRole.USER ? 1 : 0), 0);
+
+		if (keptUserMessages < opts.minKeptUserTurns) return null;
+	}
+
+	const headBytes = systemStart === 1 ? estimateTokens(path[0]) : 0;
+	const keptBytes = kept.reduce((sum, m) => sum + estimateTokens(m), 0);
+
+	return {
+		cutIndex,
+		estimatedTokensAfter: headBytes + keptBytes,
+		estimatedTokensBefore: headBytes + keptBytes + summarizeBytes,
+		firstKeptMessageId: path[cutIndex].id,
+		isSplitTurn,
+		kept,
+		systemHead: systemStart === 1 ? path[0] : null,
+		toSummarize
+	};
+}
+
+/** Parameters for the mode-specific success check (02-data-model §6). */
+export interface CompactionCheckParams {
+	/** The model context size (n_ctx). */
+	nCtx: number;
+	/** `contextMaxContextOverride` (mode A, 0 = off). */
+	contextMaxContextOverride: number;
+	/** `contextKeepRecentTokens` (mode A, byte count). */
+	contextKeepRecentTokens: number;
+	/** `contextKeepTargetPercent` (mode B, % of n_ctx). */
+	contextKeepTargetPercent: number;
+}
+
+/** Result of the mode-specific success check. */
+export interface CompactionCheckResult {
+	/** true = the compaction result is within the mode target. */
+	ok: boolean;
+	/** The post-compaction size the mode checks (A: head + summary + kept; B: head + summary). */
+	postSize: number;
+	/** The mode target (A: window − keep; B: keepTarget% × n_ctx). */
+	target: number;
+}
+
+/**
+ * The mode-specific "did the compaction succeed" check, evaluated once the
+ * summary exists (02-data-model §6). `summarySize` is the summary's size in
+ * the mode's units: the API's actual completion tokens when the server
+ * reported them, else the UTF-8 byte length of the content
+ * ({@link resolveSummarySize}).
+ * - A: `head + summary + kept ≤ window − keep` (below the trigger point →
+ *   no immediate re-trigger);
+ * - B: `head + summary ≤ keepTarget% × n_ctx` (kept is already constrained
+ *   to the budget by the cut point).
+ */
+export function evaluateCompactionResult(
+	plan: CompactionPlan,
+	summarySize: number,
+	mode: CompactionMode,
+	params: CompactionCheckParams
+): CompactionCheckResult {
+	const headBytes = plan.systemHead ? estimateTokens(plan.systemHead) : 0;
+
+	if (mode === 'recent-window') {
+		const window = computeEffectiveWindow(params.nCtx, params.contextMaxContextOverride);
+		const target = window - params.contextKeepRecentTokens;
+		const keptBytes = plan.kept.reduce((sum, m) => sum + estimateTokens(m), 0);
+		const postSize = headBytes + summarySize + keptBytes;
+
+		return { ok: postSize <= target, postSize, target };
+	}
+
+	const target = Math.floor((params.nCtx * params.contextKeepTargetPercent) / 100);
+	const postSize = headBytes + summarySize;
+
+	return { ok: postSize <= target, postSize, target };
+}
+
+/**
+ * Resolves the summary's size for the success check: the API's actual
+ * completion tokens when reported, else the UTF-8 byte length of the
+ * content (02-data-model §3.4: no API value → byte count).
+ */
+export function resolveSummarySize(tokens: number | null, content: string): number {
+	return tokens ?? byteLength(content);
+}
+
+/**
+ * The shared over-target mechanism's loop step (02-data-model §6): after an
+ * over-target summary, retry while attempts remain, otherwise hand over to
+ * the user gate. `maxAttempts` = total attempts (1 = once; ≤ 0 = unlimited,
+ * the gate is the only stop).
+ */
+export function nextCompactionStep(attempts: number, maxAttempts: number): 'retry' | 'gate' {
+	return maxAttempts <= 0 || attempts < maxAttempts ? 'retry' : 'gate';
 }

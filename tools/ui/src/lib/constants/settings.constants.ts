@@ -5,9 +5,11 @@ import { TITLE_GENERATION } from './title-generation.constants';
 import { FILE_GLOB_SEARCH_PICKERS } from './working-directory.constants';
 import {
 	Code,
+	Clock,
 	Database,
 	FileText,
 	Funnel,
+	Gauge,
 	Layers,
 	ListRestart,
 	Monitor,
@@ -209,9 +211,44 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 				type: SettingsFieldType.CHECKBOX
 			},
 			{
-				defaultValue: 70,
+				defaultValue: 'recent-window',
 				dependsOn: SETTINGS_KEYS.CONTEXT_AUTO_COMPACTION,
-				help: 'Compact once the last prompt reaches this percentage of the model context (n_ctx). Only decides when the check runs; how much context survives is set by the keep target and the summary cap.',
+				help: 'How automatic compaction decides what to keep. Recent-window keeps the most recent messages verbatim (at least the keep-recent budget) and compacts the rest; threshold-target caps the kept suffix at (threshold − keep target)% of n_ctx.',
+				key: SETTINGS_KEYS.CONTEXT_COMPACTION_MODE,
+				label: 'Compaction mode',
+				options: [
+					{ icon: Clock, label: 'Recent window (default)', value: 'recent-window' },
+					{ icon: Gauge, label: 'Threshold target', value: 'threshold-target' }
+				],
+				type: SettingsFieldType.SELECT
+			},
+			{
+				defaultValue: 0,
+				dependsOn: SETTINGS_KEYS.CONTEXT_COMPACTION_MODE,
+				dependsOnValue: 'recent-window',
+				help: '(Recent-window) Cap the effective context window used for compaction decisions: min(n_ctx, this value). 0 = use the full model n_ctx. Only affects the trimming decision; the outgoing payload is never hard-limited by it.',
+				isPositiveInteger: true,
+				key: SETTINGS_KEYS.CONTEXT_MAX_CONTEXT_OVERRIDE,
+				label: 'Max context override',
+				min: 0,
+				type: SettingsFieldType.INPUT
+			},
+			{
+				defaultValue: 20000,
+				dependsOn: SETTINGS_KEYS.CONTEXT_COMPACTION_MODE,
+				dependsOnValue: 'recent-window',
+				help: '(Recent-window) Minimum recent context to keep verbatim. Measured in UTF-8 bytes walked back from the last message (CJK text keeps roughly 1/3–1/8 of this in tokens). Triggers once the last prompt exceeds window − this value.',
+				isPositiveInteger: true,
+				key: SETTINGS_KEYS.CONTEXT_KEEP_RECENT_TOKENS,
+				label: 'Keep recent window (bytes)',
+				min: 1,
+				type: SettingsFieldType.INPUT
+			},
+			{
+				defaultValue: 70,
+				dependsOn: SETTINGS_KEYS.CONTEXT_COMPACTION_MODE,
+				dependsOnValue: 'threshold-target',
+				help: '(Threshold-target) Compact once the last prompt reaches this percentage of the model context (n_ctx). Also caps the post-compaction total: kept context is limited to (this − keep target)%.',
 				isPositiveInteger: true,
 				key: SETTINGS_KEYS.CONTEXT_COMPACTION_THRESHOLD,
 				label: 'Compaction threshold (%)',
@@ -221,7 +258,7 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 			},
 			{
 				defaultValue: 4,
-				help: 'Minimum number of recent user messages to keep verbatim when compacting. Lower values compact more aggressively.',
+				help: 'Minimum number of recent user messages to keep verbatim when compacting (both modes). Lower values compact more aggressively.',
 				isPositiveInteger: true,
 				key: SETTINGS_KEYS.CONTEXT_KEEP_MIN_USER_TURNS,
 				label: 'Keep minimum user turns',
@@ -231,7 +268,7 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 			},
 			{
 				defaultValue: 0,
-				help: 'Minimum total messages to keep when a single turn is too large to drop whole (the cut then lands inside the turn). 0 (default) allows the cut to land after the last message, compacting every message; set 2 or more to keep at least that many recent messages.',
+				help: 'Minimum total messages to keep when a single turn is too large to drop whole (the cut then lands inside the turn; both modes). 0 (default) allows the cut to land after the last message, compacting every message; set 2 or more to keep at least that many recent messages.',
 				isPositiveInteger: true,
 				key: SETTINGS_KEYS.CONTEXT_KEEP_MIN_MESSAGES,
 				label: 'Keep minimum messages',
@@ -241,12 +278,25 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 			},
 			{
 				defaultValue: 50,
-				help: 'How much of the model context (n_ctx) to keep after a compaction, as a percentage: the kept recent messages must fit under this, minus a reserve for the summary itself (floored at 10% of n_ctx).',
+				dependsOn: SETTINGS_KEYS.CONTEXT_COMPACTION_MODE,
+				dependsOnValue: 'threshold-target',
+				help: '(Threshold-target) How much of the model context (n_ctx) the compaction summary may take, as a percentage: a compaction succeeds when system head + summary stay under this. The kept suffix is limited to (threshold − this)%.',
 				isPositiveInteger: true,
 				key: SETTINGS_KEYS.CONTEXT_KEEP_TARGET_PERCENT,
 				label: 'Keep target (% of n_ctx)',
 				max: 90,
 				min: 10,
+				type: SettingsFieldType.INPUT
+			},
+			{
+				defaultValue: 3,
+				dependsOn: SETTINGS_KEYS.CONTEXT_AUTO_COMPACTION,
+				help: '(Both modes) Total attempts for the summary call when the result exceeds the mode target: 1 = once, 0 = unlimited. Once the attempts run out, a card asks: use this summary / re-compact / skip.',
+				isPositiveInteger: true,
+				key: SETTINGS_KEYS.CONTEXT_SUMMARY_MAX_ATTEMPTS,
+				label: 'Summary max attempts',
+				max: 10,
+				min: 0,
 				type: SettingsFieldType.INPUT
 			},
 			{
@@ -781,6 +831,7 @@ function toSettingsSection(section: SettingsSectionEntry): SettingsSection {
 			.filter((s) => s.standaloneField !== false)
 			.map((s) => ({
 				dependsOn: s.dependsOn,
+				dependsOnValue: s.dependsOnValue,
 				help: s.help,
 				isExperimental: s.isExperimental,
 				isPositiveInteger: s.isPositiveInteger,

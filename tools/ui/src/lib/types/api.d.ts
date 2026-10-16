@@ -389,6 +389,18 @@ export interface ApiChatCompletionResponse {
 		};
 		finish_reason?: string | null;
 	}>;
+	/**
+	 * Server-reported timings for the whole completion (same shape as the
+	 * streaming chunk). `predicted_n` is the actual completion token count —
+	 * the source for the compaction success check (context-enhance/02 §3.4).
+	 */
+	timings?: {
+		prompt_n?: number;
+		prompt_ms?: number;
+		predicted_n?: number;
+		predicted_ms?: number;
+		cache_n?: number;
+	};
 }
 
 export interface ApiSlotData {

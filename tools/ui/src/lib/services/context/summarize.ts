@@ -24,8 +24,19 @@
 import { AttachmentType, MessageRole } from '$lib/enums';
 import { ChatService } from '$lib/services/chat.service';
 import type { ApiChatMessageData } from '$lib/types/api';
+import type { ChatMessageTimings } from '$lib/types/chat';
 import type { DatabaseMessage, DatabaseMessageExtra } from '$lib/types/database';
 import { formatFileSize } from '$lib/utils/formatters';
+import {
+	evaluateCompactionResult,
+	nextCompactionStep,
+	resolveSummarySize
+} from './compaction-policy';
+import type {
+	CompactionCheckParams,
+	CompactionDecision,
+	CompactionMode
+} from './compaction-policy';
 import type { CompactionPlan } from './types';
 
 /**
@@ -61,6 +72,19 @@ Be dense; drop small talk.`;
  * the default; `transcript` is the v1 flat-text fallback.
  */
 export type SummaryMode = 'prefix-stable' | 'transcript';
+
+/**
+ * Result of {@link summarizeMessages}: the summary text plus the server's
+ * actual completion token count when it reported one (`timings.predicted_n`);
+ * null when the server did not — the success check then prices the content
+ * in bytes (02-data-model §3.4).
+ */
+export interface SummaryResult {
+	/** The summary text (trimmed). */
+	content: string;
+	/** Actual completion tokens from the response timings; null = not reported. */
+	tokens: number | null;
+}
 
 /**
  * Coerces a raw settings value (the `contextSummaryMode` config) into a valid
@@ -177,15 +201,16 @@ function summarizeToolCalls(toolCallsJson: string): string {
  *   an `AbortError` so callers can distinguish "stopped" from "failed".
  * @param options - maxTokens / temperature / custom prompt / mode /
  *   excludeReasoning (see {@link SummarizeOptions}).
- * @returns The summary text (trimmed). Throws on any failure — the caller must
- *   treat that as "do not compact".
+ * @returns The summary text (trimmed) plus the actual completion tokens when
+ *   the server reported them (null otherwise). Throws on any failure — the
+ *   caller must treat that as "do not compact".
  */
 export async function summarizeMessages(
 	plan: CompactionPlan,
 	model: string | null,
 	signal?: AbortSignal,
 	options: SummarizeOptions = {}
-): Promise<string> {
+): Promise<SummaryResult> {
 	const instruction =
 		options.prompt?.trim() || (plan.isSplitTurn ? SPLIT_TURN_SUMMARY_PROMPT : DEFAULT_SUMMARY_PROMPT);
 
@@ -201,9 +226,17 @@ export async function summarizeMessages(
 				{ content: instruction, role: MessageRole.USER }
 			];
 
+	// The non-streaming response's timings arrive through onComplete (the
+	// return value is the content only) — capture them here for the
+	// compaction success check (02-data-model §3.4).
+	let responseTimings: ChatMessageTimings | undefined;
+
 	const response = await ChatService.sendMessage(
 		messages,
 		{
+			onComplete: (_content, _reasoningContent, timings) => {
+				responseTimings = timings;
+			},
 			excludeReasoningFromContext: options.excludeReasoning === true,
 			max_tokens: options.maxTokens ?? 1024,
 			model: model ?? undefined,
@@ -227,5 +260,89 @@ export async function summarizeMessages(
 		throw new Error('Summary generation returned an empty response');
 	}
 
-	return summary;
+	return { content: summary, tokens: responseTimings?.predicted_n ?? null };
+}
+
+/**
+ * The user gate the shared over-target mechanism asks (02-data-model §6).
+ * Implemented by the stores (AgenticGates' compaction-decision gate); the
+ * pure loop below only calls it.
+ */
+export interface CompactionSummaryGate {
+	requestDecision(params: {
+		attempts: number;
+		mode: CompactionMode;
+		postSize: number;
+		target: number;
+	}): Promise<CompactionDecision>;
+}
+
+/** Options for {@link summarizeWithRetry}. */
+export interface SummarizeWithRetryOptions extends SummarizeOptions {
+	/** The model context size (n_ctx); ≤ 0 = unknown → no success check. */
+	nCtx: number;
+	/** The active compaction mode (selects the success formula). */
+	compactionMode: CompactionMode;
+	/** The mode check's parameters (window/keep/keepTarget). */
+	checkParams: CompactionCheckParams;
+	/** Total summary attempts before the gate (1 = once; ≤ 0 = unlimited). */
+	maxAttempts: number;
+	/**
+	 * The over-target gate (user decision). When absent an over-target
+	 * result is accepted as-is (fail-open) once the attempts run out.
+	 */
+	gate?: CompactionSummaryGate;
+}
+
+/**
+ * The shared over-target mechanism for BOTH modes (02-data-model §6):
+ * summarize → mode-specific success check → retry up to `maxAttempts` →
+ * user gate (use / retry / skip; an aborted signal resolves the gate as
+ * skip). The manual paths (Compact now / Re-summarize / backward boundary
+ * move) run the same flow.
+ *
+ * @returns The summary (success, or the user's "use it"), or null when the
+ *   user skipped — the caller must NOT create/update the compaction entry.
+ *   Throws on summary-call failure / abort (the caller fails open).
+ */
+export async function summarizeWithRetry(
+	plan: CompactionPlan,
+	model: string | null,
+	signal: AbortSignal | undefined,
+	options: SummarizeWithRetryOptions
+): Promise<SummaryResult | null> {
+	const { checkParams, compactionMode, gate, maxAttempts, nCtx } = options;
+
+	let attempts = 0;
+	let last: SummaryResult | null = null;
+
+	while (true) {
+		attempts++;
+
+		last = await summarizeMessages(plan, model, signal, options);
+
+		const summarySize = resolveSummarySize(last.tokens, last.content);
+		const check = nCtx > 0 ? evaluateCompactionResult(plan, summarySize, compactionMode, checkParams) : null;
+
+		if (!check || check.ok) return last;
+
+		if (nextCompactionStep(attempts, maxAttempts) === 'retry') continue;
+
+		// Over target and the attempts ran out: ask the user.
+		if (!gate) return last;
+
+		const decision = await gate.requestDecision({
+			attempts,
+			mode: compactionMode,
+			postSize: check.postSize,
+			target: check.target
+		});
+
+		if (decision === 'use') return last;
+
+		if (decision === 'skip') return null;
+
+		// 'retry': the attempt counter is recomputed
+		attempts = 0;
+	}
 }

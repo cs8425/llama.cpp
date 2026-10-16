@@ -1,7 +1,8 @@
 <script lang="ts">
 	import LazyChatMessage from './LazyChatMessage.svelte';
-	import { ChatMessageUserPending } from '$lib/components/app';
+	import { ChatCompactionDecisionCard, ChatMessageUserPending } from '$lib/components/app';
 	import { MessageRole, MessageType } from '$lib/enums';
+	import type { CompactionDecision } from '$lib/services/context';
 	import { agenticStore, chatStore, conversationsStore, settingsStore } from '$lib/stores';
 	import type { ChatMessageActions } from '$lib/types';
 	import {
@@ -265,6 +266,28 @@
 				{toolMessages}
 			/>
 		{/each}
+
+		<!-- Over-target compaction gate (between flows / manual actions): an
+		     independent row at the end of the message list. In-loop the card
+		     mounts inside the agentic message instead (the flow is running, so
+		     this one stays hidden). -->
+		{#if conversationsStore.activeConversation}
+			{@const compactionConvId = conversationsStore.activeConversation.id}
+			{@const pendingCompaction =
+				!agenticStore.isRunning(compactionConvId)
+					? agenticStore.getPendingCompactionDecision(compactionConvId)
+					: null}
+
+			{#if pendingCompaction}
+				<div class="mx-auto mt-12 w-full max-w-3xl">
+					<ChatCompactionDecisionCard
+						onDecision={(decision: CompactionDecision) =>
+							agenticStore.resolveCompactionDecision(compactionConvId, decision)}
+						request={pendingCompaction}
+					/>
+				</div>
+			{/if}
+		{/if}
 
 		{#if conversationsStore.activeConversation && agenticStore.getPendingSteeringMessageContent(conversationsStore.activeConversation!.id)}
 			{@const convId = conversationsStore.activeConversation!.id}
