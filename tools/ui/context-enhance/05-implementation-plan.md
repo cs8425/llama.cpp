@@ -56,49 +56,89 @@
 ✅ 驗收:長對話(或測試用低 threshold)自動壓縮發生一次且只發生一次;
 編輯 summary 後下一輪 payload 即變;Expand 後 context 完整還原。
 
-### v3 — 實際 token 計數 + compact 成功判定(設計確認 2026-10-16,未實做)
+### 雙 mode — recent-window(A,預設)+ threshold-target(B = v3 + N6)(規格定稿 2026-10-17,未實做)
 
 > 背景:自動壓縮從未觸發(262.14K/262.14K 案例)——根因是舊 budget 公式
 > (summary max 70% × 1.5 = 105% n_ctx 的 reserve)把 keepBudget 壓死在 10% floor,
-> planCompaction 回 null、auto 路徑完全靜默。根因分析與決策記錄見
-> 06-status §3.20。設計:02-§3.3/§3.4/§6(v3)、03-§3/§4.2/§4.4(v3)。
+> planCompaction 回 null、auto 路徑完全靜默(分析見 06-status §3.20)。使用者另引入
+> pi reference 的切點(下限:至少留最近 keepRecentTokens 原樣),決定**同時保留
+> 兩種作法、user 選 mode、預設 = A**;A 超標沿用 B 的重試邏輯;計數 = API 有
+> 實際 token 數就用(trigger = prompt_n、summary = completion tokens)、msg / API
+> 無 token 數用 byte、**不做派生比例**。決策見 06-status §3.22;設計:
+> 02-§3.3/§3.4/§6(雙 mode)、03-§2/§3/§4.2/§4.4、04-§3/§4。
+
+#### 共用(兩 mode)
+
+- [ ] `chat.service.ts`:`ApiChatCompletionResponse` 補 `timings` 欄位;
+      `handleNonStreamResponse` 解析 `data.timings` 傳給 `onComplete`
+      (summary 呼叫實際 completion tokens 的來源)
+- [ ] `summarize.ts`:`summarizeMessages` 回傳 `string` → `{ content: string;
+      tokens: number | null }`(tokens = 回應的實際 completion tokens;
+      server 沒回 → null → 成功判定改 `byteLen(content)` 代入)
+- [ ] `compaction-policy.ts`:`estimateTokens` / `estimateApiMessageTokens`
+      文字部分(content / toolCalls / reasoning / attachment text / PDF text)
+      char/4 → **UTF-8 byte 數**;image 1000 / audio-video 3000 不變
+- [ ] 超標機制(共用):成功判定式(mode 特定,§02-6)→ 重發同一 request,
+      總嘗試次數 = `contextSummaryMaxAttempts`(**新共用設定**,預設 3;
+      1 = 總共一次;≤ 0 = 無限;registry validator 允許 0)→ 仍超 →
+      gate 問 user(同 maxTurns/tool 確認機制)
+- [ ] `AgenticGates`:新增 compaction-decision gate
+      (`requestCompactionDecision` / `resolveCompactionDecision` /
+      `getPendingCompactionDecision`,同 requestContinue 的 Promise + pending
+      state 模式;abort = skip)
+- [ ] `agenticStore` / `chatStore`:public wrapper(request/resolve/getPending)
+      + `compactConversation` / `compactBetweenTurns` 接:觸發檢查(mode 特定)
+      → plan(mode 特定)→ summarize → 成功判定/重試/gate(共用);
+      手動路徑(Compact now / Re-summarize / 斷點後移)同走此流程
+- [ ] `ChatCompactionDecisionCard.svelte`:確認卡片(與 agentic continue 卡片
+      同風格):顯示這次壓完的實際數 vs mode 目標 + [使用這次壓完] [重壓]
+      [這次不壓];掛法:in-loop = agentic 訊息內(與 continue 卡片同位);
+      flow 之間 = 訊息列尾端獨立 row
+- [ ] Settings:`contextCompactionMode`(SELECT:`recent-window`(A,**預設**)
+      / `threshold-target`(B),dependsOn: auto)+ dependsOn 鏈(A 欄位 / B 欄位
+      掛 mode;舊 threshold/keepTarget 的 dependsOn auto → mode)+
+      settings-registry-invariants 同步更新
+- [ ] gauge:分母 / 觸發標記跟 active mode 走(04-§3)
+- [ ] unit tests:byte 計數(CJK / ASCII / 附件);成功判定邊界(≤ / >);
+      重試次數(1 / 3 / ≤ 0);summaryTokens null → byteLen
+- [ ] client tests:卡片三選項 resolve gate;abort = skip
+
+#### Mode A — recent-window(pi reference)
+
+- [ ] 新設定(mode=A 才顯示):`contextMaxContextOverride`(INPUT,0 = 關;
+      有效視窗 = min(n_ctx, override);只用於裁切決策)、
+      `contextKeepRecentTokens`(INPUT,預設 20000)
+- [ ] `compaction-policy.ts`:新增 `planCompactionRecentWindow(path, opts)`
+      (pi walk:從最後往回加 byte 數、≥ keep 停;切在交叉點以右最近合法切點;
+      沒有 → 最右合法切點(尾端 tool 保留其前 ass);未達 → null;
+      **A 不產生空 kept**;I5 / minSummarize 檢查)
+- [ ] 觸發式(A):`lastPrompt > min(n_ctx, override) − keepRecentTokens`;
+      `window − keep ≤ 0` → auto 永不觸發(手動不受影響)
+- [ ] 成功判定式(A):`headBytes + (summaryTokens ?? byteLen) + keptBytes ≤
+      window − keepRecentTokens`
+- [ ] unit tests:下限停止;交叉點 = tool → 保留其前 ass 整輪;交叉點 =
+      user/assistant;未達 → null;A 不產生空 kept;I5(minKeptMessages /
+      minKeptUserTurns);minSummarize
+
+#### Mode B — threshold-target(v3 + N6)
 
 - [ ] `compaction-policy.ts` `computeCompactionBudget`:`keepBudgetTokens =
       floor((contextCompactionThreshold − contextKeepTargetPercent) / 100 × nCtx)`
       (threshold ≤ keepTarget → 0)——移除 summaryReserve(× 1.5)與 10% floor;
       `computeSummaryMaxTokens` 不再進 budget(只留在 summary 呼叫的 max_tokens)
-- [ ] `estimateTokens` / `estimateApiMessageTokens`:文字部分(content / toolCalls /
-      reasoning / attachment text / PDF text)char/4 → **UTF-8 byte 數**
-      (保守上限:切點 fit 偏向「多留」);image 1000 / audio-video 3000 不變
-- [ ] `chat.service.ts`:`ApiChatCompletionResponse` 補 `timings` 欄位;
-      `handleNonStreamResponse` 解析 `data.timings` 傳給 `onComplete`
-      (summary 呼叫實際 completion tokens 的來源)
-- [ ] `summarize.ts`:`summarizeMessages` 回傳 `string` → `{ content: string;
-      tokens: number | null }`(tokens = 回應 timings 的 completion tokens;
-      server 沒回 → null → 成功判定改 `byteLen(content)` 代入)
-- [ ] 成功判定 + 重試迴圈(compactConversation / compactBetweenTurns / 手動
-      re-summarize 共用):`headBytes + (summaryTokens ?? byteLen(summary)) ≤
-      keepTarget% × n_ctx`;超標 → 重發同一 request,總嘗試次數 =
-      `contextSummaryMaxAttempts`(新設定,預設 3;1 = 總共一次;≤ 0 = 無限;
-      registry 需要允許 0 的 validator)
-- [ ] `AgenticGates`:新增 compaction-decision gate
-      (`requestCompactionDecision` / `resolveCompactionDecision` /
-      `getPendingCompactionDecision`,同 requestContinue 的 Promise + pending
-      state 模式;abort = skip)
-- [ ] `agenticStore`:public wrapper(request/resolve/getPending)+
-      `compactBetweenTurns` 接成功判定/重試/gate
-- [ ] `chatStore.compactConversation`:接成功判定/重試/gate
-- [ ] `ChatCompactionDecisionCard.svelte`:確認卡片(與 agentic continue 卡片
-      同風格):顯示當前 compact 完的 token 數(head + summary,實際值/byte 數)
-      vs keepTarget% 目標 + [使用這次壓完] [重壓] [這次不壓];
-      掛法:in-loop = agentic 訊息內(與 continue 卡片同位);
-      flow 之間 = 訊息列尾端獨立 row
-- [ ] unit tests:byte 計數(CJK / ASCII / 附件);budget 簡化公式;
-      成功判定邊界(≤ / >);重試次數(1 / 3 / ≤ 0);summaryTokens null → byteLen
-- [ ] client tests:卡片三選項 resolve gate;abort = skip
+- [ ] 觸發式(B):`lastPrompt > n_ctx × threshold%`
+- [ ] 成功判定式(B):`headBytes + (summaryTokens ?? byteLen) ≤
+      keepTarget% × n_ctx`
+- [ ] unit tests:budget 簡化公式;既有 planCompaction 測試(上限 / 空 kept)
+      維持
 
-✅ 驗收:長對話(262K 級)自動壓縮真的會發生;超標場景(小 keepTarget)走
-重試 → gate 三選項;無 cmp 對話行為不變。
+✅ 驗收:
+- Mode A(預設):長對話(262K 級)自動壓縮真的會發生,最近 ~keepRecent
+  (byte 數)原樣保留(巨幅 tool result → 保留整個 turn),壓完總量低於觸發點;
+  超標場景(小 window / 大 keep)走重試 → gate 三選項;無 cmp 對話行為不變。
+- Mode B:同 v3 原驗收(長對話自動壓縮發生;小 keepTarget 超標走重試 →
+  gate;無 cmp 不變)。
+- 切 mode 不影響既有 cmp 節點;inspector / 手動操作兩 mode 皆可用。
 
 ### N6 — split 切允許空 kept（使用者要求 2026-10-16，已實做、待編譯確認）
 

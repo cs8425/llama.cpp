@@ -161,7 +161,41 @@ Split user-message span (one span exceeds budget):
 > Pi 規範中的 BashExecution / custom_message / branch_summary 在我們
 > 的型別系統中沒有對應物;上表即本專案的完整合法集合。
 
-### 3.3 選點演算法(兩階段,優先邊界切;v3:budget = threshold − keep target)
+### 3.3 選點演算法(雙 mode;A = recent-window / B = threshold-target)
+
+兩種可選 mode(`contextCompactionMode`,2026-10-17 使用者定稿,**預設 = A**)。
+共用:合法切點(I4)、安全下限(I5、minSummarizeTokens)、計數規則(§3.4);
+差異:觸發公式(§6)、budget/停止規則、成功判定式(§6)。
+
+#### 3.3.1 Mode A — recent-window(pi reference;下限:「至少留最近 ~keepRecentTokens」)
+
+```
+keep   = contextKeepRecentTokens(使用者設定)
+window = min(model n_ctx, contextMaxContextOverride)   # override = 0 → n_ctx
+
+valid(j) = path[j].role ∈ {user, assistant}
+
+1. 從最後一則往回加算 per-message count(byte 數,§3.4),
+   加到 ≥ keep 停(交叉點 i)
+2. 切在交叉點**以右最近**的 valid 切點;
+   沒有(尾端 tool result 自己就跨過)→ **最右 valid 切點**
+   (保留該 tool 之前的 ass(tool_calls) + 其 tool results)
+3. 全程未達(整個 path < keep)→ null(不壓)
+4. 對結果檢查:
+   - summarize 區 count < minSummarizeTokens(2k)→ null
+   - I5:kept.length ≥ M(`contextKeepMinMessages`,預設 0);
+     切點落在 user 訊息上 → kept user 數 ≥ N(`contextKeepMinUserTurns`,預設 4)
+```
+
+- **A 不會產生空 kept**:kept 恆 ≥1 則、以 user/assistant 開頭
+  (交叉點本身或所在 turn)。
+- A 的 budget 是**下限**(target):kept ≥ keep(byte 數,通常略超);
+  上限由成功判定式(§6)保證(壓完總量 ≤ window − keep → 不重觸發)。
+- 典型獲益場景:巨幅 tool result——往回加算在交叉點停、切點落在該 tool
+  result **之後**的 assistant(或尾端 tool 自己跨過時保留整個 turn),
+  最近 tool 交換**原樣保留**。
+
+#### 3.3.2 Mode B — threshold-target(v3;上限:「kept ≤ budget」)
 
 ```
 budget = keepBudgetTokens = (contextCompactionThreshold% − contextKeepTargetPercent%) × n_ctx
@@ -219,10 +253,18 @@ valid(j) = path[j].role ∈ {user, assistant}
               + byteLen(reasoningContent)
 ```
 
+3. **不做派生比例**(2026-10-17 使用者確認):per-message 沒有 API 實際值
+   (API 只回 whole-prompt / response 層級的 token 數)→ 一律 byte 數;
+   **不**用 `prompt_n / totalBytes` 反推每則成本。後果(接受、記錄):
+   mode A 的 `keepRecentTokens` 對照的是 byte 加算——CJK 下實際保留的
+   token 數 ≈ 設定值 / 3–8(該設定實際是 byte budget);觸發公式
+   `window − keepRecentTokens` 混 token 尺度(window)與 byte 尺度(keep)
+   (CJK 下觸發點實際偏高,即較晚才壓)。
+
 > v1 的 char/4(`len/4`)作廢:對 CJK 低估 ~1.5–4×,且與舊 budget 公式疊加
 > 讓行為不可預測(06-status §3.20)。原 Phase 3 規劃的「token 估計校準:
-> 用 `timings.prompt_n` 反推每則成本」不再需要——v3 在兩個需要精確的決策點
-> (觸發、成功判定)直接用 API 實際值,切點用 byte 數。
+> 用 `timings.prompt_n` 反推每則成本」不再需要——雙 mode 在需要精確的決策點
+> (觸發、成功判定)直接用 API 實際值,切點 / per-message 用 byte 數。
 
 ## 4. 邊界情境行為表
 

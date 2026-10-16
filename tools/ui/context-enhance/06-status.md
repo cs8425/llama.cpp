@@ -3,12 +3,24 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**v3 重設計已確認、未實做**（2026-10-16）——「自動壓縮
+> **恢復點（最新）**：**雙 mode 壓縮規格定稿、未實做**（2026-10-17）——
+> 同時保留兩種作法、user 選 mode、**default = A（recent-window / pi
+> reference）**：A = 至少留最近 `keepRecentTokens` 原樣（下限：從最後往回
+> 加到 ≥ 停、尾端 tool 跨越留其前 ass）+ 觸發 `window − keep`（window =
+> min(n_ctx, `contextMaxContextOverride`）；B = v3 + N6（kept ≤
+> （threshold−keepTarget）%、成功判定 head+summary ≤ keepTarget%、允許空
+> kept）。計數 = API 有實際 token 數就用（trigger = prompt_n、summary =
+> completion tokens）、msg / API 無數用 byte、**不做派生比例**。A 超標
+> 沿用 B 的重試邏輯（同一 `contextSummaryMaxAttempts` + gate 卡片，只有
+> 成功判定式不同 → 該設定從 B 專用變**共用**）。02/03/04/05 已同步
+> （決策見 §3.22）。下一步 = 使用者 N6 編譯/測試確認 → 實做雙 mode
+> （共用 → A → B）→ 使用者 check + unit 驗證。
+>
+> 此前恢復點：**v3 重設計已確認、未實做**（2026-10-16）——「自動壓縮
 > 從未觸發」根因已定位（舊 budget 公式把 keepBudget 壓死在 10% floor，
 > planCompaction → null、auto 路徑靜默，分析見 §3.20），修正設計（實際 token
 > 計數 + compact 成功判定 + 超標重試/user gate）經使用者 A–E 五點確認；
-> 文件 02/03/05 已同步 v3；下一步 = 使用者確認文件 → 實做 → 使用者自行
-> check + unit 驗證。
+> 文件 02/03/05 已同步 v3；v3 設計現為雙 mode 規格的**方法 B**（§3.22）。
 >
 > 此前恢復點：**N1–N5 全部完成並確認**（2026-07-22）——context
 > enhance 的「下一輪增強」全數落地；剩：Phase 1 的 5.8 手動驗收（見 §4
@@ -39,7 +51,7 @@
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
-| v3 重設計 — 實際 token 計數 + compact 成功判定 + 超標重試/gate（§3.20） | 🚧 設計已確認（2026-10-16），未實做 |
+| 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22） | 🚧 規格定稿（2026-10-17），未實做；02/03/04/05 已同步 |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
 | 下一輪 — 5 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式 / N5 summary mode 設定，§5c） | ✅ **N1–N5 全部完成並確認**：N1（§3.13：改 n_ctx × %）；N2（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；N3（§3.15：手動壓縮 Stop 鍵）；N4（§3.18：prefix-stable default + 附件原樣送 + reasoning 跟隨主送出開關；第一輪 test bug 已修、重跑全綠）；N5（§3.19：`contextSummaryMode` SELECT 設定） |
 | Context Inspector UI 修復（水平溢出 + header 重疊，§2s/§3.16） | ✅ 完成並確認（第 3 輪 `w-full` mobile 寬度修復已通過手動驗證） |
@@ -1063,7 +1075,7 @@ auto on / in-loop on / threshold 50%。
 - **E**：**沒有 API 回傳準確 token 數時，直接用 byte 數**（UTF-8），
   不做 char/4 自己估算。
 
-**v3 設計摘要**（詳見 02-§3.3/§3.4/§6、03-§3/§4.2/§4.4、05-v3 清單）：
+**v3 設計摘要**（詳見 02-§3.3/§3.4/§6、03-§3/§4.2/§4.4、05-雙 mode 清單的 Mode B 部分；v3 現為雙 mode 的方法 B，見 §3.22）：
 - token 計數：API 有實際值用實際值（觸發 = prompt_n；成功判定 = summary 回應
   的 completion tokens）；沒有 → UTF-8 byte 數（保守上限）。
 - 裁切：budget = keepTarget% × n_ctx（裸值）；算法不變。
@@ -1079,19 +1091,20 @@ auto on / in-loop on / threshold 50%。
 - 作廢：原 Phase 3「token 估計校準（prompt_n 反推每則成本）」——v3 在兩個
   需要精確的決策點直接用 API 實際值，切點用 byte 數，不再需要。
 
-**未決（等使用者決定）**：切點 fit 檢查的計數單位。E 的 byte 數對 CJK
-≈ 8× 實際 tokens（本案例實測：262K 實際 tokens vs 175K char/4 估計 →
-bytes ≈ 8× tokens）。以使用者設定（threshold 50 / keep 40）算：
-budget = 10% × 262,144 = **26,214 bytes ≈ ~3.2K 實際 tokens**；而最後一個
-agentic turn（含大 tool result）≈ 640K+ bytes（~80K 實際 tokens）→
-**純 byte 數下 planCompaction 仍會回 null，原問題（自動壓縮不觸發）未解**。
-選項：(a) fit 檢查用 prompt_n 反推的實際 tokens（有 timings 時），
-byte 數只在無 timings 時 fallback（符合 E 的精神：API 有數用 API 數）；
-(b) 純 byte 數（字面 E，接受「含大 tool result 的 CJK agentic 對話不壓」的後果）。
+**未決（等使用者決定）→ 已決（2026-10-17，使用者 Q2）**：切點 / per-message 的
+計數單位。決定：**API 有實際 token 數就用**（觸發 = `prompt_n`、成功判定 =
+summary 的 completion tokens）；**msg 不是 API 來的 / API 缺失 token
+數資料改用 byte**（per-message 沒有 API 實際值 → byte 數）；**不做派生比例**
+（不用 `prompt_n / totalBytes` 反推）。後果（接受並記錄）：mode A 的
+`keepRecentTokens` 對照 byte 加算（CJK 下實際保留 tokens ≈ 設定 / 3–8，
+該設定實際是 byte budget）；觸發式 `window − keepRecentTokens` 混 token 尺度
+（window）與 byte 尺度（keep）（CJK 下觸發點實際偏高，即較晚才壓）。
 
-**狀態**：設計已確認（budget 公式為 A 第二輪版）；02/03/05 文件已同步；**未實做**。實做清單見 05-v3；
-完成後使用者自行 `npm run check` + unit（compaction-policy / summarize / 
-context-builder）+ client（settings-registry-invariants + 新卡片測試）驗證。
+**狀態**：v3 設計已確認（budget 公式為 A 第二輪版）；v3 現為雙 mode 規格的
+**方法 B**（§3.22，2026-10-17 定稿）；02/03/04/05 已同步；**未實做**。
+實做清單見 05-雙 mode；完成後使用者自行 `npm run check` + unit
+（compaction-policy / summarize / context-builder + 新 planCompactionRecentWindow）
++ client（settings-registry-invariants + 卡片測試 + 回歸）驗證。
 
 ### 3.21 N6：split 切允許空 kept（使用者要求 2026-10-16，未實做）
 
@@ -1134,6 +1147,69 @@ boundary 切維持原規則（整個最後一個 turn 要放得下 budget）。
 **狀態**：使用者已確認（D1 簡化版 + D2）；02/03/04/05 文件已同步；
 **程式碼 + tests 已實做（2026-10-16），待使用者編譯/測試確認**（清單見
 05-N6；驗證指令見 §4 最新條目）。確認全綠後勾選 05-N6 清單。
+
+### 3.22 雙 mode 壓縮：recent-window（A，預設）+ threshold-target（B = v3+N6）（規格定稿 2026-10-17，未實做）
+
+**背景**：§3.20 的 v3 設計（budget 公式修正 + 實際 token 計數 + 成功判定/
+重試/gate）已確認未實做；使用者另引入 pi reference 的切點（下限：從最後
+往回加到 ≥ keepRecentTokens 停，保留最近窗口原樣），並要求**同時保留兩種
+作法、user 選 mode**。
+
+**使用者決策（2026-10-17，Q1–Q3）**：
+- **Q1**：預設 mode = **A（recent-window）**。
+- **Q2**：計數 = **能從 API 拿到 token 數就用**（觸發 = `prompt_n`；成功判定
+  = summary 回應的 completion tokens）；**msg 不是 API 來的 / API 缺失 token
+  數資料改用 byte**（per-message 沒有 API 實際值 → byte）；**不做派生比例**
+  （不用 `prompt_n / totalBytes` 反推）。後果（接受、記錄）：A 的
+  `keepRecentTokens` 對照 byte 加算（CJK 下實際保留 tokens ≈ 設定 / 3–8，
+  該設定實際是 byte budget）；觸發式混 token 尺度（window）與 byte 尺度（keep）
+  （CJK 下觸發點實際偏高，即較晚才壓）。
+- **Q3**：A 壓完成功 = `contextTokens（壓完後 context） ≤ window −
+  keepRecentTokens`（即低於觸發點 → 不重觸發）；**失敗用 B 的重試邏輯**（同一
+  `contextSummaryMaxAttempts` + gate 卡片）→ 超標機制**兩 mode 共用**，只有
+  成功判定式不同；`contextSummaryMaxAttempts` 從「B 專用」變**共用**。
+
+**規格摘要**（詳見 02-§3.3/§3.4/§6、03-§2/§3/§4.2/§4.4、04-§3/§4、
+05-雙 mode 清單）：
+- 新設定 `contextCompactionMode`（SELECT：`recent-window`（A，**預設**）/
+  `threshold-target`（B），dependsOn: `contextAutoCompaction`）；切 mode 不影響
+  既有 cmp 節點（mode 只決定往後的裁切決策；inspector / 手動操作 mode-agnostic）。
+- **Mode A**：設定 `contextMaxContextOverride`（0 = 關；有效視窗 =
+  `min(n_ctx, override)`；只用於裁切決策、不硬限送出）+ `contextKeepRecentTokens`
+  （預設 20000）。觸發 `lastPrompt > window − keep`（`window − keep ≤ 0` →
+  auto 永不觸發、手動不受影響）。切點（pi walk）：從最後往回加 byte 數、
+  ≥ keep 停；切在交叉點**以右最近**合法切點；沒有（尾端 tool 自己跨過）→
+  最右合法切點（保留其前 ass(tool_calls) + tool results）；未達 → 不壓；
+  **A 不產生空 kept**（kept 恆 ≥1 則、以 user/assistant 開頭）。成功判定
+  `headBytes + (summaryTokens ?? byteLen) + keptBytes ≤ window − keep`。
+- **Mode B**（= v3 + N6）：觸發 `lastPrompt > n_ctx × threshold%`；budget =
+  `（threshold − keepTarget）% × n_ctx`（threshold ≤ keepTarget → 0 → auto
+  永不觸發）；切點 = 現行 `planCompaction()`（兩階段上限 + N6 空 kept +
+  I4/I5）；成功判定 `headBytes + (summaryTokens ?? byteLen) ≤
+  keepTarget% × n_ctx`（kept 不進判定）。
+- **共用**：三個觸發點 / contextTokens 來源（prompt_n 優先、否則 byte 數）/
+  per-message byte 計數（image 1000、audio-video 3000 不變）/ cmp 節點 /
+  builder / I1–I7 / inspector / 手動操作 / minKept×2 / minSummarizeTokens /
+  summary maxTokens% / summaryMode / prompt / fail-open / 超標機制
+  （成功判定 → 重試 × maxAttempts → gate 卡片三選項，abort = skip；手動路徑
+  同走此流程）。
+- **Settings dependsOn 鏈**：auto → mode → {A: override/keep} / {B:
+  threshold/keepTarget}；舊 threshold/keepTarget 的 dependsOn auto → mode
+  （registry invariants 測試需同步）。
+- **Gauge**：分母跟 mode 走（A = 有效視窗、觸發標記 = window − keep；
+  B = n_ctx、觸發標記 = threshold%）。
+- **複雜度評估**：中等——mode = 兩個呼叫點上的策略選擇（觸發公式 + planner +
+  壓後處理），共用同一套純核心；無資料模型改動、無 UI 重複（除 settings
+  欄位）；風險 = dependsOn 三層鏈（registry 測試抓）、A 的單位一致性
+  （Q2 已解：byte 加算 + 記錄後果）、兩個 planner 的長期維護（皆小純函式、
+  回同一 CompactionPlan 型別）。
+
+**狀態**：規格定稿（Q1–Q3）；02/03/04/05 已同步；**未實做**。實做順序：
+共用基礎（timings 解析 / `{content, tokens}` / byte 計數 / 重試+gate /
+settings 鏈 / 卡片）→ A（planner + 觸發/判定 + gauge）→ B（budget 公式 +
+觸發/判定）。完成後使用者跑 `npm run check` + unit（compaction-policy /
+summarize / context-builder + 新 planCompactionRecentWindow）+ client
+（settings-registry-invariants + 卡片測試 + 回歸）驗證。
 
 ## 4. 驗證狀態（目前停在這）
 
@@ -1318,8 +1394,10 @@ boundary 切維持原規則（整個最後一個 turn 要放得下 budget）。
 - **N5 ✅ 完成並確認**（變更見 §3.19）：使用者跑 `npm run check` + unit
   `summarize`（**16/16**：原 14 + 新 2）+ client
   `settings-registry-invariants`（全 key 迴綠、含新 `contextSummaryMode`）全綠。
-- **下一步**：① **N6 編譯/測試確認**（見下方最新條目）；② **v3 實做**
-（清單見 05-v3、設計見 §3.20）；③ Phase 1 的 5.8 手動驗收（見上方清單）；
+- **下一步**：① **N6 編譯/測試確認**（見下方最新條目）；② **雙 mode 實做**
+（清單見 05-雙 mode、設計見 §3.22；順序：共用基礎（timings /
+{content,tokens} / byte 計數 / 重試+gate / settings 鏈 / 卡片）→ A → B）；
+③ Phase 1 的 5.8 手動驗收（見上方清單）；
 ④ Phase 3 可選後續（規劃見 05-§1，含 summary 獨立 model / endpoint）。
 - **N6（split 切允許空 kept）已實做、待編譯確認**（變更見 §3.21）：
   policy 階段 2 允許 `cutIndex = path.length`（空 kept、`firstKeptMessageId`

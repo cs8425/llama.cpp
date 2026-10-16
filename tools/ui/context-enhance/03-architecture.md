@@ -9,7 +9,7 @@
 src/lib/services/context/            ← 新增,純函式、無 store 依賴、可獨立單測
 ├── types.ts              # LlmContext、CompactionPlan、ContextBuildResult
 ├── context-builder.ts    # buildLlmContext(path) —— 唯一 choke point
-├── compaction-policy.ts  # planCompaction(path, budget) / estimateTokens(msg)
+├── compaction-policy.ts  # planCompaction(B) / planCompactionRecentWindow(A) / estimateTokens(byte 數)
 ├── summarize.ts          # buildSummaryTranscript() / summarizeMessages()
 └── index.ts
 
@@ -17,10 +17,10 @@ src/lib/services/database.service.ts ← 新增 createCompactionMessage()
 src/lib/stores/chat/index.svelte.ts  ← 新增 compactConversation()、inspector 資料提供
 src/lib/stores/agentic/index.svelte.ts ← flow 開始前改走 builder
 src/lib/services/chat.service.ts     ← sendMessage / preEncode 改走 builder
-src/lib/stores/agentic/gates.svelte.ts ← (v3) 新增 compaction-decision gate(超標確認,同 requestContinue 模式)
-src/lib/services/chat.service.ts     ← (v3) 非 streaming 回應解析 timings(summary 實際 token 數)
-components: ChatMessageCompaction.svelte、DialogContextInspector.svelte、(v3) ChatCompactionDecisionCard.svelte(超標確認卡片,與 agentic 卡片同風格)
-settings: SETTINGS_KEYS + SETTINGS_REGISTRY 新 key、(v3) contextSummaryMaxAttempts
+src/lib/stores/agentic/gates.svelte.ts ← (雙 mode) 新增 compaction-decision gate(超標確認,兩 mode 共用,同 requestContinue 模式)
+src/lib/services/chat.service.ts     ← (雙 mode) 非 streaming 回應解析 timings(summary 實際 token 數)
+components: ChatMessageCompaction.svelte、DialogContextInspector.svelte、(雙 mode) ChatCompactionDecisionCard.svelte(超標確認卡片,與 agentic 卡片同風格)
+settings: SETTINGS_KEYS + SETTINGS_REGISTRY 新 key、(雙 mode) contextCompactionMode / contextMaxContextOverride / contextKeepRecentTokens / contextSummaryMaxAttempts(共用)
 ```
 
 ### 為什麼 policy 與 builder 分開
@@ -76,22 +76,32 @@ export async function buildLlmContext(
 ): Promise<ContextBuildResult>;
 
 // services/context/compaction-policy.ts
-export function estimateTokens(msg: DatabaseMessage): number;
+export function estimateTokens(msg: DatabaseMessage): number;  // byte 數(文字)+ flat(附件,§02-3.4)
 export function planCompaction(
   path: DatabaseMessage[],
   budget: { keepBudgetTokens: number;
             minKeptUserTurns: number;   // 邊界切:kept 區 user 訊息下限
             minKeptMessages: number;    // split 切:kept 區訊息下限(預設 0 = 允許空 kept)
             minSummarizeTokens: number }
-): CompactionPlan | null;
+): CompactionPlan | null;               // mode B:上限(kept ≤ budget,§02-3.3.2)
+export function planCompactionRecentWindow(
+  path: DatabaseMessage[],
+  opts: { keepRecentTokens: number;     // 下限目標(byte 加算,§02-3.3.1)
+          minKeptUserTurns: number;     // 切點落 user 訊息時:kept user 數下限
+          minKeptMessages: number;      // kept 訊息數下限(預設 0)
+          minSummarizeTokens: number }
+): CompactionPlan | null;               // mode A:下限(pi walk;A 不產生空 kept)
 
 // services/context/summarize.ts
 export function buildSummaryTranscript(msgs: DatabaseMessage[]): string;
 export async function summarizeMessages(
   plan: CompactionPlan,
   model: string | null,
-  signal?: AbortSignal
-): Promise<string>;   // 非 streaming ChatService.sendMessage
+  signal?: AbortSignal,
+  options?: SummarizeOptions   // maxTokens / mode / prompt / excludeReasoning(N4/N5 已實做)
+): Promise<{ content: string; tokens: number | null }>;
+// tokens = 回應 timings 的實際 completion tokens(server 沒回 → null;
+// 成功判定改 byteLen(content) 代入,§02-3.4)
 ```
 
 `buildLlmContext` 內部 = 「找最後一筆 cmp → 決定窗口 → 逐則
@@ -131,11 +141,11 @@ transcript,摘要忠度更高。實做時兩點已定(使用者 2026-07-22,D1/D2
 | `ChatService.sendMessage`(`chat.service.ts:1022`) | `normalizeMessagesForApi(messages)` 後直接 POST | 入參是 DB path 時,先 `buildLlmContext(path)` 取代 normalize;入參已是 `ApiChatMessageData[]`(agentic session)時維持原路徑。**簽名不變** |
 | `ChatService.preEncode`(`chat.service.ts:840`) | 同上 | 同上 —— **必改**,否則 KV 預熱與實際送出不一致 |
 | `agenticStore.runAgenticFlow`(`agentic/index.svelte.ts:304,358`) | `normalizeMessagesForApi(messages)` 一次 | 改 `buildLlmContext(messages)`(取 `.messages`);迴圈內續加 `sessionMessages` 的邏輯不動 |
-| `agenticStore.executeAgenticLoop` turn 邊界(`agentic/index.svelte.ts:432` 迴圈內) | — | (Phase 2)每 turn 落 DB 後、下一 turn 前:plan → summarize → 成功判定/重試/gate(v3)→ 建 cmp → 以 builder 重建 `sessionMessages` → 續跑;失敗即跳過(fail-open) |
+| `agenticStore.executeAgenticLoop` turn 邊界(`agentic/index.svelte.ts:432` 迴圈內) | — | (Phase 2)每 turn 落 DB 後、下一 turn 前:觸發檢查(mode 特定,§02-6)→ plan(A: planCompactionRecentWindow / B: planCompaction)→ summarize → 成功判定/重試/gate(共用,判定式 mode 特定)→ 建 cmp → 以 builder 重建 `sessionMessages` → 續跑;失敗即跳過(fail-open) |
 | `chatStore.triggerPreEncode`(`stores/chat/index.svelte.ts:1402`) | 組 `[...allMessages, assistant]` 後呼叫 preEncode | 不動(builder 在 preEncode 內部) |
 | `chatStore.streamChatCompletion`(`:799`) | 直接傳 `allMessages` | **不動** —— 組裝統一在 service 層,store 不感知 compaction |
 | Inspector(新增) | — | `buildLlmContext(conversationsStore.activeMessages)` |
-| `ChatService.handleNonStreamResponse`(`chat.service.ts:1481`)(v3) | 非 streaming 回應不解析 `timings`(`onComplete` 收到 `undefined`) | 解析 `data.timings` 傳給 `onComplete`;`ApiChatCompletionResponse` 補 `timings` 欄位——summary 實際 completion tokens 的來源(成功判定用) |
+| `ChatService.handleNonStreamResponse`(`chat.service.ts:1481`)(雙 mode) | 非 streaming 回應不解析 `timings`(`onComplete` 收到 `undefined`) | 解析 `data.timings` 傳給 `onComplete`;`ApiChatCompletionResponse` 補 `timings` 欄位——summary 實際 completion tokens 的來源(成功判定用) |
 
 > 關鍵可維護性論點:**store 層完全不知道 compaction 的存在**
 > (除了「觸發 + 建立節點」的協調邏輯)。payload 組裝只有一個入口,
@@ -162,15 +172,21 @@ user 按送出
 
 ```
 onFlowComplete(且 !isChatLoading && !agenticStore.isRunning)
-  → lastPrompt > n_ctx × threshold% ?
-      → planCompaction(path, budget = (threshold − keepTarget)% × n_ctx)
-          → null? 結束(不壓)
-      → summarizeMessages(plan)      (UI:「Compacting context…」)
-          → 失敗? toast,結束(不壓)
-      → 成功判定(v3):headBytes + summaryTokens ≤ keepTarget% × n_ctx ?
-          → 否 → 重發同一 request(contextSummaryMaxAttempts,預設 3 次總計;≤0 = 無限)
-                → 仍超 → gate 問 user:[使用這次壓完 / 重壓 / 這次不壓]
-                  (use it → 繼續;retry → 嘗試次數重新計算後重跑;skip → 結束不壓)
+  → 觸發檢查(mode 特定,§02-6):
+      A: lastPrompt > window − keepRecentTokens ?(window = min(n_ctx, override))
+      B: lastPrompt > n_ctx × threshold% ?
+      → 未達? 結束
+  → plan = mode A: planCompactionRecentWindow(path, keep)
+           mode B: planCompaction(path, budget = (threshold − keepTarget)% × n_ctx)
+      → null? 結束(不壓)
+  → summarizeMessages(plan)      (UI:「Compacting context…」)
+      → 失敗? toast,結束(不壓)
+  → 成功判定(mode 特定,§02-6):
+      A: headBytes + summaryTokens + keptBytes ≤ window − keepRecentTokens ?
+      B: headBytes + summaryTokens ≤ keepTarget% × n_ctx ?
+      → 否 → 重發同一 request(contextSummaryMaxAttempts,預設 3 次總計;≤0 = 無限)
+            → 仍超 → gate 問 user:[使用這次壓完 / 重壓 / 這次不壓]
+              (use it → 繼續;retry → 嘗試次數重新計算後重跑;skip → 結束不壓)
       → DatabaseService.createCompactionMessage({
             convId, parentId: 路徑最後一則.id,
             content: summary,
@@ -201,11 +217,11 @@ onFlowComplete(且 !isChatLoading && !agenticStore.isRunning)
 
 ```
 executeAgenticLoop turn k 結束(tool results 已落 DB + activeMessages)
-  → turnTimings.prompt_n > n_ctx × threshold% ?
-      → planCompaction(該 conv 的 DB 路徑)   # 非 active conv 時從 DB 抓
+  → 觸發檢查(mode 特定):A: prompt_n > window − keep ? B: prompt_n > n_ctx × threshold% ?
+      → plan(mode A: planCompactionRecentWindow / mode B: planCompaction,該 conv 的 DB 路徑)
           → null / 失敗? 續跑
       → summarize(plan)  (UI:「Compacting context…」,signal = flow abort)
-      → 成功判定/重試/gate(v3):headBytes + summaryTokens ≤ keepTarget% × n_ctx ?
+      → 成功判定/重試/gate(共用;判定式 mode 特定,§02-6)
           超標 → 重試(contextSummaryMaxAttempts)→ 仍超 → gate 問 user
           (flow 暫停等 user,同 maxTurns;abort = skip)
       → createCompactionMessage(parent = 路徑最後一則)

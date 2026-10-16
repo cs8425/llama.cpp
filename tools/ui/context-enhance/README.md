@@ -57,13 +57,17 @@
    span 前半段進 summary,後半段(最近 tool 交換)保留;連最近 tool 交換都
    放不下時,切點落在**最後一則訊息之後**(空 kept,全部壓縮;
    N6,2026-10-16,見 06-status §3.21)。
-5. **自動觸發**:flow 之間(用 server `timings.prompt_n` 對照
-   `n_ctx × threshold%`),以及 **agentic 迴圈 turn 之間**(「兩次 user 訊息
-   之間」的 context 爆炸就發生在迴圈內,只在 flow 結束後檢查來不及;
-   觸發點皆非 streaming 中)。**v3**:壓縮後用實際 token 數做成功判定
-   (`system head + summary ≤ keepTarget% × n_ctx`),超標則重試(次數可設,
-   預設 3 共計)再交給 user 決(使用/重壓/跳過,同 maxTurns 卡片機制)。
-   設計與根因分析見 06-status §3.20。
+5. **自動觸發**:flow 之間(用 server `timings.prompt_n` 對照 mode 觸發點),
+   以及 **agentic 迴圈 turn 之間**(「兩次 user 訊息之間」的 context 爆炸就
+   發生在迴圈內,只在 flow 結束後檢查來不及;觸發點皆非 streaming 中)。
+   **雙 mode(2026-10-17 定稿,預設 A)**:A = recent-window(pi reference):
+   觸發 `window − keepRecentTokens`(window = min(n_ctx, maxContextOverride))、
+   切點 = 從最後往回加 byte 數到 ≥ keep(尾端 tool 跨越留其前 ass)、成功判定
+   `head + summary + kept ≤ window − keep`;B = threshold-target(v3 + N6):
+   觸發 `threshold% × n_ctx`、kept ≤ (threshold−keepTarget)%、成功判定
+   `head + summary ≤ keepTarget%`、允許空 kept。超標(兩 mode 共用)→ 重試
+   (`contextSummaryMaxAttempts`,預設 3 共計)→ user gate(使用/重壓/跳過,
+   同 maxTurns 卡片機制)。設計與根因分析見 06-status §3.20/§3.22。
 6. **Inspector 永遠可用**(不受自動壓縮開關影響):顯示精確的 payload、
    可編輯 summary、可移動保留斷點(含 mid-turn 斷點)、可手動 compact / expand(還原)。
    入口放在 context gauge popup 裡 + 聊天表單 action + 鍵盤快捷鍵。
