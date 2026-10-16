@@ -3,7 +3,16 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**雙 mode 壓縮規格定稿、未實做**（2026-10-17）——
+> **恢復點（最新）**：**N6 第一輪 check 的語法錯已修、待重跑**（2026-10-17）
+> ——使用者跑 `npm run check` 抓到 `context-builder.ts` 5 錯 + unit
+> `context-builder` suite transform 失敗（esbuild `Unexpected ":"`）；根因 =
+> N6 實做時 `keptIndex` 三元運算式漏 `?`（單一語法錯，其餘 4 個 type 錯為
+> `keptIndex` 被推斷成 `boolean` 的連鎖）；已補 `?`（純語法、無行為改動）。
+> 下一步 = 使用者重跑 `npm run check` + unit `context-builder` /
+> `compaction-policy` + client 回歸（清單見 §4 N6 條目）→ 全綠後 N6 完成
+> 並確認 → 實做雙 mode（共用 → A → B，見 §3.22）。
+>
+> 此前恢復點：**雙 mode 壓縮規格定稿、未實做**（2026-10-17）——
 > 同時保留兩種作法、user 選 mode、**default = A（recent-window / pi
 > reference）**：A = 至少留最近 `keepRecentTokens` 原樣（下限：從最後往回
 > 加到 ≥ 停、尾端 tool 跨越留其前 ass）+ 觸發 `window − keep`（window =
@@ -1145,8 +1154,10 @@ boundary 切維持原規則（整個最後一個 turn 要放得下 budget）。
   fail-open 語義（空字串 ≠ 缺欄位），行為不變。
 
 **狀態**：使用者已確認（D1 簡化版 + D2）；02/03/04/05 文件已同步；
-**程式碼 + tests 已實做（2026-10-16），待使用者編譯/測試確認**（清單見
-05-N6；驗證指令見 §4 最新條目）。確認全綠後勾選 05-N6 清單。
+**程式碼 + tests 已實做（2026-10-16）**；第一輪 check 抓到
+`context-builder.ts` 語法錯（`keptIndex` 三元漏 `?`）、已修（2026-10-17，
+見 §4 N6 第一輪）；**待使用者重跑編譯/測試確認**（清單見 05-N6；驗證指令
+見 §4 最新條目）。確認全綠後勾選 05-N6 清單。
 
 ### 3.22 雙 mode 壓縮：recent-window（A，預設）+ threshold-target（B = v3+N6）（規格定稿 2026-10-17，未實做）
 
@@ -1418,6 +1429,15 @@ summarize / context-builder + 新 planCompactionRecentWindow）+ client
   client 回歸 `chat-message-compaction` / `context-inspector` /
   `context-gauge-compaction` / `settings-registry-invariants`。
   全綠 → N6 完成並確認（勾 05-N6 清單、§3.21 狀態改「完成並確認」）。
+- **N6 第一輪**：使用者跑 `npm run check`（**5 錯**，全在
+  `context-builder.ts`）+ unit `context-builder`（suite transform 失敗、
+  0 test）。根因 = N6 實做時 `keptIndex` 三元運算式漏 `?`（`boundaryId ===
+  undefined` 後直接接 true 分支、esbuild 在 `:` 處 `Unexpected ":"`，整檔
+  解析失敗）；其餘 4 個 type 錯（105:32 / 105:73 / 124:26 / 149:25）皆為
+  `keptIndex` 被推斷成 `boolean` 的連鎖。**已修**：補上 `?`（純語法、無行為
+  改動；修正後已逐 case 手工追蹤 `context-builder.test.ts` 全部 15 支與
+  邏輯一致）。待使用者重跑上方 N6 條目的完整指令（check + 2 支 unit +
+  client 回歸 4 支）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 

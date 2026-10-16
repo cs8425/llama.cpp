@@ -98,8 +98,8 @@ export async function buildLlmContext(
 	//   silently dropping "current" messages or duplicating the system prompt.
 	const keptIndex =
 		boundaryId === undefined
-			path.findIndex((message) => message.id === entry.id) + 1
-		: path.findIndex((message) => message.id === boundaryId);
+			? path.findIndex((message) => message.id === entry.id) + 1
+			: path.findIndex((message) => message.id === boundaryId);
 
 	const boundaryValid =
 		boundaryId === undefined || (keptIndex !== -1 && !(head.length > 0 && keptIndex === 0));
