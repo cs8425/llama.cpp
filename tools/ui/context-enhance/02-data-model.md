@@ -150,15 +150,15 @@ Split user-message span (one span exceeds budget):
 > Pi 規範中的 BashExecution / custom_message / branch_summary 在我們
 > 的型別系統中沒有對應物;上表即本專案的完整合法集合。
 
-### 3.3 選點演算法(兩階段,優先邊界切;v3:budget = 裸 keep target)
+### 3.3 選點演算法(兩階段,優先邊界切;v3:budget = threshold − keep target)
 
 ```
-budget = keepBudgetTokens = n_ctx × contextKeepTargetPercent%(user 設定值,例 40)
-        # v3(2026-10-16,使用者確認 A):移除舊的「- summaryReserve(≈ summary
-        # max_tokens × 1.5),下限 n_ctx × 0.1」公式——那是過度設計:summary max 70%
-        # 時 reserve = 105% n_ctx,壓過任何 keep target,budget 恆落 10% floor,
-        # planCompaction 回 null、自動壓縮從未觸發(根因分析見 06-status §3.20)。
-        # (trigger threshold 只決定「何時檢查」,不參與 budget — 見 §6)
+budget = keepBudgetTokens = (contextCompactionThreshold% − contextKeepTargetPercent%) × n_ctx
+        # v3(2026-10-16,使用者確認 A 第二輪):budget = threshold 與 keep target 的差值:
+        # 裁切後總量 = (head + summary) + kept ≤ keepTarget%(成功判定)+ budget(切點)
+        # = threshold% × n_ctx → 不會立刻再觸發(避免連續壓縮)。
+        # 移除舊的「- summaryReserve(× 1.5)、下限 n_ctx × 0.1」公式(過度設計,§3.20);
+        # threshold ≤ keepTarget(設定異常)→ budget = 0 → 永不壓縮。
 
 valid(j) = path[j].role ∈ {user, assistant}
 
@@ -174,12 +174,14 @@ valid(j) = path[j].role ∈ {user, assistant}
 
 - 階段 1 優先的理由:邊界切讓 summary 涵蓋「完整回合」,語義最乾淨;
   split 切是預算逼出來的退路。
-- **threshold 與 keep target 解耦(v3 最終版)**:`threshold` 是純觸發點
-  (ctx 超過這個 % 才檢查,見 §6);budget = **裸的 `contextKeepTargetPercent`%
-  × n_ctx**(user 可自訂,INPUT 10–90)。v3 移除 summaryReserve(summary max × 1.5)
-  與 10% floor——summary 的大小不再「預先保留」,改由 §6 的**事後成功判定**
-  用 API 實際 token 數約束。舊公式 `n_ctx × (1 − threshold%)`(§3.12 已修)與
-  reserve/floor 公式(§3.13/§3.14 曾實做)皆作廢,記錄見 06-status §3.20。
+- **threshold 與 keep target 的分工(v3 最終版)**:`threshold` = 觸發點(ctx
+  超過這個 % 才檢查,見 §6)且是**壓縮後總量的上限**;`keepTarget%` 約束
+  **壓縮代表的大小**(head + summary,成功判定,§6);budget = 兩者差值
+  (kept 區上限,上方公式)。三者關係:head + summary ≤ keepTarget%、
+  kept ≤ (threshold − keepTarget)%、**總量 ≤ threshold% → 不立刻再觸發**。
+  v3 移除 summaryReserve(summary max × 1.5)與 10% floor;舊公式
+  `n_ctx × (1 − threshold%)`(§3.12 已修)與 reserve/floor 公式
+  (§3.13/§3.14 曾實做)皆作廢,記錄見 06-status §3.20。
 - 巨幅單一 user 訊息(開頭就超 budget)會自然落到階段 2
   (user 訊息本身被 summarize),或階段 3(連 split 都放不下)。
 - 巨幅 tool result(例:讀了 1MB 檔案)是 split 切的典型獲益場景:
@@ -291,7 +293,7 @@ onFlowComplete / onComplete(且無 stream 在跑)/ agentic turn 之間:
   if autoCompactionEnabled
      && n_ctx 已知
      && lastPrompt > n_ctx × threshold%            # threshold = 純觸發點(「超過」)
-     && planCompaction(path, budget) 有有效斷點:   # budget = keepTarget% × n_ctx(§3.3)
+     && planCompaction(path, budget) 有有效斷點:   # budget = (threshold − keepTarget)% × n_ctx(§3.3)
         → 執行壓縮:
             1. summarize(max_tokens = summaryMax% × n_ctx,不變)
             2. 成功判定(新):
@@ -316,7 +318,9 @@ onFlowComplete / onComplete(且無 stream 在跑)/ agentic turn 之間:
 - **成功判定**:「壓到多小」用**事後實際數字**判定——`system head + summary ≤
   keepTarget% × n_ctx`。summary 的 token 數是 API 回應的實際值(需要非 streaming
   路徑解析 `timings`,見 03-§3);head 無獨立 API 數,用 byte 數(靜態小文字,
-  誤差可忽略)。**kept 區不進成功判定**——它已由切點(§3.3)約束在 keepTarget% 內。
+  誤差可忽略)。**kept 區不進成功判定**——它已由切點(§3.3)約束在
+  (threshold − keepTarget)% 內;總量 = (head + summary) + kept ≤ threshold%
+  × n_ctx,不會立刻再觸發。
 - **超標處理**:server 有強制 `max_tokens`,summary 本身不會超過它;超標只可能
   來自 summary 真的太長(模型寫太多)→ 重發同一個 request 幾次(stochastic)
   通常可解;仍超則交給 user 決(三選項)。in-loop 時 flow 暫停等 user

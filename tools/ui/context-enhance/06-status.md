@@ -1049,10 +1049,12 @@ auto on / in-loop on / threshold 50%。
    （262K 實際 vs 175K 估計）。
 
 **使用者決策（2026-10-16，A–E）**：
-- **A**：觸發 = 當前 context 超過 `contextCompactionThreshold × n_ctx` 就執行
-  裁切；**移除所有 keepBudget 的過度設計**（×1.5 reserve、10% floor）。
-  planCompaction 算法本體不變（兩階段 / I4 / I5 / minSummarizeTokens），其
-  budget 輸入 = 裸的 `keepTarget% × n_ctx`。
+- **A**（第二輪修正）：觸發 = 當前 context 超過 `contextCompactionThreshold × n_ctx`
+  就執行裁切；**移除所有 keepBudget 的過度設計**（×1.5 reserve、10% floor）。
+  planCompaction 算法本體不變（兩階段 / I4 / I5 / minSummarizeTokens），
+  **budget = (threshold − keepTarget)% × n_ctx**——語義：threshold 觸發、
+  成功判定約束 head + summary ≤ keepTarget%、切點約束 kept ≤ 差值
+  → 裁切後總量 ≤ threshold% × n_ctx，**避免繼續觸發裁切**。
 - **B**：超標 gate 三選項：**使用這次壓完（use it）/ 重壓（retry）/ 這次不壓
   （skip）**。
 - **C**：新設定重試次數：**預設 3，3 = 共 3 次；1 = 總共一次；≤ 0 = 無限重試**。
@@ -1077,7 +1079,17 @@ auto on / in-loop on / threshold 50%。
 - 作廢：原 Phase 3「token 估計校準（prompt_n 反推每則成本）」——v3 在兩個
   需要精確的決策點直接用 API 實際值，切點用 byte 數，不再需要。
 
-**狀態**：設計已確認；02/03/05 文件已同步；**未實做**。實做清單見 05-v3；
+**未決（等使用者決定）**：切點 fit 檢查的計數單位。E 的 byte 數對 CJK
+≈ 8× 實際 tokens（本案例實測：262K 實際 tokens vs 175K char/4 估計 →
+bytes ≈ 8× tokens）。以使用者設定（threshold 50 / keep 40）算：
+budget = 10% × 262,144 = **26,214 bytes ≈ ~3.2K 實際 tokens**；而最後一個
+agentic turn（含大 tool result）≈ 640K+ bytes（~80K 實際 tokens）→
+**純 byte 數下 planCompaction 仍會回 null，原問題（自動壓縮不觸發）未解**。
+選項：(a) fit 檢查用 prompt_n 反推的實際 tokens（有 timings 時），
+byte 數只在無 timings 時 fallback（符合 E 的精神：API 有數用 API 數）；
+(b) 純 byte 數（字面 E，接受「含大 tool result 的 CJK agentic 對話不壓」的後果）。
+
+**狀態**：設計已確認（budget 公式為 A 第二輪版）；02/03/05 文件已同步；**未實做**。實做清單見 05-v3；
 完成後使用者自行 `npm run check` + unit（compaction-policy / summarize / 
 context-builder）+ client（settings-registry-invariants + 新卡片測試）驗證。
 

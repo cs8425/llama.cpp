@@ -160,7 +160,7 @@ user 按送出
 ```
 onFlowComplete(且 !isChatLoading && !agenticStore.isRunning)
   → lastPrompt > n_ctx × threshold% ?
-      → planCompaction(path, budget = keepTarget% × n_ctx)
+      → planCompaction(path, budget = (threshold − keepTarget)% × n_ctx)
           → null? 結束(不壓)
       → summarizeMessages(plan)      (UI:「Compacting context…」)
           → 失敗? toast,結束(不壓)

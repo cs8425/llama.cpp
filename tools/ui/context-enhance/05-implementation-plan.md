@@ -64,9 +64,9 @@
 > 06-status §3.20。設計:02-§3.3/§3.4/§6(v3)、03-§3/§4.2/§4.4(v3)。
 
 - [ ] `compaction-policy.ts` `computeCompactionBudget`:`keepBudgetTokens =
-      floor(nCtx × contextKeepTargetPercent%)`——移除 summaryReserve(× 1.5)與
-      10% floor;`computeSummaryMaxTokens` 不再進 budget(只留在 summary 呼叫的
-      max_tokens)
+      floor((contextCompactionThreshold − contextKeepTargetPercent) / 100 × nCtx)`
+      (threshold ≤ keepTarget → 0)——移除 summaryReserve(× 1.5)與 10% floor;
+      `computeSummaryMaxTokens` 不再進 budget(只留在 summary 呼叫的 max_tokens)
 - [ ] `estimateTokens` / `estimateApiMessageTokens`:文字部分(content / toolCalls /
       reasoning / attachment text / PDF text)char/4 → **UTF-8 byte 數**
       (保守上限:切點 fit 偏向「多留」);image 1000 / audio-video 3000 不變
