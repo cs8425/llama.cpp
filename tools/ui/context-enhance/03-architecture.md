@@ -36,11 +36,13 @@ settings: SETTINGS_KEYS + SETTINGS_REGISTRY 新 key、(v3) contextSummaryMaxAtte
 ```ts
 // services/context/types.ts
 export interface CompactionPlan {
-  /** 切在 path[i] 之前;role 必為 user 或 assistant(I4);system prompt 永遠不在 summarize 區 */
+  /** 切在 path[i] 之前;role 必為 user 或 assistant(I4);system prompt 永遠不在 summarize 區;
+   *  i = path.length = 切在最後一則訊息之後(空 kept,僅 split 切) */
   cutIndex: number;
-  /** true = split user-message span(切在單一 span 內的 assistant) */
+  /** true = split user-message span(切在單一 span 內的 assistant,或切在最後一則之後) */
   isSplitTurn: boolean;
-  firstKeptMessageId: string;
+  /** id of path[cutIndex] —— 送出窗口的起點;**cutIndex = path.length(空 kept)時缺** */
+  firstKeptMessageId?: string;
   toSummarize: DatabaseMessage[];   // path[1 .. cutIndex)
   kept: DatabaseMessage[];          // path[cutIndex .. end]
   estimatedTokensBefore: number;
@@ -50,9 +52,10 @@ export interface CompactionPlan {
 export interface ContextBuildResult {
   /** 實際送出的 payload(已轉換,含 attachments → content parts) */
   messages: ApiChatMessageData[];
-  /** 供 UI/inspector 使用:哪一筆 cmp 生效、drop 了幾則、斷點是否失效 */
+  /** 供 UI/inspector 使用:哪一筆 cmp 生效、drop 了幾則、斷點是否失效
+   *  (firstKeptMessageId 缺 = 空 kept,是合法狀態,不是失效) */
   compaction:
-    | { entryId: string; firstKeptMessageId: string; droppedCount: number;
+    | { entryId: string; firstKeptMessageId?: string; droppedCount: number;
         boundaryValid: boolean }
     | null;
   /** 估計 token(與 estimateTokens 同源) */
@@ -78,7 +81,7 @@ export function planCompaction(
   path: DatabaseMessage[],
   budget: { keepBudgetTokens: number;
             minKeptUserTurns: number;   // 邊界切:kept 區 user 訊息下限
-            minKeptMessages: number;    // split 切:kept 區訊息下限
+            minKeptMessages: number;    // split 切:kept 區訊息下限(預設 0 = 允許空 kept)
             minSummarizeTokens: number }
 ): CompactionPlan | null;
 
@@ -171,7 +174,7 @@ onFlowComplete(且 !isChatLoading && !agenticStore.isRunning)
       → DatabaseService.createCompactionMessage({
             convId, parentId: 路徑最後一則.id,
             content: summary,
-            compactionMeta: { firstKeptMessageId, summarizedCount,
+            compactionMeta: { firstKeptMessageId(可缺 = 空 kept), summarizedCount,
                               model, estimatedTokensBefore }
         })
       → conversationsStore.addMessageToActive(cmp)

@@ -269,7 +269,8 @@ export class DatabaseService {
 	 *
 	 * The entry is a tree node (role: user, type: compaction) whose content is
 	 * the summary of the messages before the kept-region boundary stored in
-	 * `compactionMeta.firstKeptMessageId`. It is attached as a child of the
+	 * `compactionMeta.firstKeptMessageId` (an absent boundary = empty kept
+	 * region: everything was compacted). It is attached as a child of the
 	 * current leaf (I6); the caller owns moving `currNode` to the new node.
 	 *
 	 * @param params - convId, parentId (last message of the pre-compaction

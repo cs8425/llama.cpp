@@ -18,8 +18,9 @@ export enum MessageType {
 ```ts
 // src/lib/types/database.d.ts — DatabaseMessage 新增選用欄位
 export interface CompactionMeta {
-  /** kept 區的第一則訊息 id(送出窗口的起點;user 或 assistant 訊息) */
-  firstKeptMessageId: string;
+  /** kept 區的第一則訊息 id(送出窗口的起點;user 或 assistant 訊息)。
+   *  **缺欄位 = 空 kept**:所有訊息都被壓縮(payload = [system, summary]) */
+  firstKeptMessageId?: string;
   /** 被 summarize 掉的訊息數(不含 system prompt),供 UI 顯示 */
   summarizedCount: number;
   /** true = split user-message span(切點落在單一 span 內的 assistant 訊息) */
@@ -76,10 +77,14 @@ function buildLlmContext(path):
   if c is null:
       return convertAll(path)                    # 現行行為
 
-  i  = index of c.compactionMeta.firstKeptMessageId in path
-  if i == -1:
-      return convertAll(path)                    # fail-open:找不到斷點就全送,
-                                                 # 寧可變長也絕不誤刪「目前」訊息
+  id = c.compactionMeta.firstKeptMessageId
+  if id 缺:                                       # 刻意的空 kept(I5 split 下限 0)
+      i  = c 的 index + 1                          # kept = cmp 之後的訊息(通常為空)
+  else:
+      i  = id 在 path 的 index
+      if i == -1:
+          return convertAll(path)                 # fail-open:找不到斷點就全送,
+                                                  # 寧可變長也絕不誤刪「目前」訊息
 
   head  = path[0] if path[0].role == 'system'    # system prompt 永不進 summarize 區
   kept  = path[i .. end]
@@ -94,9 +99,9 @@ function buildLlmContext(path):
 | - | ------ | ---- |
 | I1 | system prompt(path 開頭)永不被 summarize、永不被移除 | 行為定義 |
 | I2 | 只有「最後一則」cmp 生效;更舊的 cmp 若落在 kept 區,按一般 `user` 訊息(其 content=舊 summary)送出 | 舊 summary 已被新 summary 涵蓋時自然被 drop;未被涵蓋時保留不丟資料 |
-| I3 | `firstKeptMessageId` 找不到 → 忽略該 cmp,全量送出(fail-open) | 分支/刪除後 id 可能失效;安全方向是「變長」不是「變短」 |
+| I3 | `firstKeptMessageId` **有 id 但找不到** → 忽略該 cmp,全量送出(fail-open);**id 缺**(刻意的空 kept)→ kept = cmp 之後的訊息 | 分支/刪除後 id 可能失效;安全方向是「變長」不是「變短」 |
 | I4 | 斷點只允許切在 **user 或 assistant 訊息之前**,絕不切在 tool result | 切在 assistant 之前:kept 區以 `ass(tool_calls) → tool…` 開頭,配對完整;切在 tool 之前會產生孤兒 tool result(API 拒收) |
-| I5 | user 邊界切:kept 區至少 N 則 user 訊息(可設,預設 4);split 切:kept 區至少 M 則訊息(預設 2,通常是一組 ass+tool 交換) | 避免把幾乎全部對話都 summarize 掉;split 切時該 span 的 user 訊息必然進 summary,由 summary 負責保留其內容 |
+| I5 | user 邊界切:kept 區至少 N 則 user 訊息(可設,預設 4);split 切:kept 區**可為空**(`contextKeepMinMessages`,預設 0)——預算放不下時切點落在**最後一則訊息之後**,所有訊息都送進 summary(payload = `[system, summary]`);把值設回 ≥1 即恢復下限 | 避免把幾乎全部對話都 summarize 掉;split 切時該 span 的 user 訊息必然進 summary,由 summary 負責保留其內容(空 kept 時連最近的 tool 交換也進 summary,split prompt 變體已要求保留 tool results) |
 | I6 | cmp 必須是路徑上的節點(由建立流程保證:parent = 當時的 leaf,currNode 指向它) | 路徑外的節點不影響送出 |
 | I7 | 壓縮只在「沒有 stream 在跑」時進行(flow 之間、agentic turn 之間) | 避免改動 in-flight 的 `sessionMessages` 底層 |
 
@@ -133,9 +138,15 @@ Split user-message span (one span exceeds budget):
   summarize 區 = 更早的 history(若有)+ 該 span 的前半段(1-6)
 ```
 
+- **空 kept**(split 下限 0,I5):若連最後一組 `ass + tool` 都放不进
+  budget,切點落在**最後一則訊息之後**:summarize 區 = 1-8(整個 span),
+  kept 為空,`firstKeptMessageId` 缺,payload = `[system, summary]`。
+
 - 語義:span 的 user 訊息(使用者的實際請求)進 summary 而非 kept 區 —
   可接受,因為 summary prompt 明確要求保留「當前任務目標」;
-  kept 區保留的是**最近的 tool 交換**,通常正是下一則訊息會引用的內容。
+  kept 區保留的是**最近的 tool 交換**,通常正是下一則訊息會引用的內容
+  (預算更緊時最近的 tool 交換也進 summary——split prompt 變體已顯式
+  要求保留 tool results 與 likely next step)。
 - 對 `buildLlmContext` 而言 split 與一般壓縮**無差別**:`firstKeptMessageId`
   只是指到一則 assistant 訊息,§2 的送出規則完全一樣。
   差異只在 (a) policy 選點、(b) summary prompt、(c) UI 顯示。
@@ -164,12 +175,13 @@ valid(j) = path[j].role ∈ {user, assistant}
 
 1. 找最小 j 使 valid(j)、count(path[j..end]) ≤ budget 且 path[j].role == 'user'
    → 找到:一般壓縮(cut 在 span 邊界)
-2. 否則找最小 j 使 valid(j) 且 count(path[j..end]) ≤ budget
-   → 找到:split span 壓縮(isSplitTurn = true)
-3. 都沒有 → null(不壓)
+2. 否則找最小 j(j ∈ [起點, path.length])使 valid(j) 且 count(path[j..end]) ≤ budget
+   (j = path.length = 切在最後一則訊息之後 → 空 kept;count = 0 恆成立)
+   → 找到:split span 壓縮(isSplitTurn = true;j = path.length 時 firstKeptMessageId 缺)
+3. 都沒有 → null(不壓)(空 kept 允許後階段 2 恆有解;實務上只剩空路徑/負 budget 等異常)
 4. 對 1/2 的結果再檢查:
    - summarize 區(1..j)count < minSummarizeTokens(2k,byte 數)→ null
-   - I5:邊界切 → kept 區 user 訊息數 ≥ N;split 切 → kept 區訊息數 ≥ M(預設 2)
+   - I5:邊界切 → kept 區 user 訊息數 ≥ N(預設 4);split 切 → kept 區訊息數 ≥ M(`contextKeepMinMessages`,預設 0)
 ```
 
 - 階段 1 優先的理由:邊界切讓 summary 涵蓋「完整回合」,語義最乾淨;
@@ -183,9 +195,12 @@ valid(j) = path[j].role ∈ {user, assistant}
   `n_ctx × (1 − threshold%)`(§3.12 已修)與 reserve/floor 公式
   (§3.13/§3.14 曾實做)皆作廢,記錄見 06-status §3.20。
 - 巨幅單一 user 訊息(開頭就超 budget)會自然落到階段 2
-  (user 訊息本身被 summarize),或階段 3(連 split 都放不下)。
+  (user 訊息本身被 summarize);階段 2 允許空 kept,所以恆有切點
+  (最壞 = 全部壓縮)。
 - 巨幅 tool result(例:讀了 1MB 檔案)是 split 切的典型獲益場景:
-  切點可以落在該 tool result **之後**的 assistant 上,把它整段 drop。
+  切點可以落在該 tool result **之後**的 assistant 上,把它整段 drop;
+  連最後一組 `ass + tool` 都放不下時,切點落在最後一則之後(空 kept),
+  該 tool result 整段進 summary。
 
 ### 3.4 token 計數(v3:API 實際值優先,否則 UTF-8 byte 數)
 
@@ -213,7 +228,8 @@ valid(j) = path[j].role ∈ {user, assistant}
 
 | 情境 | 行為 | 依據 |
 | ---- | ---- | ---- |
-| 單一 span 超 budget(典型 agentic 長 turn) | split 切:切在 span 內 assistant,span 前半進 summary,後半(最近 tool 交換)保留;`isSplitTurn=true` | §3.1 |
+| 單一 span 超 budget(典型 agentic 長 turn) | split 切:切在 span 內 assistant,span 前半進 summary,後半(最近 tool 交換)保留;`isSplitTurn=true`;連最近 tool 交換都放不下 → 空 kept(全壓,`firstKeptMessageId` 缺) | §3.1 |
+| split 切空 kept(全部壓縮) | payload = `[system, summary]`;cmp 之後追加的新訊息成為 kept;inspector 斷點選擇器顯示「無保留訊息」、只能前移(選一則訊息);Re-summarize 的 region = cmp 之前的所有訊息(排除 cmp 節點本身) | I5/§3.3 |
 | agentic flow 進行中(context 逼近上限) | turn 之間(非 streaming 中)觸發:建 cmp(parent=最後一則)→ 重建 in-memory `sessionMessages` → 續跑;flow 中斷時 cmp 已落 DB,狀態一致 | §6 |
 | split 切後 flow 繼續追加 turns | 新訊息接在 cmp 之後;下次壓縮照「最後一筆 cmp 生效」(I2)涵蓋它 | I2 |
 | 該 span 的 user 訊息被 summarize 後,user 又編輯了它 | 編輯落在 summarize 區:不影響送出(不在 kept 區);summary 文字不自動更新,可手動「重新摘要」 | — |

@@ -15,11 +15,12 @@
 > default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status §3.18）；
 > **N5 ✅ 完成並確認**（新設定 `contextSummaryMode`：summary 的 prompt
 > 模式開放給 user 選，見 06-status §3.19））。
-> **目前停點**：**v3 重設計已確認、未實做**（2026-10-16）——「自動壓縮從未觸發」
+> **目前停點**：**v3 重設計已確認、未實做** + **N6 split 切允許空 kept 已確認、未實做**（皆 2026-10-16）——「自動壓縮從未觸發」
 > 根因已定位（舊 budget 公式把 keepBudget 壓死在 10% floor，分析見 06-status
 > §3.20）；v3 = 實際 token 計數（API 實際值優先、否則 byte 數）+ compact 成功
 > 判定（head + summary ≤ keepTarget% n_ctx）+ 超標重試/user gate（三選項）；
-> 02/03/05 已同步。此前：N1–N5 全部完成並確認（N5 = `contextSummaryMode` SELECT
+> N6 = split 切下限 2→0（最後 ass+tool 放不下時切在最後一則之後、全部壓縮，
+> `firstKeptMessageId` 缺 = 空 kept，見 06-status §3.21）；02/03/04/05 已同步。此前：N1–N5 全部完成並確認（N5 = `contextSummaryMode` SELECT
 > 設定 + `toSummaryMode()` + 3 個呼叫點透傳，unit 16/16 + client registry
 > 全綠）；剩 Phase 1 的 5.8 手動驗收 + Phase 3 可選後續（含 summary
 > 獨立 model / endpoint；token 校準已被 v3 取代）。
@@ -53,7 +54,9 @@
    (tool result 必須與它的 tool call 同存共毀)。若**單一 user-message span**
    (兩則 user 訊息之間,典型 = 一個 agentic turn)本身就超 keep 預算,
    允許 **split user-message span**:切點落在該 span 內的 assistant 訊息,
-   span 前半段進 summary,後半段(最近 tool 交換)保留。
+   span 前半段進 summary,後半段(最近 tool 交換)保留;連最近 tool 交換都
+   放不下時,切點落在**最後一則訊息之後**(空 kept,全部壓縮;
+   N6,2026-10-16,見 06-status §3.21)。
 5. **自動觸發**:flow 之間(用 server `timings.prompt_n` 對照
    `n_ctx × threshold%`),以及 **agentic 迴圈 turn 之間**(「兩次 user 訊息
    之間」的 context 爆炸就發生在迴圈內,只在 flow 結束後檢查來不及;

@@ -11,7 +11,11 @@
  * - a compaction entry in effect → [system prompt?, summary (role: user), kept…];
  * - only the LAST entry is in effect (I2); older entries inside the kept
  *   region are sent as plain user messages (their content is the old summary);
- * - a missing `firstKeptMessageId` → fail-open, send the full path (I3).
+ * - an ABSENT `firstKeptMessageId` → deliberate empty kept: kept = the
+ *   messages after the entry node (usually none) — the full pre-entry history
+ *   is covered by the summary;
+ * - a PRESENT `firstKeptMessageId` that no longer exists → fail-open, send
+ *   the full path (I3).
  *
  * Conversion reuses `ChatService.normalizeMessagesForApi` (per-message
  * `convertDbMessageToApiChatMessageData` + empty-system filter) — no fork.
@@ -79,17 +83,28 @@ export async function buildLlmContext(
 		};
 	}
 
-	const boundaryId = entry.compactionMeta?.firstKeptMessageId ?? '';
-	const keptIndex = boundaryId ? path.findIndex((message) => message.id === boundaryId) : -1;
+	const boundaryId = entry.compactionMeta?.firstKeptMessageId;
 
 	// I1: the system prompt head is never part of the summarize region.
 	const head = path[0] && path[0].role === MessageRole.SYSTEM ? [path[0]] : [];
 
-	// Fail-open (I3): the boundary no longer exists on this path (branching,
-	// deletion) — or points at the system prompt itself (corrupt data; the
-	// policy and the inspector never produce it). Send everything rather than
-	// silently dropping "current" messages or duplicating the system prompt.
-	if (keptIndex === -1 || (head.length > 0 && keptIndex === 0)) {
+	// Resolve the kept window (02-data-model §2):
+	// - absent boundary id → deliberate empty kept: the window starts right
+	//   after the entry node (messages appended after a compaction stay kept);
+	// - present boundary id → the window starts at that message; an id that no
+	//   longer exists on this path (branching, deletion) — or one pointing at
+	//   the system prompt itself (corrupt data; the policy and the inspector
+	//   never produce it) — is the I3 fail-open: send everything rather than
+	//   silently dropping "current" messages or duplicating the system prompt.
+	const keptIndex =
+		boundaryId === undefined
+			path.findIndex((message) => message.id === entry.id) + 1
+		: path.findIndex((message) => message.id === boundaryId);
+
+	const boundaryValid =
+		boundaryId === undefined || (keptIndex !== -1 && !(head.length > 0 && keptIndex === 0));
+
+	if (!boundaryValid) {
 		return {
 			compaction: {
 				boundaryValid: false,
@@ -102,10 +117,10 @@ export async function buildLlmContext(
 		};
 	}
 
-	// The kept window runs from the boundary to the end of the path. The entry
-	// node itself sits inside that window (it is a path node — usually the
-	// last one) and must NOT be sent again: its content is the summary that
-	// is inserted separately. Messages appended after the entry stay kept.
+	// The kept window runs from the window start to the end of the path. The
+	// entry node itself sits inside that window (it is a path node — usually
+	// the last one) and must NOT be sent again: its content is the summary
+	// that is inserted separately. Messages appended after the entry stay kept.
 	const kept = path.slice(keptIndex).filter((message) => message.id !== entry.id);
 
 	// The summary travels as a plain user turn so every chat template accepts it

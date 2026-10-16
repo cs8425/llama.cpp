@@ -40,7 +40,7 @@ function message(
 function budget(keepBudgetTokens: number, overrides: Partial<CompactionBudget> = {}): CompactionBudget {
 	return {
 		keepBudgetTokens,
-		minKeptMessages: 2,
+		minKeptMessages: 0,
 		minKeptUserTurns: 4,
 		minSummarizeTokens: 10,
 		...overrides
@@ -186,7 +186,7 @@ describe('computeSummaryMaxTokens', () => {
 
 describe('computeCompactionBudget', () => {
 	const settings: CompactionSettings = {
-		contextKeepMinMessages: 2,
+		contextKeepMinMessages: 0,
 		contextKeepMinUserTurns: 4,
 		contextKeepTargetPercent: 50,
 		contextSummaryMaxTokensPercent: 7
@@ -369,14 +369,64 @@ describe('planCompaction', () => {
 		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['u1']);
 	});
 
-	it('returns null when even a split cut cannot fit the budget', () => {
+	it('falls back to an empty kept region (all messages summarized) when nothing fits the budget', () => {
 		const path = [
 			message('sys', MessageRole.SYSTEM, T100),
 			message('u1', MessageRole.USER, 'x'.repeat(1600)), // 400 tokens
 			message('a1', MessageRole.ASSISTANT, T100)
 		];
 
-		expect(planCompaction(path, budget(50))).toBeNull();
+		const plan = planCompaction(path, budget(50));
+
+		expect(plan).not.toBeNull();
+		expect(plan?.isSplitTurn).toBe(true);
+		// cut after the last message: kept is empty, the boundary id is absent
+		expect(plan?.cutIndex).toBe(3);
+		expect(plan?.firstKeptMessageId).toBeUndefined();
+		expect(plan?.kept).toEqual([]);
+		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['u1', 'a1']);
+	});
+
+	it('cuts after the last message (empty kept) when only the tail is oversized', () => {
+		const toolCalls = JSON.stringify([{ function: { name: 'read_file' }, id: 'c1' }]);
+		const path = [
+			message('sys', MessageRole.SYSTEM, T100),
+			message('u1', MessageRole.USER, T100),
+			message('a1', MessageRole.ASSISTANT, T100, { toolCalls }),
+			message('t1', MessageRole.TOOL, T100, { toolCallId: 'c1' }),
+			message('a2', MessageRole.ASSISTANT, 'x'.repeat(4000)), // 1000 tokens
+			message('t2', MessageRole.TOOL, 'x'.repeat(4000), { toolCallId: 'c2' })
+		];
+
+		const plan = planCompaction(path, budget(300));
+
+		expect(plan).not.toBeNull();
+		expect(plan?.isSplitTurn).toBe(true);
+		// the last ass+tool alone exceeds the budget → the cut lands after it
+		expect(plan?.cutIndex).toBe(path.length);
+		expect(plan?.firstKeptMessageId).toBeUndefined();
+		expect(plan?.kept).toEqual([]);
+		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['u1', 'a1', 't1', 'a2', 't2']);
+	});
+
+	it('still honors a raised minKeptMessages floor (the old behavior, opt-in)', () => {
+		const toolCalls = JSON.stringify([{ function: { name: 'read_file' }, id: 'c1' }]);
+		const path = [
+			message('sys', MessageRole.SYSTEM, T100),
+			message('u1', MessageRole.USER, T100),
+			message('a1', MessageRole.ASSISTANT, T100, { toolCalls }),
+			message('t1', MessageRole.TOOL, T100, { toolCallId: 'c1' })
+		];
+
+		// the budget fits the last ass+tool (200 ≤ 300) → split at a1
+		const plan = planCompaction(path, budget(300, { minKeptMessages: 2 }));
+
+		expect(plan?.isSplitTurn).toBe(true);
+		expect(plan?.firstKeptMessageId).toBe('a1');
+		expect(plan?.kept.map((m) => m.id)).toEqual(['a1', 't1']);
+
+		// a floor of 3 leaves no legal split cut → null
+		expect(planCompaction(path, budget(300, { minKeptMessages: 3 }))).toBeNull();
 	});
 
 	it('returns null when the summarize region is below minSummarizeTokens', () => {
@@ -496,6 +546,23 @@ describe('estimateCompactionSavings', () => {
 		];
 
 		expect(estimateCompactionSavings(path, broken)).toBe(0);
+	});
+
+	it('counts the whole post-head path as dropped for an empty-kept entry (absent boundary id)', () => {
+		const cmp = message('cmp', MessageRole.USER, 'y'.repeat(800), {
+			compactionMeta: { estimatedTokensBefore: 450, summarizedCount: 2 },
+			type: MessageType.COMPACTION
+		});
+		const path = [
+			message('sys', MessageRole.SYSTEM, T100),
+			message('u1', MessageRole.USER, T100),
+			message('a1', MessageRole.ASSISTANT, T100),
+			cmp
+		];
+
+		// dropped = u1 + a1 = 200 (the entry is the summary, not dropped);
+		// payload = sys + cmp = 300 → 450 − 300 = 150
+		expect(estimateCompactionSavings(path, cmp)).toBe(150);
 	});
 
 	it('clamps to 0 when the pre-compaction estimate is below the current payload', () => {

@@ -758,7 +758,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			return;
 		}
 
-		const currentIndex = this.boundaryIndexOf(path, found.entry);
+		const currentIndex = this.keptWindowStartOf(path, found.entry);
 
 		if (currentIndex === -1) {
 			toast.info('Compaction boundary no longer exists — compact again to recreate it');
@@ -833,6 +833,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				path,
 				newIndex,
 				path[newIndex].role === MessageRole.ASSISTANT,
+				cmpId,
 				abortController.signal
 			);
 			const model = this.resolveCompactionModel(path);
@@ -889,7 +890,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			return;
 		}
 
-		const boundaryIndex = this.boundaryIndexOf(path, found.entry);
+		const boundaryIndex = this.keptWindowStartOf(path, found.entry);
 
 		if (boundaryIndex === -1) {
 			toast.info('Compaction boundary no longer exists — compact again to recreate it');
@@ -905,7 +906,15 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			return;
 		}
 
-		if (boundaryIndex <= this.headLengthOf(path)) {
+		// The effective region excludes the entry itself (it is the summary
+		// being rewritten). With an empty-kept entry the window start sits one
+		// past the entry, so this is what catches a fully-deleted pre-entry
+		// region — summarizing nothing would be a wasted LLM call.
+		const region = path
+			.slice(this.headLengthOf(path), boundaryIndex)
+			.filter((message) => message.id !== cmpId);
+
+		if (region.length === 0) {
 			toast.info('Nothing to summarize');
 
 			return;
@@ -921,6 +930,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				path,
 				boundaryIndex,
 				baseMeta.isSplitTurn === true,
+				cmpId,
 				abortController.signal
 			);
 			const model = this.resolveCompactionModel(path);
@@ -991,11 +1001,20 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		}
 	}
 
-	/** Index of the entry's boundary message on the path, or -1 when invalid (I3). */
-	private boundaryIndexOf(path: DatabaseMessage[], entry: DatabaseMessage): number {
-		const boundaryId = entry.compactionMeta?.firstKeptMessageId ?? '';
+	/**
+	 * Start index of the entry's kept window on the path: the boundary message
+	 * when `firstKeptMessageId` exists, one past the entry when it is absent
+	 * (deliberate empty kept, 02-§2). -1 only when a *present* id no longer
+	 * exists (the I3 fail-open).
+	 */
+	private keptWindowStartOf(path: DatabaseMessage[], entry: DatabaseMessage): number {
+		const boundaryId = entry.compactionMeta?.firstKeptMessageId;
 
-		return boundaryId ? path.findIndex((message) => message.id === boundaryId) : -1;
+		if (boundaryId === undefined) {
+			return path.findIndex((message) => message.id === entry.id) + 1;
+		}
+
+		return path.findIndex((message) => message.id === boundaryId);
 	}
 
 	/** The compaction entry at `cmpId` on the path (with its index), or null. */
@@ -1041,13 +1060,17 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 	 * boundary move): resolves the model like compactConversation, applies the
 	 * configured summary options (maxTokens derived from the conversation's
 	 * n_ctx) and summarizes the region before `boundaryIndex` (the system-prompt
-	 * head excluded). `signal` carries the stop-compaction abort (N3).
+	 * head and the entry node itself excluded — the summary being rewritten is
+	 * never part of its own input; with an empty-kept entry the window start
+	 * sits one past the entry, so the filter is what keeps it out).
+	 * `signal` carries the stop-compaction abort (N3).
 	 */
 	private async summarizeRegion(
 		convId: string,
 		path: DatabaseMessage[],
 		boundaryIndex: number,
 		isSplitTurn: boolean,
+		entryId: string,
 		signal?: AbortSignal
 	): Promise<string> {
 		const headLength = this.headLengthOf(path);
@@ -1059,11 +1082,11 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				.slice(boundaryIndex)
 				.reduce((sum, message) => sum + estimateTokens(message), 0),
 			estimatedTokensBefore: path.reduce((sum, message) => sum + estimateTokens(message), 0),
-			firstKeptMessageId: path[boundaryIndex].id,
+			firstKeptMessageId: path[boundaryIndex]?.id,
 			isSplitTurn,
 			kept: path.slice(boundaryIndex),
 			systemHead: headLength === 1 ? path[0] : null,
-			toSummarize: path.slice(headLength, boundaryIndex)
+			toSummarize: path.slice(headLength, boundaryIndex).filter((message) => message.id !== entryId)
 		};
 
 		return await summarizeMessages(plan, this.resolveCompactionModel(path), signal, {

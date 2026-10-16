@@ -1093,6 +1093,49 @@ byte 數只在無 timings 時 fallback（符合 E 的精神：API 有數用 API 
 完成後使用者自行 `npm run check` + unit（compaction-policy / summarize / 
 context-builder）+ client（settings-registry-invariants + 新卡片測試）驗證。
 
+### 3.21 N6：split 切允許空 kept（使用者要求 2026-10-16，未實做）
+
+**背景**：split 切原本要求「最後 ≥2 則（含大 tool result）放得下 budget」
+（`contextKeepMinMessages` 預設 2）。budget 極緊時（典型：agentic 最後一組
+ass+tool 含巨大 tool result）planCompaction 回 null、無法壓縮——與 §3.20
+同源的「壓不下去」死區。使用者決策：split 下限改為允許 0，即允許
+**所有 message 都丟去 compact**（payload = `[system, summary]`）；
+boundary 切維持原規則（整個最後一個 turn 要放得下 budget）。
+
+**使用者決策（2026-10-16）**：
+- **D1（簡化版）**：`CompactionMeta.firstKeptMessageId` 改選用
+  （`firstKeptMessageId?: string`）。**缺 id = 空 kept**（合法狀態：kept =
+  cmp 節點之後的訊息，通常為空）——系統未投入實際使用、無 legacy 資料，
+  「meta 整組缺」與「欄位缺」不區分；**id 存在但路徑上找不到 = fail-open
+  全量送出**（I3 不變；真實場景 = 刪了 boundary 訊息 / branch 後路徑變動）。
+- **D2**：保留 `contextKeepMinMessages` 設定，**default 2 → 0、range 0–50**
+  （設回 ≥1 即恢復舊的下限行為）。
+
+**設計要點**（詳見 02-§1.1/§2/I3/I5/§3.1/§3.3/§4、03-§2/§4.2、04-§2.2、
+05-N6 清單）：
+- `planCompaction` 階段 2 的 j 範圍扩到 `path.length`：`cutIndex = path.length`
+  = 切在最後一則訊息之後 → 空 kept、`firstKeptMessageId` 缺。階段 2 因此
+  恆有解（最壞 = 全壓）；「無有效斷點 → null」實務上只剩 minSummarizeTokens
+  未達（2k）等情形。
+- `buildLlmContext`：缺 `firstKeptMessageId` → kept = cmp 之後的訊息、
+  `boundaryValid = true`（**不是** fail-open）；有 id 找不到 → fail-open（I3）。
+- v3 的 `threshold ≤ keepTarget → budget = 0 → auto 永不觸發` guard 維持
+  （在觸發層；手動 Compact now 不受影響、可全壓）。
+- `minSummarizeTokens`（2k）檢查不變。
+- Inspector：空 kept 時斷點選擇器顯示「無保留訊息（全部壓縮）」、只能前移；
+  cmp row 的 Kept from 顯示「none」；Re-summarize 的 region = cmp 之前的所有
+  訊息（**排除 cmp 節點本身**——實作上 summarizeRegion 的 region 以 entry id
+  過濾，避免把被重寫的 summary 自己餵進 summary payload）。
+- 空 kept 時沿用 split-turn prompt 變體（已要求保留 task goal / steps /
+  tool results / likely next step）；不加新 prompt。
+- 既有 client fixture 的 `firstKeptMessageId: ''` 維持「有 id 但無效」=
+  fail-open 語義（空字串 ≠ 缺欄位），行為不變。
+
+**狀態**：使用者已確認（D1 簡化版 + D2）；02/03/04/05 文件已同步；**未實做**。
+實做清單見 05-N6；完成後使用者自行 `npm run check` + unit
+（compaction-policy / context-builder）+ client（chat-message-compaction /
+context-inspector / context-gauge-compaction / settings-registry-invariants）驗證。
+
 ## 4. 驗證狀態（目前停在這）
 
 - Phase 0：使用者已跑 `npm run check` + 4 支 unit，**全綠**。

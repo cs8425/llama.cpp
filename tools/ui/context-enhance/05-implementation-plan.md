@@ -100,6 +100,47 @@
 ✅ 驗收:長對話(262K 級)自動壓縮真的會發生;超標場景(小 keepTarget)走
 重試 → gate 三選項;無 cmp 對話行為不變。
 
+### N6 — split 切允許空 kept(使用者要求 2026-10-16,未實做)
+
+> 背景:split 切原本要求「最後 ≥2 則(含大 tool result)放得下 budget」
+> (`contextKeepMinMessages` 預設 2);budget 極緊時(最後一組 ass+tool 本身就巨大)
+> planCompaction 回 null、無法壓縮。使用者決策:split 下限改 0,允許
+> **所有訊息都丟去 compact**(payload = `[system, summary]`);boundary 切不變
+> (整個最後一個 turn 要放得下)。
+> **D1(簡化版)**:`firstKeptMessageId` 改選用,**缺 id = 空 kept**(合法狀態,
+> 不是 fail-open);id 存在但路徑上找不到 = fail-open(I3 不變)。
+> **D2**:保留 `contextKeepMinMessages`,default 2→0、range 0–50(設回 ≥1 恢復舊行為)。
+> 設計同步:02-§1.1/§2/I3/I5/§3.1/§3.3/§4、03-§2/§4.2、04-§2.2;
+> 決策記錄見 06-status §3.21。
+
+- [ ] `types/database.d.ts`:`CompactionMeta.firstKeptMessageId: string` → `firstKeptMessageId?: string`
+- [ ] `services/context/types.ts`:`CompactionPlan.firstKeptMessageId` /
+      `ContextCompactionInfo.firstKeptMessageId` → 選用 + doc
+- [ ] `compaction-policy.ts` `planCompaction`:階段 2 允許 `cutIndex = path.length`
+      (切在最後一則訊息之後 → 空 kept、`firstKeptMessageId` 缺);
+      I5 split 下限跟 `contextKeepMinMessages`(預設 0);
+      `estimateCompactionSavings` 處理「無 boundary」(dropped = head 之後全部,排除 entry 本身)
+- [ ] `context-builder.ts` `buildLlmContext`:缺 `firstKeptMessageId` → kept = cmp 之後的訊息
+      (通常為空)、`boundaryValid = true`;id 存在但找不到 → fail-open(I3 不變)
+- [ ] `stores/chat/index.svelte.ts`:`boundaryIndexOf` → `keptWindowStartOf`(缺 id = entry index + 1);
+      `moveCompactionBoundary` / `recompactConversationEntry` / `summarizeRegion`
+      處理空 kept(region 排除 cmp 節點本身)
+- [ ] `constants/settings.constants.ts`:`contextKeepMinMessages` defaultValue 2→0、
+      min 2→0、help 文案
+- [ ] `ChatMessageCompaction.svelte`:空 kept 態(「Kept from: none」、dropped 統計 = 全部、
+      expand 描述)
+- [ ] `DialogContextInspector.svelte`:空 kept → dropped 區 = 全部;選擇器顯示
+      「無保留訊息(全部壓縮)」
+- [ ] unit:`compaction-policy.test.ts`(split 空 kept 切點 / I5=0 / 舊「連 split
+      都放不下 → null」用例更新);`context-builder.test.ts`(空 kept payload、
+      缺 meta = 空 kept、fail-open 不變)
+- [ ] client:chat-message-compaction / context-inspector 回歸(既有 fixture 用
+      `firstKeptMessageId: ''` = 「有 id 但無效」= fail-open,行為不變,確認即可)
+
+✅ 驗收:最後一組 ass+tool 超 budget 時,自動/手動壓縮產生空 kept cmp、
+payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點可前移
+恢復 kept;無 cmp 對話行為不變。
+
 ### Phase 3 —(可選,後續)
 
 > **下一輪(規劃已定;N1–N5 ✅ 全部完成並確認,明細見 06-status §3.13–§3.19,依序 N1→N5)**:

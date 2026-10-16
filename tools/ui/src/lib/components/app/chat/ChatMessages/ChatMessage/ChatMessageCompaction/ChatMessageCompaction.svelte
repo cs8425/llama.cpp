@@ -49,6 +49,11 @@
 	// Current size of the entry itself, from the same estimator the policy uses.
 	let summaryTokens = $derived(estimateTokens(message));
 
+	// Absent boundary id = deliberate empty kept (02-§2): the summary covers
+	// everything before the entry. (A meta-less entry reads the same — the
+	// system never writes one, so it is not distinguished.)
+	let emptyKept = $derived(meta?.firstKeptMessageId === undefined);
+
 	// The kept-region start the entry claims, resolved against the active path.
 	// -1 = the boundary message no longer exists (the builder then fails open
 	// to a full send); the row surfaces that instead of a stale preview.
@@ -59,26 +64,36 @@
 		keptMessageIndex >= 0 ? conversationsStore.activeMessages[keptMessageIndex] : null
 	);
 
-	// Same validity rule as the builder's boundaryValid (I1/I3): the boundary
-	// must exist on the path and must not point at the system-prompt head.
+	// Same validity rule as the builder's boundaryValid (I1/I3): an absent id
+	// is a valid empty kept; a present id must exist on the path and must not
+	// point at the system-prompt head.
 	let boundaryValid = $derived(
-		keptMessageIndex !== -1 && !(headLength > 0 && keptMessageIndex === 0)
+		emptyKept || (keptMessageIndex !== -1 && !(headLength > 0 && keptMessageIndex === 0))
 	);
 
 	// What expand grows the context back to: the full path, and what the
 	// summary currently covers on it (the entry itself is the summary, not
 	// covered content — excluded). Display only, same estimator as the policy.
 	let fullPathTokens = $derived(path.reduce((sum, msg) => sum + estimateTokens(msg), 0));
-	let droppedCount = $derived.by(() => {
-		if (keptMessageIndex <= headLength) return 0;
 
-		return path.slice(headLength, keptMessageIndex).filter((msg) => msg.id !== message.id).length;
+	// Exclusive end of the covered region: the boundary when present, the end
+	// of the path for an empty-kept entry, nothing when the boundary is lost
+	// (the builder fail-opens to a full send, so nothing is covered).
+	let droppedEnd = $derived.by(() => {
+		if (emptyKept) return path.length;
+
+		return keptMessageIndex > headLength ? keptMessageIndex : 0;
+	});
+	let droppedCount = $derived.by(() => {
+		if (droppedEnd === 0) return 0;
+
+		return path.slice(headLength, droppedEnd).filter((msg) => msg.id !== message.id).length;
 	});
 	let droppedTokens = $derived.by(() => {
-		if (keptMessageIndex <= headLength) return 0;
+		if (droppedEnd === 0) return 0;
 
 		return path
-			.slice(headLength, keptMessageIndex)
+			.slice(headLength, droppedEnd)
 			.reduce((sum, msg) => (msg.id === message.id ? sum : sum + estimateTokens(msg)), 0);
 	});
 
@@ -232,7 +247,9 @@
 				{/if}
 
 				<div class="text-muted-foreground flex flex-col gap-1">
-					{#if keptMessage}
+					{#if emptyKept}
+						<span>Kept from: none — every message is covered by the summary</span>
+					{:else if keptMessage}
 						<span>Kept from: #{keptMessageIndex + 1} ({keptPreview(keptMessage)})</span>
 					{:else}
 						<span class="text-amber-400">

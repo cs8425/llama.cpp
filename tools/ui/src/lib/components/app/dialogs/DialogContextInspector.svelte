@@ -165,7 +165,12 @@
 
 		if (!compaction?.boundaryValid) return [];
 
-		const boundaryIndex = path.findIndex((message) => message.id === compaction.firstKeptMessageId);
+		// Absent boundary id = deliberate empty kept: the covered region runs
+		// to the end of the path.
+		const boundaryIndex =
+			compaction.firstKeptMessageId === undefined
+				? path.length
+				: path.findIndex((message) => message.id === compaction.firstKeptMessageId);
 
 		if (boundaryIndex <= headLength) return [];
 
@@ -214,11 +219,16 @@
 	);
 
 	let selectedBoundary = $derived(
-		result?.compaction?.boundaryValid ? result.compaction.firstKeptMessageId : ''
+		result?.compaction?.boundaryValid ? (result.compaction.firstKeptMessageId ?? '') : ''
 	);
-	let selectedBoundaryLabel = $derived(
-		boundaryOptions.find((option) => option.id === selectedBoundary)?.label ?? 'No valid boundary'
-	);
+	let selectedBoundaryLabel = $derived.by(() => {
+		// A valid empty kept region has no boundary message to show.
+		if (result?.compaction?.boundaryValid && result.compaction.firstKeptMessageId === undefined) {
+			return 'No kept messages (all compacted)';
+		}
+
+		return boundaryOptions.find((option) => option.id === selectedBoundary)?.label ?? 'No valid boundary';
+	});
 
 	// Size of the un-compacted path — what the context grows back to on expand.
 	let fullPathTokens = $derived(path.reduce((sum, message) => sum + estimateTokens(message), 0));

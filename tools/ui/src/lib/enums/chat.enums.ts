@@ -44,7 +44,8 @@ export enum MessageRole {
 export enum MessageType {
 	/**
 	 * Compaction entry: a tree node whose content is the summary of the messages
-	 * before the kept-region boundary stored in `compactionMeta.firstKeptMessageId`.
+	 * before the kept-region boundary stored in `compactionMeta.firstKeptMessageId`
+	 * (an absent boundary = empty kept region: everything was compacted).
 	 * Sent to the API with `user` role (chat-template safe); the type is only read
 	 * by the renderer and the context builder.
 	 */

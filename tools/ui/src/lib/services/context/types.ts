@@ -17,7 +17,11 @@ export interface CompactionBudget {
 	keepBudgetTokens: number;
 	/** Boundary cut: minimum number of user messages that must stay in the kept region (I5). */
 	minKeptUserTurns: number;
-	/** Split cut: minimum total messages that must stay in the kept region (I5). */
+	/**
+	 * Split cut: minimum total messages that must stay in the kept region (I5).
+	 * 0 = an empty kept region is allowed (the cut may land after the last
+	 * message, compacting everything).
+	 */
 	minKeptMessages: number;
 	/**
 	 * Minimum estimated tokens in the summarize region (path[systemStart..cutIndex));
@@ -30,12 +34,19 @@ export interface CompactionBudget {
  * Result of {@link planCompaction}: where to cut and what to summarize.
  */
 export interface CompactionPlan {
-	/** Cut before `path[cutIndex]`; that message's role is user or assistant (I4), never a tool result. */
+	/**
+	 * Cut before `path[cutIndex]`; that message's role is user or assistant
+	 * (I4), never a tool result. `cutIndex = path.length` = cut after the last
+	 * message (empty kept region — split cuts only, I5 with minKeptMessages 0).
+	 */
 	cutIndex: number;
-	/** true = split user-message span (the cut landed on an assistant message inside a single span). */
+	/** true = split user-message span (the cut landed inside a single span, or after the last message). */
 	isSplitTurn: boolean;
-	/** id of `path[cutIndex]` — the start of the send window. */
-	firstKeptMessageId: string;
+	/**
+	 * id of `path[cutIndex]` — the start of the send window; **absent when
+	 * `cutIndex = path.length` (empty kept region, everything compacted)**.
+	 */
+	firstKeptMessageId?: string;
 	/**
 	 * The system-prompt head (`path[0]` when it is a SYSTEM message), sent first
 	 * in the prefix-stable summary payload so its prefix matches the main
@@ -62,8 +73,12 @@ export interface CompactionPlan {
 export interface ContextCompactionInfo {
 	/** id of the compaction entry node that is in effect (the last one on the path, I2). */
 	entryId: string;
-	/** The boundary id the entry claims. */
-	firstKeptMessageId: string;
+	/**
+	 * The boundary id the entry claims. **Absent = empty kept region** (a
+	 * deliberate state: kept = the messages after the entry, usually none) —
+	 * NOT a fail-open. A present id that no longer exists is the fail-open.
+	 */
+	firstKeptMessageId?: string;
 	/**
 	 * Number of path messages (excluding the system prompt head) dropped from
 	 * the payload and covered by the summary. The in-effect entry itself is the
@@ -71,8 +86,9 @@ export interface ContextCompactionInfo {
 	 */
 	droppedCount: number;
 	/**
-	 * false = the boundary id no longer exists on the path; the full path was
-	 * sent instead (fail-open, I3). The inspector must surface this.
+	 * false = the boundary id exists but no longer does on the path; the full
+	 * path was sent instead (fail-open, I3). The inspector must surface this.
+	 * An absent id is a valid empty kept region, not an invalid boundary.
 	 */
 	boundaryValid: boolean;
 }

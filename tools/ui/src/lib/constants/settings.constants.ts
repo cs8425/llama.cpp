@@ -230,13 +230,13 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 				type: SettingsFieldType.INPUT
 			},
 			{
-				defaultValue: 2,
-				help: 'Minimum total messages to keep when a single turn is too large to drop whole (the cut then lands inside the turn).',
+				defaultValue: 0,
+				help: 'Minimum total messages to keep when a single turn is too large to drop whole (the cut then lands inside the turn). 0 (default) allows the cut to land after the last message, compacting every message; set 2 or more to keep at least that many recent messages.',
 				isPositiveInteger: true,
 				key: SETTINGS_KEYS.CONTEXT_KEEP_MIN_MESSAGES,
 				label: 'Keep minimum messages',
 				max: 50,
-				min: 2,
+				min: 0,
 				type: SettingsFieldType.INPUT
 			},
 			{

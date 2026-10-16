@@ -116,9 +116,10 @@ function estimateContentPartTokens(part: ApiChatMessageContentPart): number {
  * The current payload is priced with the same heuristic the builder uses —
  * the whole path minus the dropped region `path[head..boundary)`, the
  * in-effect entry excluded from that region because it IS sent (as the
- * summary). Returns 0 when the entry has no meta, its boundary is lost
- * (the builder fail-opens to the full path, so nothing is saved) or nothing
- * is net saved.
+ * summary). With an absent boundary id (deliberate empty kept, 02-§2) the
+ * dropped region is everything after the head. Returns 0 when the entry has
+ * no meta, its boundary id is lost (the builder fail-opens to the full path,
+ * so nothing is saved) or nothing is net saved.
  */
 export function estimateCompactionSavings(path: DatabaseMessage[], entry: DatabaseMessage): number {
 	const meta = entry.compactionMeta;
@@ -127,17 +128,22 @@ export function estimateCompactionSavings(path: DatabaseMessage[], entry: Databa
 	// without it the savings figure is undefined, not NaN
 	if (!meta || !meta.estimatedTokensBefore) return 0;
 
-	const boundaryId = meta.firstKeptMessageId;
-	const boundaryIndex = boundaryId ? path.findIndex((message) => message.id === boundaryId) : -1;
 	const headLength = path[0]?.role === MessageRole.SYSTEM ? 1 : 0;
 
-	// mirror the builder's I3 fail-open exactly (missing boundary, or a
-	// boundary pointing at the system head)
-	if (boundaryIndex === -1 || (headLength > 0 && boundaryIndex === 0)) return 0;
+	// Absent boundary id = deliberate empty kept: the dropped region runs to
+	// the end of the path. A *present* id that no longer exists (or points at
+	// the system head) mirrors the builder's I3 fail-open exactly — the full
+	// path is sent, so nothing is saved.
+	const hasBoundary = meta.firstKeptMessageId !== undefined;
+	const boundaryIndex = hasBoundary ? path.findIndex((message) => message.id === meta.firstKeptMessageId) : -1;
+
+	if (hasBoundary && (boundaryIndex === -1 || (headLength > 0 && boundaryIndex === 0))) return 0;
+
+	const droppedEnd = hasBoundary ? boundaryIndex : path.length;
 
 	let dropped = 0;
 
-	for (let i = headLength; i < boundaryIndex; i++) {
+	for (let i = headLength; i < droppedEnd; i++) {
 		if (path[i].id === entry.id) continue;
 
 		dropped += estimateTokens(path[i]);
@@ -206,13 +212,18 @@ export function computeCompactionBudget(nCtx: number, settings: CompactionSettin
  * Two stages, boundary-first (02-data-model §3.3):
  * 1. earliest **user** message whose suffix fits the keep budget
  *    → normal compaction (the summary covers whole turns);
- * 2. otherwise earliest **user-or-assistant** cut whose suffix fits
- *    → split user-message span (`isSplitTurn = true`);
- * 3. otherwise null (nothing to do / no legal cut).
+ * 2. otherwise earliest **user-or-assistant** cut whose suffix fits —
+ *    including `j = path.length`, the cut after the last message (empty kept
+ *    region, everything compacted; allowed since I5's split floor is 0)
+ *    → split user-message span (`isSplitTurn = true`, `firstKeptMessageId`
+ *    absent in the empty-kept case);
+ * 3. otherwise null (nothing to do / no legal cut — with the empty-kept
+ *    option stage 2 always has a solution, so this is left for degenerate
+ *    inputs).
  *
  * Then the safety checks: the summarize region must reach `minSummarizeTokens`,
  * and the kept region must respect I5 (≥ N user messages for a boundary cut,
- * ≥ M messages for a split cut).
+ * ≥ M messages for a split cut, M = 0 by default).
  *
  * @param path - The full root→leaf path (system prompt at index 0 when present).
  * @param budget - Keep budget and safety limits.
@@ -248,9 +259,11 @@ export function planCompaction(path: DatabaseMessage[], budget: CompactionBudget
 
 	// Stage 2: split the span (earliest legal cut — necessarily an assistant
 	// message here, since stage 1 already covered all user positions).
+	// j == length is legal too: the cut after the last message leaves an empty
+	// kept region (I5: the split floor minKeptMessages is 0 by default).
 	if (cutIndex === -1) {
-		for (let j = systemStart; j < length; j++) {
-			if (!isCuttable(path[j])) continue;
+		for (let j = systemStart; j <= length; j++) {
+			if (j < length && !isCuttable(path[j])) continue;
 
 			if (suffixEstimate[j] > budget.keepBudgetTokens) continue;
 
@@ -284,7 +297,7 @@ export function planCompaction(path: DatabaseMessage[], budget: CompactionBudget
 		cutIndex,
 		estimatedTokensAfter: systemTokens + suffixEstimate[cutIndex],
 		estimatedTokensBefore: suffixEstimate[0],
-		firstKeptMessageId: path[cutIndex].id,
+		firstKeptMessageId: cutIndex < length ? path[cutIndex].id : undefined,
 		isSplitTurn,
 		kept,
 		systemHead: systemStart === 1 ? path[0] : null,

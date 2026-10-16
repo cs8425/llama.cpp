@@ -111,8 +111,14 @@ export type DatabaseMessageExtra =
 	| DatabaseMessageExtraLegacyContext;
 
 export interface CompactionMeta {
-	/** id of the first message of the kept region (send-window start; a user or assistant message) */
-	firstKeptMessageId: string;
+	/**
+	 * id of the first message of the kept region (send-window start; a user or
+	 * assistant message). **Absent = empty kept region**: every message was
+	 * compacted (payload = [system, summary]) — a deliberate state, not a
+	 * fail-open. A present id that no longer exists on the path is the I3
+	 * fail-open (full send).
+	 */
+	firstKeptMessageId?: string;
 	/** number of summarized messages (excluding the system prompt), for UI display */
 	summarizedCount: number;
 	/** true = split user-message span (the cut landed on an assistant message inside a single span) */

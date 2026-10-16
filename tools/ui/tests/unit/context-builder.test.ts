@@ -47,7 +47,7 @@ function message(
 
 function compaction(
 	content: string,
-	firstKeptMessageId: string,
+	firstKeptMessageId: string | undefined,
 	extra?: Partial<CompactionMeta>
 ): DatabaseMessage {
 	return message(MessageRole.USER, content, {
@@ -231,15 +231,59 @@ describe('buildLlmContext', () => {
 		expect(result.messages).toHaveLength(3);
 	});
 
-	it('handles a missing compactionMeta as a fail-open boundary', async () => {
+	it('treats an absent firstKeptMessageId as a deliberate empty kept region (all compacted)', async () => {
+		const sys = message(MessageRole.SYSTEM, 'sys');
+		const u1 = message(MessageRole.USER, 'q1');
+		const a1 = message(MessageRole.ASSISTANT, 'a1');
+		const cmp = compaction('SUMMARY', undefined);
+
+		const result = await buildLlmContext([sys, u1, a1, cmp]);
+
+		// payload = [system, summary]; this is NOT the I3 fail-open
+		expect(result.messages).toEqual([
+			{ content: 'sys', role: MessageRole.SYSTEM },
+			{ content: 'SUMMARY', role: MessageRole.USER }
+		]);
+		expect(result.compaction).toEqual({
+			boundaryValid: true,
+			droppedCount: 2,
+			entryId: cmp.id,
+			firstKeptMessageId: undefined
+		});
+	});
+
+	it('keeps only the messages appended after an empty-kept entry', async () => {
+		const sys = message(MessageRole.SYSTEM, 'sys');
+		const u1 = message(MessageRole.USER, 'q1');
+		const a1 = message(MessageRole.ASSISTANT, 'a1');
+		const cmp = compaction('SUMMARY', undefined);
+		// the user keeps chatting after the compaction: new turns hang off cmp
+		const u2 = message(MessageRole.USER, 'q2');
+
+		const result = await buildLlmContext([sys, u1, a1, cmp, u2]);
+
+		expect(result.messages).toEqual([
+			{ content: 'sys', role: MessageRole.SYSTEM },
+			{ content: 'SUMMARY', role: MessageRole.USER },
+			{ content: 'q2', role: MessageRole.USER }
+		]);
+		expect(result.compaction?.droppedCount).toBe(2);
+		expect(result.compaction?.boundaryValid).toBe(true);
+	});
+
+	it('treats a missing compactionMeta the same as an absent boundary (empty kept)', async () => {
 		const sys = message(MessageRole.SYSTEM, 'sys');
 		const u1 = message(MessageRole.USER, 'q1');
 		const cmp = message(MessageRole.USER, 'SUMMARY', { type: MessageType.COMPACTION });
 
 		const result = await buildLlmContext([sys, u1, cmp]);
 
-		expect(result.compaction?.boundaryValid).toBe(false);
-		expect(result.messages).toHaveLength(3);
+		expect(result.compaction?.boundaryValid).toBe(true);
+		expect(result.compaction?.firstKeptMessageId).toBeUndefined();
+		expect(result.messages).toEqual([
+			{ content: 'sys', role: MessageRole.SYSTEM },
+			{ content: 'SUMMARY', role: MessageRole.USER }
+		]);
 	});
 
 	it('filters an empty system head like the current pipeline', async () => {
