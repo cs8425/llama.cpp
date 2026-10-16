@@ -15,15 +15,23 @@
 > default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status §3.18）；
 > **N5 ✅ 完成並確認**（新設定 `contextSummaryMode`：summary 的 prompt
 > 模式開放給 user 選，見 06-status §3.19））。
-> **目前停點**：**v3 重設計已確認、未實做** + **N6 split 切允許空 kept 已實做、待編譯/測試確認**（皆 2026-10-16）——「自動壓縮從未觸發」
-> 根因已定位（舊 budget 公式把 keepBudget 壓死在 10% floor，分析見 06-status
-> §3.20）；v3 = 實際 token 計數（API 實際值優先、否則 byte 數）+ compact 成功
-> 判定（head + summary ≤ keepTarget% n_ctx）+ 超標重試/user gate（三選項）；
-> N6 = split 切下限 2→0（最後 ass+tool 放不下時切在最後一則之後、全部壓縮，
-> `firstKeptMessageId` 缺 = 空 kept，見 06-status §3.21）；02/03/04/05 已同步。此前：N1–N5 全部完成並確認（N5 = `contextSummaryMode` SELECT
-> 設定 + `toSummaryMode()` + 3 個呼叫點透傳，unit 16/16 + client registry
-> 全綠）；剩 Phase 1 的 5.8 手動驗收 + Phase 3 可選後續（含 summary
-> 獨立 model / endpoint；token 校準已被 v3 取代）。
+> **目前停點**：**雙 mode 壓縮規格定稿、未實做**（2026-10-17）——同時保留兩種作法、
+> user 選 mode、**default = A（recent-window / pi reference）**：A = 至少留最近
+> `keepRecentTokens` 原樣 + 觸發 `window − keep`（window = min(n_ctx,
+> `contextMaxContextOverride`）；B = v3 + N6（kept ≤（threshold−keepTarget）%、
+> 成功判定 head+summary ≤ keepTarget%、允許空 kept）。計數 = API 有實際
+> token 數就用（trigger = prompt_n、summary = completion tokens）、msg / API
+> 無數用 byte、**不做派生比例**。超標 → 重試（`contextSummaryMaxAttempts`）→
+> user gate（使用/重壓/跳過）。02/03/04/05 已同步、設計見 06-status §3.22；
+> 下一步 = 雙 mode 實做（共用基礎 → A → B）。
+> 此前：**N6 split 切允許空 kept ✅ 完成並確認**（2026-10-17：check + unit
+> `compaction-policy` / `context-builder` + client 回歸 4 支全綠，見 06-status
+> §3.21/§4；N6 = split 切下限 2→0、最後 ass+tool 放不下時切在最後一則之後
+> 全壓、`firstKeptMessageId` 缺 = 空 kept）；v3 重設計已確認（「自動壓縮從未
+> 觸發」根因見 06-status §3.20，現為雙 mode 規格的方法 B）；N1–N5 全部完成並
+> 確認（N5 = `contextSummaryMode` SELECT 設定 +
+> `toSummaryMode()` + 3 個呼叫點透傳，unit 16/16 + client registry 全綠）；剩 Phase 1 的 5.8 手動驗收 + Phase 3
+> 可選後續（含 summary 獨立 model / endpoint；token 校準已被 v3 取代）。
 
 ## 目錄
 

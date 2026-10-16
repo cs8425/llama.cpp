@@ -140,7 +140,7 @@
   gate;無 cmp 不變)。
 - 切 mode 不影響既有 cmp 節點;inspector / 手動操作兩 mode 皆可用。
 
-### N6 — split 切允許空 kept（使用者要求 2026-10-16，已實做、待編譯確認）
+### N6 — split 切允許空 kept（使用者要求 2026-10-16，✅ 完成並確認 2026-10-17）
 
 > 背景:split 切原本要求「最後 ≥2 則(含大 tool result)放得下 budget」
 > (`contextKeepMinMessages` 預設 2);budget 極緊時(最後一組 ass+tool 本身就巨大)
@@ -153,32 +153,34 @@
 > 設計同步:02-§1.1/§2/I3/I5/§3.1/§3.3/§4、03-§2/§4.2、04-§2.2;
 > 決策記錄見 06-status §3.21。
 >
-> **狀態(2026-10-16)**:程式碼 + tests 已實做、02/03/04/05 已同步;
-> **待使用者編譯/測試確認**(指令清單見 06-status §4 最新條目)。
-> 全綠後勾選下列清單。
+> **狀態(2026-10-17)**:✅ **完成並確認**——使用者重跑 `npm run check` +
+> unit `compaction-policy` / `context-builder` + client 回歸
+> (`chat-message-compaction` / `context-inspector` / `context-gauge-compaction` /
+> `settings-registry-invariants`)全綠(第一輪 check 的 `context-builder.ts`
+> 語法錯已修,見 06-status §4 N6 第一輪/重跑)。下列清單全部勾選。
 
-- [ ] `types/database.d.ts`:`CompactionMeta.firstKeptMessageId: string` → `firstKeptMessageId?: string`
-- [ ] `services/context/types.ts`:`CompactionPlan.firstKeptMessageId` /
+- [x] `types/database.d.ts`:`CompactionMeta.firstKeptMessageId: string` → `firstKeptMessageId?: string`
+- [x] `services/context/types.ts`:`CompactionPlan.firstKeptMessageId` /
       `ContextCompactionInfo.firstKeptMessageId` → 選用 + doc
-- [ ] `compaction-policy.ts` `planCompaction`:階段 2 允許 `cutIndex = path.length`
+- [x] `compaction-policy.ts` `planCompaction`:階段 2 允許 `cutIndex = path.length`
       (切在最後一則訊息之後 → 空 kept、`firstKeptMessageId` 缺);
       I5 split 下限跟 `contextKeepMinMessages`(預設 0);
       `estimateCompactionSavings` 處理「無 boundary」(dropped = head 之後全部,排除 entry 本身)
-- [ ] `context-builder.ts` `buildLlmContext`:缺 `firstKeptMessageId` → kept = cmp 之後的訊息
+- [x] `context-builder.ts` `buildLlmContext`:缺 `firstKeptMessageId` → kept = cmp 之後的訊息
       (通常為空)、`boundaryValid = true`;id 存在但找不到 → fail-open(I3 不變)
-- [ ] `stores/chat/index.svelte.ts`:`boundaryIndexOf` → `keptWindowStartOf`(缺 id = entry index + 1);
+- [x] `stores/chat/index.svelte.ts`:`boundaryIndexOf` → `keptWindowStartOf`(缺 id = entry index + 1);
       `moveCompactionBoundary` / `recompactConversationEntry` / `summarizeRegion`
       處理空 kept(region 排除 cmp 節點本身)
-- [ ] `constants/settings.constants.ts`:`contextKeepMinMessages` defaultValue 2→0、
+- [x] `constants/settings.constants.ts`:`contextKeepMinMessages` defaultValue 2→0、
       min 2→0、help 文案
-- [ ] `ChatMessageCompaction.svelte`:空 kept 態(「Kept from: none」、dropped 統計 = 全部、
+- [x] `ChatMessageCompaction.svelte`:空 kept 態(「Kept from: none」、dropped 統計 = 全部、
       expand 描述)
-- [ ] `DialogContextInspector.svelte`:空 kept → dropped 區 = 全部;選擇器顯示
+- [x] `DialogContextInspector.svelte`:空 kept → dropped 區 = 全部;選擇器顯示
       「無保留訊息(全部壓縮)」
-- [ ] unit:`compaction-policy.test.ts`(split 空 kept 切點 / I5=0 / 舊「連 split
+- [x] unit:`compaction-policy.test.ts`(split 空 kept 切點 / I5=0 / 舊「連 split
       都放不下 → null」用例更新);`context-builder.test.ts`(空 kept payload、
       缺 meta = 空 kept、fail-open 不變)
-- [ ] client:chat-message-compaction / context-inspector 回歸(既有 fixture 用
+- [x] client:chat-message-compaction / context-inspector 回歸(既有 fixture 用
       `firstKeptMessageId: ''` = 「有 id 但無效」= fail-open,行為不變,確認即可)
 
 ✅ 驗收:最後一組 ass+tool 超 budget 時,自動/手動壓縮產生空 kept cmp、

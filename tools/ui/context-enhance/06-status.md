@@ -3,14 +3,16 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**N6 第一輪 check 的語法錯已修、待重跑**（2026-10-17）
-> ——使用者跑 `npm run check` 抓到 `context-builder.ts` 5 錯 + unit
-> `context-builder` suite transform 失敗（esbuild `Unexpected ":"`）；根因 =
-> N6 實做時 `keptIndex` 三元運算式漏 `?`（單一語法錯，其餘 4 個 type 錯為
-> `keptIndex` 被推斷成 `boolean` 的連鎖）；已補 `?`（純語法、無行為改動）。
-> 下一步 = 使用者重跑 `npm run check` + unit `context-builder` /
-> `compaction-policy` + client 回歸（清單見 §4 N6 條目）→ 全綠後 N6 完成
-> 並確認 → 實做雙 mode（共用 → A → B，見 §3.22）。
+> **恢復點（最新）**：**N6 完成並確認；下一步 = 雙 mode 實做**（2026-10-17）
+> ——N6（split 切允許空 kept，§3.21）使用者重跑 `npm run check` +
+> unit `compaction-policy` / `context-builder` + client 回歸 4 支（
+> `chat-message-compaction` / `context-inspector` / `context-gauge-compaction` /
+> `settings-registry-invariants`）全綠（第一輪 check 抓到 `context-builder.ts`
+> 語法錯 = `keptIndex` 三元漏 `?`、已修，見 §4 N6 第一輪/重跑）；05-N6
+> 清單全部勾選。下一步 = **雙 mode 實做**（規格見 §3.22；順序：共用基礎
+> （timings / {content,tokens} / byte 計數 / 重試+gate / settings 鏈 /
+> 卡片）→ A → B）→ 使用者 check + unit 驗證。另剩：Phase 1 的 5.8 手動
+> 驗收 + Phase 3 可選後續。
 >
 > 此前恢復點：**雙 mode 壓縮規格定稿、未實做**（2026-10-17）——
 > 同時保留兩種作法、user 選 mode、**default = A（recent-window / pi
@@ -22,8 +24,8 @@
 > completion tokens）、msg / API 無數用 byte、**不做派生比例**。A 超標
 > 沿用 B 的重試邏輯（同一 `contextSummaryMaxAttempts` + gate 卡片，只有
 > 成功判定式不同 → 該設定從 B 專用變**共用**）。02/03/04/05 已同步
-> （決策見 §3.22）。下一步 = 使用者 N6 編譯/測試確認 → 實做雙 mode
-> （共用 → A → B）→ 使用者 check + unit 驗證。
+> （決策見 §3.22）。下一步 = 實做雙 mode（共用 → A → B）→ 使用者
+> check + unit 驗證（N6 已完成並確認，見上方最新恢復點）。
 >
 > 此前恢復點：**v3 重設計已確認、未實做**（2026-10-16）——「自動壓縮
 > 從未觸發」根因已定位（舊 budget 公式把 keepBudget 壓死在 10% floor，
@@ -60,7 +62,8 @@
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
-| 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22） | 🚧 規格定稿（2026-10-17），未實做；02/03/04/05 已同步 |
+| 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22） | 🚧 規格定稿（2026-10-17），未實做；02/03/04/05 已同步；**下一步（見恢復點）** |
+| N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
 | 下一輪 — 5 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式 / N5 summary mode 設定，§5c） | ✅ **N1–N5 全部完成並確認**：N1（§3.13：改 n_ctx × %）；N2（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；N3（§3.15：手動壓縮 Stop 鍵）；N4（§3.18：prefix-stable default + 附件原樣送 + reasoning 跟隨主送出開關；第一輪 test bug 已修、重跑全綠）；N5（§3.19：`contextSummaryMode` SELECT 設定） |
 | Context Inspector UI 修復（水平溢出 + header 重疊，§2s/§3.16） | ✅ 完成並確認（第 3 輪 `w-full` mobile 寬度修復已通過手動驗證） |
@@ -1153,11 +1156,12 @@ boundary 切維持原規則（整個最後一個 turn 要放得下 budget）。
 - 既有 client fixture 的 `firstKeptMessageId: ''` 維持「有 id 但無效」=
   fail-open 語義（空字串 ≠ 缺欄位），行為不變。
 
-**狀態**：使用者已確認（D1 簡化版 + D2）；02/03/04/05 文件已同步；
-**程式碼 + tests 已實做（2026-10-16）**；第一輪 check 抓到
-`context-builder.ts` 語法錯（`keptIndex` 三元漏 `?`）、已修（2026-10-17，
-見 §4 N6 第一輪）；**待使用者重跑編譯/測試確認**（清單見 05-N6；驗證指令
-見 §4 最新條目）。確認全綠後勾選 05-N6 清單。
+**狀態**：✅ **完成並確認**（2026-10-17：使用者重跑 `npm run check` + unit
+`compaction-policy` / `context-builder` + client 回歸 4 支全綠，見 §4 N6
+重跑；05-N6 清單全部勾選）。歷史：使用者已確認（D1 簡化版 + D2）；
+02/03/04/05 文件已同步；程式碼 + tests 已實做（2026-10-16）；第一輪 check
+抓到 `context-builder.ts` 語法錯（`keptIndex` 三元漏 `?`）、已修（2026-10-17，
+見 §4 N6 第一輪）。
 
 ### 3.22 雙 mode 壓縮：recent-window（A，預設）+ threshold-target（B = v3+N6）（規格定稿 2026-10-17，未實做）
 
@@ -1405,12 +1409,12 @@ summarize / context-builder + 新 planCompactionRecentWindow）+ client
 - **N5 ✅ 完成並確認**（變更見 §3.19）：使用者跑 `npm run check` + unit
   `summarize`（**16/16**：原 14 + 新 2）+ client
   `settings-registry-invariants`（全 key 迴綠、含新 `contextSummaryMode`）全綠。
-- **下一步**：① **N6 編譯/測試確認**（見下方最新條目）；② **雙 mode 實做**
-（清單見 05-雙 mode、設計見 §3.22；順序：共用基礎（timings /
-{content,tokens} / byte 計數 / 重試+gate / settings 鏈 / 卡片）→ A → B）；
-③ Phase 1 的 5.8 手動驗收（見上方清單）；
-④ Phase 3 可選後續（規劃見 05-§1，含 summary 獨立 model / endpoint）。
-- **N6（split 切允許空 kept）已實做、待編譯確認**（變更見 §3.21）：
+- **下一步**：① **雙 mode 實做**（清單見 05-雙 mode、設計見 §3.22；順序：
+共用基礎（timings / {content,tokens} / byte 計數 / 重試+gate / settings 鏈 /
+卡片）→ A → B）→ 使用者 check + unit 驗證；② Phase 1 的 5.8 手動驗收（見
+上方清單）；③ Phase 3 可選後續（規劃見 05-§1，含 summary 獨立 model /
+endpoint）。（N6 編譯/測試確認 ✅ 已完成並確認，見下方 N6 重跑）
+- **N6（split 切允許空 kept）已實做**（變更見 §3.21）：
   policy 階段 2 允許 `cutIndex = path.length`（空 kept、`firstKeptMessageId`
   缺）；builder 三態（缺 id = 空 kept `boundaryValid: true`／id 失效 =
   fail-open I3／正常）；`contextKeepMinMessages` default 2→0、min 2→0；
@@ -1438,6 +1442,11 @@ summarize / context-builder + 新 planCompactionRecentWindow）+ client
   改動；修正後已逐 case 手工追蹤 `context-builder.test.ts` 全部 15 支與
   邏輯一致）。待使用者重跑上方 N6 條目的完整指令（check + 2 支 unit +
   client 回歸 4 支）。
+- **N6 重跑 ✅ 完成並確認**（使用者 2026-10-17）：`npm run check` +
+  unit `compaction-policy` + unit `context-builder` + client 回歸
+  `chat-message-compaction` / `context-inspector` / `context-gauge-compaction` /
+  `settings-registry-invariants` **全綠**。N6 完成（05-N6 清單已勾、§3.21
+  狀態改「完成並確認」）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
