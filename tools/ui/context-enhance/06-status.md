@@ -1234,12 +1234,13 @@ boundary 切維持原規則（整個最後一個 turn 要放得下 budget）。
   （Q2 已解：byte 加算 + 記錄後果）、兩個 planner 的長期維護（皆小純函式、
   回同一 CompactionPlan 型別）。
 
-**狀態**：規格定稿（Q1–Q3）；02/03/04/05 已同步；**未實做**。實做順序：
+**狀態**：規格定稿（Q1–Q3）；02/03/04/05 已同步；**來源碼完成（2026-10-17，
+§3.23，18 檔，已逐檔確認存在且與明細一致）、測試未寫**。實做順序已照規劃執行：
 共用基礎（timings 解析 / `{content, tokens}` / byte 計數 / 重試+gate /
 settings 鏈 / 卡片）→ A（planner + 觸發/判定 + gauge）→ B（budget 公式 +
-觸發/判定）。完成後使用者跑 `npm run check` + unit（compaction-policy /
-summarize / context-builder + 新 planCompactionRecentWindow）+ client
-（settings-registry-invariants + 卡片測試 + 回歸）驗證。
+觸發/判定）。下一步 = 測試（見 §3.23「下一步」1–5）→ 使用者跑 `npm run check` +
+unit（compaction-policy / summarize / context-builder）+ client
+（settings-registry-invariants + compaction-decision-card + 回歸）驗證。
 
 ## 3.23 雙 mode 實做（共用 + A + B）（2026-10-17；來源碼完成、測試未寫，待編譯驗證）
 
@@ -1564,6 +1565,37 @@ endpoint）。（N6 編譯/測試確認 ✅ 已完成並確認，見下方 N6 �
   `chat-message-compaction` / `context-inspector` / `context-gauge-compaction` /
   `settings-registry-invariants` **全綠**。N6 完成（05-N6 清單已勾、§3.21
   狀態改「完成並確認」）。
+- **雙 mode 實做（共用 + A + B）來源碼完成、測試未寫、待使用者 check**（2026-10-17；
+  變更見 §3.23，18 檔已逐檔確認存在且一致）：
+  ① `tests/unit/compaction-policy.test.ts` **需重寫**：現 34 支皆 char/4 語義
+  （fixture T100 = 400 chars = 100 「tokens」）+ 舊 budget 公式（summaryReserve
+  × 1.5 / 10% floor，已移除）+ `estimateCompactionSavings` 硬編碼期望（char/4 下
+  算出）→ 需改 byte 語義 + 新公式（逐支調值清單見 §3.23 下一步 1）；新 suite
+  `byteLength` / `planCompactionRecentWindow` / `shouldTriggerCompaction` /
+  `evaluateCompactionResult` / `computeEffectiveWindow` / `toCompactionMode` /
+  `resolveSummarySize` / `nextCompactionStep` 未寫。**重寫前跑此 suite 會紅**
+  （舊公式 / 舊單位用例 vs 新實做）——預期，非回歸。
+  ② `tests/unit/summarize.test.ts` 需更新：現 16 支以
+  `mockResolvedValue('the summary')` string 回傳 mock（新實做 line 257 相容
+  `typeof response === 'string'`，既有用例預期維持綠），但對新回傳型別
+  `{ content, tokens }` / timings 抓取 / `summarizeWithRetry` **零覆蓋** →
+  照 §3.23 下一步 2 改 `{ content, tokens }` 斷言 + 新 `summarizeWithRetry`
+  suite。
+  ③ `tests/client/compaction-decision-card.svelte.test.ts` **新、未建立**（卡片
+  三選項 resolve gate + gate 層 request → pending → resolve / abort = skip）。
+  ④ `tests/unit/context-builder.test.ts`（14 支）期望值用同一 `estimateTokens`
+  函式計算 → byte 化預期自適應零改動（待跑確認）。
+  ⑤ `settings-registry-invariants` generic（iterates `SETTING_CONFIG_DEFAULT`）
+  → 4 新 key + `dependsOnValue` 預期零改動（待跑確認）。
+  待使用者跑：`npm run check` +
+  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
+  `npx vitest --project=unit --run tests/unit/summarize.test.ts` +
+  `npx vitest --project=unit --run tests/unit/context-builder.test.ts` +
+  `npx vitest --project=client --run tests/client/settings-registry-invariants.svelte.test.ts` +
+  `npx vitest --project=client --run tests/client/compaction-decision-card.svelte.test.ts` +
+  client 回歸 `chat-message-compaction` / `context-inspector` /
+  `context-gauge-compaction`。全綠 → 勾 05-雙 mode 清單測試項、§3.22/§3.23 狀態
+  改「完成並確認」、README 停點更新。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
