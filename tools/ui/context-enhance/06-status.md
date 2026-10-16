@@ -1131,10 +1131,9 @@ boundary 切維持原規則（整個最後一個 turn 要放得下 budget）。
 - 既有 client fixture 的 `firstKeptMessageId: ''` 維持「有 id 但無效」=
   fail-open 語義（空字串 ≠ 缺欄位），行為不變。
 
-**狀態**：使用者已確認（D1 簡化版 + D2）；02/03/04/05 文件已同步；**未實做**。
-實做清單見 05-N6；完成後使用者自行 `npm run check` + unit
-（compaction-policy / context-builder）+ client（chat-message-compaction /
-context-inspector / context-gauge-compaction / settings-registry-invariants）驗證。
+**狀態**：使用者已確認（D1 簡化版 + D2）；02/03/04/05 文件已同步；
+**程式碼 + tests 已實做（2026-10-16），待使用者編譯/測試確認**（清單見
+05-N6；驗證指令見 §4 最新條目）。確認全綠後勾選 05-N6 清單。
 
 ## 4. 驗證狀態（目前停在這）
 
@@ -1319,7 +1318,28 @@ context-inspector / context-gauge-compaction / settings-registry-invariants）�
 - **N5 ✅ 完成並確認**（變更見 §3.19）：使用者跑 `npm run check` + unit
   `summarize`（**16/16**：原 14 + 新 2）+ client
   `settings-registry-invariants`（全 key 迴綠、含新 `contextSummaryMode`）全綠。
-- **下一步**：① Phase 1 的 5.8 手動驗收（見上方清單）；② Phase 3 可選後續（規劃見 05-§1，含 summary 獨立 model / endpoint）。
+- **下一步**：① **N6 編譯/測試確認**（見下方最新條目）；② **v3 實做**
+（清單見 05-v3、設計見 §3.20）；③ Phase 1 的 5.8 手動驗收（見上方清單）；
+④ Phase 3 可選後續（規劃見 05-§1，含 summary 獨立 model / endpoint）。
+- **N6（split 切允許空 kept）已實做、待編譯確認**（變更見 §3.21）：
+  policy 階段 2 允許 `cutIndex = path.length`（空 kept、`firstKeptMessageId`
+  缺）；builder 三態（缺 id = 空 kept `boundaryValid: true`／id 失效 =
+  fail-open I3／正常）；`contextKeepMinMessages` default 2→0、min 2→0；
+  store `boundaryIndexOf` → `keptWindowStartOf`（缺 id = entry index + 1）、
+  `summarizeRegion` 加 `entryId` 參數且 region 排除 cmp 節點本身、
+  `recompactConversationEntry` 的「Nothing to summarize」改算排除 entry 後的
+  實際 region；`ChatMessageCompaction` / `DialogContextInspector` 空 kept 態
+  （Kept from: none / 「No kept messages (all compacted)」/ dropped = 全部）；
+  `estimateCompactionSavings` 無 boundary = dropped 全部。unit：policy 改 1
+  支（舊「連 split 都放不下 → null」→ 空 kept plan）+ 新 4 支；builder 改 1
+  支（舊「缺 meta = fail-open」→ 空 kept）+ 新 2 支；I3 fail-open 用例保留。
+  client 零改動（fixture `firstKeptMessageId: ''` = 「有 id 但無效」= fail-open，
+  語義不變）。待使用者跑：`npm run check` +
+  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
+  `npx vitest --project=unit --run tests/unit/context-builder.test.ts` +
+  client 回歸 `chat-message-compaction` / `context-inspector` /
+  `context-gauge-compaction` / `settings-registry-invariants`。
+  全綠 → N6 完成並確認（勾 05-N6 清單、§3.21 狀態改「完成並確認」）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 

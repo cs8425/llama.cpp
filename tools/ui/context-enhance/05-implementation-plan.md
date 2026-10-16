@@ -100,7 +100,7 @@
 ✅ 驗收:長對話(262K 級)自動壓縮真的會發生;超標場景(小 keepTarget)走
 重試 → gate 三選項;無 cmp 對話行為不變。
 
-### N6 — split 切允許空 kept(使用者要求 2026-10-16,未實做)
+### N6 — split 切允許空 kept（使用者要求 2026-10-16，已實做、待編譯確認）
 
 > 背景:split 切原本要求「最後 ≥2 則(含大 tool result)放得下 budget」
 > (`contextKeepMinMessages` 預設 2);budget 極緊時(最後一組 ass+tool 本身就巨大)
@@ -112,6 +112,10 @@
 > **D2**:保留 `contextKeepMinMessages`,default 2→0、range 0–50(設回 ≥1 恢復舊行為)。
 > 設計同步:02-§1.1/§2/I3/I5/§3.1/§3.3/§4、03-§2/§4.2、04-§2.2;
 > 決策記錄見 06-status §3.21。
+>
+> **狀態(2026-10-16)**:程式碼 + tests 已實做、02/03/04/05 已同步;
+> **待使用者編譯/測試確認**(指令清單見 06-status §4 最新條目)。
+> 全綠後勾選下列清單。
 
 - [ ] `types/database.d.ts`:`CompactionMeta.firstKeptMessageId: string` → `firstKeptMessageId?: string`
 - [ ] `services/context/types.ts`:`CompactionPlan.firstKeptMessageId` /

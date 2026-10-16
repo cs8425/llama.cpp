@@ -15,7 +15,7 @@
 > default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status §3.18）；
 > **N5 ✅ 完成並確認**（新設定 `contextSummaryMode`：summary 的 prompt
 > 模式開放給 user 選，見 06-status §3.19））。
-> **目前停點**：**v3 重設計已確認、未實做** + **N6 split 切允許空 kept 已確認、未實做**（皆 2026-10-16）——「自動壓縮從未觸發」
+> **目前停點**：**v3 重設計已確認、未實做** + **N6 split 切允許空 kept 已實做、待編譯/測試確認**（皆 2026-10-16）——「自動壓縮從未觸發」
 > 根因已定位（舊 budget 公式把 keepBudget 壓死在 10% floor，分析見 06-status
 > §3.20）；v3 = 實際 token 計數（API 實際值優先、否則 byte 數）+ compact 成功
 > 判定（head + summary ≤ keepTarget% n_ctx）+ 超標重試/user gate（三選項）；
