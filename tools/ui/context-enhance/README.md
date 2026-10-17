@@ -15,8 +15,11 @@
 > default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status §3.18）；
 > **N5 ✅ 完成並確認**（新設定 `contextSummaryMode`：summary 的 prompt
 > 模式開放給 user 選，見 06-status §3.19））。
-> **目前停點**：**v4 真實 token 計數 ✅ 完成並確認**（2026-10-17；`npm run
-> check` + unit 3 支 + client 5 支全綠,見 06-status 檔首恢復點 / §3.25）。
+> **目前停點**：**N7 壓縮進行中（queue + in-chat 指標列 + Stop）已實做、
+> 待使用者編譯/測試確認**（2026-11-04；來源碼 + client 11 支完成，見
+> 06-status 檔首恢復點 / §2u / §3.26）。此前：**v4 真實 token 計數 ✅ 完成並確認**
+> （2026-10-17；`npm run check` + unit 3 支 + client 5 支全綠，見 06-status
+> 檔首恢復點 / §3.25）。
 > v4 = 計數/觸發/成功判定/
 > Inspector 全用真實
 > token（`deriveRealMessageTokens`：assistant=predicted_n、段真實總和歸該段
@@ -33,10 +36,11 @@
 > N6（split 切允許空 kept，2026-10-17）；N1–N5（2026-07-22：summary 上限
 > n_ctx × % / keep target 設定 / Stop 鍵 / prefix-stable default /
 > `contextSummaryMode` 設定）。
-> **剩**：**N7 壓縮進行中（queue + in-chat 指標列 + Stop）設計定稿、待實做**
-> （2026-11-04；post-flow 自動壓縮 fire-and-forget 與新送出的競態修復——
-> 見 06-status §3.26 / 04-§4.2 / 05-N7）+ Phase 1 5.8 手動驗收
-> （見 06-status §4 清單；A/B mode 行為 + v4 顯示可一併驗）+ Phase 3
+> **剩**：**N7 待使用者編譯/測試確認**（已實做；2026-11-04；post-flow 自動
+> 壓縮 fire-and-forget 與新送出的競態修復——見 06-status §3.26 / §2u /
+> 04-§4.2 / 05-N7）+ Phase 1 5.8 手動驗收
+> （見 06-status §4 清單；A/B mode 行為 + v4 顯示可一併驗；N7 手動驗收
+> #8–#12）+ Phase 3
 > 可選後續（兩段式 summary / per-conversation
 > 覆蓋 / 合併重摘要提示 / summary 獨立 model / endpoint / gauge savings
 > 顯示，見 05-§1；

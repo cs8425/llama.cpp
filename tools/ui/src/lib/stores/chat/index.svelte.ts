@@ -140,6 +140,11 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			c.abort();
 			this.abortControllers.delete(convId);
 		}
+
+		// N7: "Send immediately" on a pending row while a compaction summary
+		// runs also aborts the summary (no-op without one) — the compaction
+		// finalizer then auto-sends the queued message.
+		this.stopCompaction();
 	}
 
 	async addMessage(
@@ -566,131 +571,162 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 
 		if (contextStatsStore.compacting) return;
 
-		const isActive = conversationsStore.activeConversation?.id === convId;
-		const path = await this.resolveConversationPath(convId);
-
-		if (!path || path.length === 0) return;
-
-		const config = settingsStore.config;
-		const nCtx = this.getContextSizeForConversation(convId, path);
-
-		if (nCtx === null || nCtx <= 0) {
-			if (!auto) toast.info('Model context size unknown');
-
-			return;
-		}
-
-		const mode: CompactionMode = toCompactionMode(config.contextCompactionMode);
-
-		// Auto compaction needs the master switch on AND the mode-specific
-		// trigger crossed; the manual action skips both gates. v4: the trigger
-		// is the real context usage (the gauge's own number) — never a byte
-		// estimate.
-		if (auto) {
-			if (!config.contextAutoCompaction) return;
-
-			if (
-				!shouldTriggerCompaction(mode, {
-					contextCompactionThreshold: config.contextCompactionThreshold,
-					contextKeepRecentTokens: config.contextKeepRecentTokens,
-					contextMaxContextOverride: config.contextMaxContextOverride,
-					lastPrompt: contextStatsStore.contextUsed,
-					nCtx
-				})
-			)
-				return;
-		}
-
-		const plan =
-			mode === 'recent-window'
-				? planCompactionRecentWindow(path, {
-						keepRecentTokens: config.contextKeepRecentTokens,
-						minKeptMessages: config.contextKeepMinMessages,
-						minKeptUserTurns: config.contextKeepMinUserTurns,
-						minSummarizeTokens: MIN_SUMMARIZE_TOKENS
-					})
-				: planCompaction(path, computeCompactionBudget(nCtx, config));
-
-		if (!plan) {
-			if (!auto) toast.info('No range to compact');
-
-			return;
-		}
-
-		// Snapshot the pre-compaction path: the active array is mutated by
-		// addMessageToActive below, and the pre-encode must warm the new
-		// prefix (old path + cmp) without duplicating the entry.
-		const preCompactionPath = [...path];
-		const model = this.resolveCompactionModel(path);
-
-		contextStatsStore.compacting = true;
-		const abortController = new AbortController();
-		this.compactionAbortController = abortController;
+		// N7: claim the compaction state before any async work — the old gap
+		// (guard → path/plan/summary) let a new send slip in, orphaning the
+		// cmp node and sending the un-compacted context. Every exit path below
+		// funnels through endCompactionState, which also auto-sends a message
+		// the user queued while the summary ran.
+		contextStatsStore.setCompacting(convId);
 
 		try {
-			// The shared over-target mechanism (both modes): summarize →
-			// mode-specific success check → retry → user gate (the card mounts
-			// as an independent row at the end of the message list; the Stop
-			// button / an abort resolves it as skip).
-			const summary = await this.runCompactionSummary(
-				convId,
-				plan,
-				model,
-				nCtx,
-				mode,
-				config,
-				abortController.signal
-			);
+			const isActive = conversationsStore.activeConversation?.id === convId;
+			const path = await this.resolveConversationPath(convId);
 
-			if (!summary) {
-				toast.info('Compaction skipped');
+			if (!path || path.length === 0) return;
+
+			const config = settingsStore.config;
+			const nCtx = this.getContextSizeForConversation(convId, path);
+
+			if (nCtx === null || nCtx <= 0) {
+				if (!auto) toast.info('Model context size unknown');
 
 				return;
 			}
 
-			const cmp = await DatabaseService.createCompactionMessage({
-				compactionMeta: {
-					estimatedTokensBefore: plan.estimatedTokensBefore,
-					firstKeptMessageId: plan.firstKeptMessageId,
-					isSplitTurn: plan.isSplitTurn || undefined,
-					model: model ?? undefined,
-					summarizedCount: plan.toSummarize.length
-				},
-				content: `${SUMMARY_CONTENT_PREFIX} ${summary.content}`,
-				convId,
-				parentId: path[path.length - 1].id
-			});
+			const mode: CompactionMode = toCompactionMode(config.contextCompactionMode);
 
-			if (isActive) {
-				conversationsStore.addMessageToActive(cmp);
-				await conversationsStore.updateCurrentNode(cmp.id);
-			} else {
-				await DatabaseService.updateCurrentNode(convId, cmp.id);
-				conversationsStore.applyConversationUpdate(convId, { currNode: cmp.id });
+			// Auto compaction needs the master switch on AND the mode-specific
+			// trigger crossed; the manual action skips both gates. v4: the trigger
+			// is the real context usage (the gauge's own number) — never a byte
+			// estimate.
+			if (auto) {
+				if (!config.contextAutoCompaction) return;
+
+				if (
+					!shouldTriggerCompaction(mode, {
+						contextCompactionThreshold: config.contextCompactionThreshold,
+						contextKeepRecentTokens: config.contextKeepRecentTokens,
+						contextMaxContextOverride: config.contextMaxContextOverride,
+						lastPrompt: contextStatsStore.contextUsed,
+						nCtx
+					})
+				)
+					return;
 			}
 
-			conversationsStore.updateConversationTimestamp(convId);
+			const plan =
+				mode === 'recent-window'
+					? planCompactionRecentWindow(path, {
+							keepRecentTokens: config.contextKeepRecentTokens,
+							minKeptMessages: config.contextKeepMinMessages,
+							minKeptUserTurns: config.contextKeepMinUserTurns,
+							minSummarizeTokens: MIN_SUMMARIZE_TOKENS
+						})
+					: planCompaction(path, computeCompactionBudget(nCtx, config));
 
-			// Warm the KV cache with the NEW prefix so the next turn does not
-			// pay a full re-prompt on top of the summary call.
-			await this.triggerPreEncode(preCompactionPath, cmp, cmp.content, model);
+			if (!plan) {
+				if (!auto) toast.info('No range to compact');
 
-			// v4: real tokens — the kept region's plan size plus the summary's
-			// own size (actual completion tokens, byte length when unreported).
-			const estimatedAfter = plan.estimatedTokensAfter + resolveSummarySize(summary.tokens, cmp.content);
+				return;
+			}
 
-			toast.success(`Context compacted: ~${plan.estimatedTokensBefore} → ~${estimatedAfter} tokens`);
-		} catch (error) {
-			// Fail-open: no cmp node was created (or it was created but the
-			// state updates failed) — the conversation keeps its full context.
-			if (isAbortError(error)) {
-				toast.info('Compaction stopped');
-			} else {
-				toast.error(`Compaction failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+			// Snapshot the pre-compaction path: the active array is mutated by
+			// addMessageToActive below, and the pre-encode must warm the new
+			// prefix (old path + cmp) without duplicating the entry.
+			const preCompactionPath = [...path];
+			const model = this.resolveCompactionModel(path);
+
+			const abortController = new AbortController();
+			this.compactionAbortController = abortController;
+
+			try {
+				// The shared over-target mechanism (both modes): summarize →
+				// mode-specific success check → retry → user gate (the card mounts
+				// as an independent row at the end of the message list; the Stop
+				// button / an abort resolves it as skip).
+				const summary = await this.runCompactionSummary(
+					convId,
+					plan,
+					model,
+					nCtx,
+					mode,
+					config,
+					abortController.signal
+				);
+
+				if (!summary) {
+					toast.info('Compaction skipped');
+
+					return;
+				}
+
+				const cmp = await DatabaseService.createCompactionMessage({
+					compactionMeta: {
+						estimatedTokensBefore: plan.estimatedTokensBefore,
+						firstKeptMessageId: plan.firstKeptMessageId,
+						isSplitTurn: plan.isSplitTurn || undefined,
+						model: model ?? undefined,
+						summarizedCount: plan.toSummarize.length
+					},
+					content: `${SUMMARY_CONTENT_PREFIX} ${summary.content}`,
+					convId,
+					parentId: path[path.length - 1].id
+				});
+
+				if (isActive) {
+					conversationsStore.addMessageToActive(cmp);
+					await conversationsStore.updateCurrentNode(cmp.id);
+				} else {
+					await DatabaseService.updateCurrentNode(convId, cmp.id);
+					conversationsStore.applyConversationUpdate(convId, { currNode: cmp.id });
+				}
+
+				conversationsStore.updateConversationTimestamp(convId);
+
+				// Warm the KV cache with the NEW prefix so the next turn does not
+				// pay a full re-prompt on top of the summary call.
+				await this.triggerPreEncode(preCompactionPath, cmp, cmp.content, model);
+
+				// v4: real tokens — the kept region's plan size plus the summary's
+				// own size (actual completion tokens, byte length when unreported).
+				const estimatedAfter = plan.estimatedTokensAfter + resolveSummarySize(summary.tokens, cmp.content);
+
+				toast.success(`Context compacted: ~${plan.estimatedTokensBefore} → ~${estimatedAfter} tokens`);
+			} catch (error) {
+				// Fail-open: no cmp node was created (or it was created but the
+				// state updates failed) — the conversation keeps its full context.
+				if (isAbortError(error)) {
+					toast.info('Compaction stopped');
+				} else {
+					toast.error(`Compaction failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+				}
 			}
 		} finally {
-			this.compactionAbortController = null;
-			contextStatsStore.compacting = false;
+			await this.endCompactionState(convId);
+		}
+	}
+
+	/**
+	 * N7 finalizer shared by this store's compaction paths (compact /
+	 * recompact / backward boundary move): clears the compaction state (the
+	 * abort controller is always reset) and auto-sends the message the user
+	 * queued while the summary ran (the sendMessage guard parked it in the
+	 * pending slot). Runs on every exit path — success, gate skip, summary
+	 * failure, abort — so a queued message is never dropped. If the
+	 * conversation is no longer active the pending message stays in the queue
+	 * (it renders again when the user returns) instead of being sent into the
+	 * now-active conversation.
+	 */
+	private async endCompactionState(convId: string): Promise<void> {
+		this.compactionAbortController = null;
+		contextStatsStore.setCompacting(null);
+
+		if (conversationsStore.activeConversation?.id !== convId) return;
+
+		const pending = this.consumePendingMessage(convId);
+
+		if (pending) {
+			await this.sendMessage(pending.content, pending.extras);
 		}
 	}
 
@@ -851,7 +887,9 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		}
 
 		// Backward move: the enlarged region must be re-summarized (02-§4).
-		contextStatsStore.compacting = true;
+		// N7: claim the state with the conv id; the shared finalizer clears it
+		// and auto-sends any queued message on every exit path.
+		contextStatsStore.setCompacting(convId);
 		const abortController = new AbortController();
 		this.compactionAbortController = abortController;
 
@@ -897,8 +935,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				toast.error(`Boundary move failed: ${error instanceof Error ? error.message : 'unknown error'}`);
 			}
 		} finally {
-			this.compactionAbortController = null;
-			contextStatsStore.compacting = false;
+			await this.endCompactionState(convId);
 		}
 	}
 
@@ -955,7 +992,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			return;
 		}
 
-		contextStatsStore.compacting = true;
+		contextStatsStore.setCompacting(convId);
 		const abortController = new AbortController();
 		this.compactionAbortController = abortController;
 
@@ -1000,8 +1037,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				toast.error(`Re-summarization failed: ${error instanceof Error ? error.message : 'unknown error'}`);
 			}
 		} finally {
-			this.compactionAbortController = null;
-			contextStatsStore.compacting = false;
+			await this.endCompactionState(convId);
 		}
 	}
 
@@ -1320,6 +1356,21 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 
 		// If non-agentic streaming is active, queue as a pending message to send after completion
 		if (activeConv && this.isChatLoadingInternal(activeConv.id)) {
+			this.injectPendingMessage(activeConv.id, content, extras);
+
+			return;
+		}
+
+		// N7: while a compaction summary runs for THIS conversation, queue the
+		// message as pending (same single slot, same last-send-wins semantics as
+		// streaming); the compaction finalizer (endCompactionState) auto-sends
+		// it once the summary settles (success / skip / failure / abort).
+		// Other conversations are unaffected (per-conv scope).
+		if (
+			activeConv &&
+			contextStatsStore.compacting &&
+			contextStatsStore.compactingConvId === activeConv.id
+		) {
 			this.injectPendingMessage(activeConv.id, content, extras);
 
 			return;

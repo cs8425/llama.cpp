@@ -566,7 +566,9 @@ class AgenticStore {
 		// mutates (context-enhance/06 §3.10).
 		const preCompactionPath = [...path];
 
-		contextStatsStore.compacting = true;
+		// N7: claim the state with the conv id so the in-chat indicator row and
+		// the UI's compacting feedback are scoped to this conversation.
+		contextStatsStore.setCompacting(conversationId);
 
 		try {
 			// The shared over-target mechanism (both modes): summarize →
@@ -642,7 +644,10 @@ class AgenticStore {
 				toast.error(`Compaction failed: ${error instanceof Error ? error.message : 'unknown error'}`);
 			}
 		} finally {
-			contextStatsStore.compacting = false;
+			// N7: clear the state only — this path does NOT auto-send a queued
+			// pending message: while the loop runs, input is steered (guard layer
+			// 1) and consumed by the next loop iteration (existing behavior).
+			contextStatsStore.setCompacting(null);
 		}
 	}
 

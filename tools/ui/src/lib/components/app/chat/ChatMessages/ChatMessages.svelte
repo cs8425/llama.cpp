@@ -1,6 +1,6 @@
 <script lang="ts">
 	import LazyChatMessage from './LazyChatMessage.svelte';
-	import { ChatCompactionDecisionCard, ChatMessageUserPending } from '$lib/components/app';
+	import { ChatCompactionDecisionCard, ChatMessageCompacting, ChatMessageUserPending } from '$lib/components/app';
 	import { MessageRole, MessageType } from '$lib/enums';
 	import type { CompactionDecision } from '$lib/services/context';
 	import { agenticStore, chatStore, conversationsStore, settingsStore } from '$lib/stores';
@@ -270,7 +270,9 @@
 		<!-- Over-target compaction gate (between flows / manual actions): an
 		     independent row at the end of the message list. In-loop the card
 		     mounts inside the agentic message instead (the flow is running, so
-		     this one stays hidden). -->
+		     this one stays hidden). N7: while no card is shown, the in-flight
+		     compaction indicator row (spinner + Stop) takes the same anchor —
+		     above the pending/steering row. -->
 		{#if conversationsStore.activeConversation}
 			{@const compactionConvId = conversationsStore.activeConversation.id}
 			{@const pendingCompaction =
@@ -286,6 +288,8 @@
 						request={pendingCompaction}
 					/>
 				</div>
+			{:else}
+				<ChatMessageCompacting class="mx-auto mt-12 w-full max-w-3xl" />
 			{/if}
 		{/if}
 

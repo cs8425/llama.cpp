@@ -32,11 +32,15 @@
 	let meta = $derived(message.compactionMeta);
 	let path = $derived(conversationsStore.activeMessages);
 	let headLength = $derived(path[0]?.role === MessageRole.SYSTEM ? 1 : 0);
-	let compacting = $derived(contextStatsStore.compacting);
+	// N7: the compaction state is per-conversation — a background compaction of
+	// another conversation must not flip this entry to its Stop state.
+	let compacting = $derived(
+		contextStatsStore.compacting && contextStatsStore.compactingConvId === message.convId
+	);
 
 	// The store actions are I7-guarded anyway (isChatLoading / compacting);
 	// the UI just gives feedback while the context is busy.
-	let actionsBlocked = $derived(contextStatsStore.compacting || chatStore.isLoading);
+	let actionsBlocked = $derived(compacting || chatStore.isLoading);
 
 	// The stored content carries the fixed summary prefix (added at node
 	// creation); strip it so the body reads as the plain summary text.

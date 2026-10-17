@@ -3,9 +3,50 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新；2026-11-04：N7 壓縮進行中（queue + 指標列 + Stop）設計定稿、
-> 待實做——設計見 04-§4.2 / 05-N7 / 本檔 §3.26；此前 v4 真實 token 計數
-> ✅ 完成並確認（2026-10-17，`npm run check` + unit 3 支 + client 5 支全綠））**：
+> **恢復點（最新；2026-11-04：N7 壓縮進行中（queue + 指標列 + Stop）已實做、
+> 待使用者編譯/測試確認——來源碼 + client 測試完成（明細見 §2u / §3.26）；
+> 此前 v4 真實 token 計數 ✅ 完成並確認（2026-10-17，`npm run check` +
+> unit 3 支 + client 5 支全綠））**：
+>
+> N7 本輪已實做（設計 04-§4.2 / 05-N7 / §3.26；queue 不 block + in-chat 指標列
+> （Stop）+ per-conv scope）：
+> - `context-stats.svelte.ts`：`compactingConvId` + 原子 `setCompacting(convId | null)`；
+>   全 codebase 的 `compacting` 寫入皆改走它（四條路徑）。
+> - `chatStore.compactConversation`：`setCompacting(convId)` 前移至 I7 guard 通過後
+>   立刻（收掉 guard→path/plan/summary 的 async 競態窗口）；全函式 try/finally →
+>   新共用 finalizer `endCompactionState(convId)`（`setCompacting(null)` +
+>   consume pending → 自動送；conversation 已切走時 pending 留在 queue 不送、
+>   不回傳到別的 conv）。
+> - `chatStore.moveCompactionBoundary`（後移）/ `recompactConversationEntry`：
+>   同樣 `setCompacting(convId)` + finalizer（前移方向不改、無 summary 呼叫）。
+> - `agenticStore.compactBetweenTurns`：`setCompacting(conversationId)`；finally
+>   只清狀態、**不** consume pending（in-loop 輸入走 steering、由下一 loop
+>   iteration 消費，既有行為）。
+> - `chatStore.sendMessage`：新第三層 guard（steering / streaming-pending 之後）：
+>   `compacting && compactingConvId === activeConv.id` → `injectPendingMessage`
+>   + return（single-slot、後送覆蓋前送，與 streaming 同語義）；他 conv 不受影響。
+> - `chatStore.abortCurrentFlow`：補 `stopCompaction()`（pending row 的
+>   Send-immediately 於壓縮期間 = 中斷 summary → finalizer 自動送；無手動壓縮
+>   時 no-op）。
+> - 新 `ChatMessageCompacting.svelte`（spinner + 「Compacting context…」+ [Stop]，
+>   `role="status"`）：顯示條件 = per-conv（`compactingConvId === activeConv.id`）
+>   + 尾端非 cmp + 超標卡片未顯示（後者由 `ChatMessages.svelte` 的 else 分支處理，
+>   DOM 序：訊息列 → 指標列 → 超標卡片 → pending/steering row）；Stop 分派：
+>   `isRunning(convId)` ? `stopGeneration()` : `stopCompaction()`。barrel export
+>   同 `ChatCompactionDecisionCard`。
+> - 既有三個 `compacting` 消費者改 per-conv（設計「conv A 背景壓縮不在 conv B
+>   顯示/阻擋」的必然推論）：gauge popup 行 / cmp row 的 Stop 與 actionsBlocked /
+>   inspector 的 actionsBlocked。
+> - 新 client suite `tests/client/chat-message-compacting.svelte.test.ts`（11 支）：
+>   指標列顯示/隱藏（同 conv / 他 conv / idle / 尾端 cmp / 超標卡片顯示中）、
+>   Stop 分派（running / 非 running）、`sendMessage` guard（同 conv → pending 無
+>   API 呼叫；他 conv → 正常送）、finalizer 自動送（early exit / abort 兩路徑）、
+>   DOM 序（指標列在 pending row 上方）。
+>
+> **待使用者執行**：`npm run check` + `npx vitest --project=client --run
+> tests/client/chat-message-compacting.svelte.test.ts`（+ 回歸
+> `chat-message-compaction` / `context-gauge-compaction` / `context-inspector` /
+> `compaction-decision-card`）；綠後勾 05-N7 清單 + 手動驗收（05-§3 #8–#12）。
 >
 > v4 本輪結案：
 > - ✅ 使用者完整指令全綠：`npm run check`（0 錯 0 警告）+ unit
@@ -25,8 +66,8 @@
 >   `estimateApiMessageTokens` 一併改名 `apiMessageBytes`。
 >
 > **剩（依序）**：
-> 1. **N7 壓縮進行中實做**（設計定稿 2026-11-04，見 §3.26 / 04-§4.2 /
->    05-N7；queue 不 block + in-chat 指標列（Stop）+ per-conv scope）。
+> 1. **N7 待使用者編譯/測試確認**（已實做，明細見檔首 / §2u / §3.26）→
+>    綠後勾 05-N7 清單 + 手動驗收（05-§3 #8–#12）。
 > 2. Phase 1 5.8 手動驗收（§4 清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）。
 > 3. Phase 3 可選後續（05-§1）。
 >
@@ -44,7 +85,7 @@
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
 | v4 — 真實 token 計數（§3.24/§3.25） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` 82/82 / `context-builder` / `summarize` + client `context-inspector` / `chat-message-compaction` / `context-gauge-compaction` / `compaction-decision-card` / `settings-registry-invariants` 全綠；第一輪 9 失敗已修、3 根因全在測試檔，見 §3.25 / 檔首恢復點；05-v4 清單已全勾） |
-| N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（§3.26） | 📐 設計定稿（2026-11-04）、**待實做**（05-N7 清單；queue 不 block + 指標列 + per-conv `compactingConvId` + sendMessage guard + finalizer 自動送） |
+| N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（§3.26/§2u） | 🚧 **已實做、待使用者編譯/測試確認**（2026-11-04；queue 不 block + 指標列 + per-conv `compactingConvId` + sendMessage guard + finalizer 自動送 + client 11 支） |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
@@ -1402,10 +1443,14 @@ request body(已確認 chat.service.ts:1142-1162 / 883-897)。
 
 ### 狀態
 
-- 📐 設計定稿（本節 + 04-§4.2 + 05-N7 清單）；**未實做**。
-- 實做順序建議：context-stats flag → chatStore guard + finalizer →
+- ✅ **已實做（2026-11-04）**——明細見 §2u（store 層五處 + 新元件 +
+  `ChatMessages` 插入 + 三個消費者 per-conv + client 11 支）；**待使用者
+  編譯/測試確認**（`npm run check` + client suite + 回歸四支）。
+- 實做順序（依建議完成）：context-stats flag → chatStore guard + finalizer →
   agentic flag → `abortCurrentFlow` → 指標列元件 + `ChatMessages` 插入 →
-  client 測試 → 手動驗收（05-§3 新增 5 項，#8–#12）。
+  client 測試 → （待）手動驗收（05-§3 新增 5 項，#8–#12）。
+- 設計補充兩點（§2u「設計補充」）：finalizer 的 conv 已切走例外（pending 留
+  queue 不送）+ 三個既有 `compacting` 消費者改 per-conv。
 
 ## 4. 驗證狀態
 

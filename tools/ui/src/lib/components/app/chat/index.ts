@@ -570,6 +570,18 @@ export { default as ChatMessageCwdChange } from './ChatMessages/ChatMessage/Chat
 export { default as ChatMessageCompaction } from './ChatMessages/ChatMessage/ChatMessageCompaction/ChatMessageCompaction.svelte';
 
 /**
+ * In-flight compaction indicator row (N7, 04-ui §4.2): a thin centered muted
+ * bar (spinner + "Compacting context…" + Stop) at the end of the message list
+ * while a compaction summary call runs for the ACTIVE conversation. Stop
+ * dispatches per context: in-loop (agentic running) → stopGeneration (the
+ * flow's own abort), post-flow / manual → stopCompaction. The over-target
+ * decision card takes the same anchor while it is shown; the row yields to
+ * the new cmp entry the moment compaction completes. Queued input renders
+ * below it through the existing ChatMessageUserPending row.
+ */
+export { default as ChatMessageCompacting } from './ChatMessages/ChatMessageCompacting.svelte';
+
+/**
  * Generic wrapper for UI-generated (synthetic) messages. Routes the
  * working-directory change to ChatMessageCwdChange and renders a muted
  * fallback for any other synthetic text, so no synthetic message ever

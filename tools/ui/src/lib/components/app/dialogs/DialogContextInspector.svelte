@@ -82,7 +82,12 @@
 	let path = $derived(conversationsStore.activeMessages);
 	let headLength = $derived(path[0]?.role === MessageRole.SYSTEM ? 1 : 0);
 	let convId = $derived(conversationsStore.activeConversation?.id ?? null);
-	let compacting = $derived(contextStatsStore.compacting);
+	// N7: the compaction state is per-conversation — the dialog shows the
+	// active conversation, so a background compaction of another one must not
+	// block its actions.
+	let compacting = $derived(
+		contextStatsStore.compacting && contextStatsStore.compactingConvId === convId
+	);
 	// v4: the header / total bar is the gauge's own real number (same source),
 	// never a byte estimate of the payload.
 	let contextUsed = $derived(contextStatsStore.contextUsed);

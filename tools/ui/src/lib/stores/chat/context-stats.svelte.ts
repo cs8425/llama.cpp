@@ -89,6 +89,24 @@ class ContextStatsStore {
 	// True while a compaction summary call is in flight (manual or auto);
 	// the gauge popup reads it to show "Compacting context…".
 	compacting = $state(false);
+	// N7: the conversation the in-flight summary call belongs to. The
+	// in-chat indicator row, the sendMessage guard and the UI's compacting
+	// feedback are all per-conversation, so a background compaction of conv A
+	// never shows on / blocks conv B (in-loop compaction explicitly keeps
+	// running after the user navigates away).
+	compactingConvId = $state<string | null>(null);
+
+	/**
+	 * N7: atomically set/clear the in-flight compaction state. Every
+	 * compaction path (chatStore ×3, agentic in-loop ×1) claims the state
+	 * with its conversation id before any async work and clears it through
+	 * this same helper, so `compacting` and `compactingConvId` can never
+	 * diverge.
+	 */
+	setCompacting(convId: string | null): void {
+		this.compacting = convId !== null;
+		this.compactingConvId = convId;
+	}
 
 	// The canonical resolution lives in modelsStore.activeModelId.
 	activeModelId = $derived(modelsStore.activeModelId);

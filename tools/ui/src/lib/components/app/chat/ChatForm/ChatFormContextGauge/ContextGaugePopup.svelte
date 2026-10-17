@@ -61,6 +61,13 @@
 	// (synchronous estimate, same heuristic as the policy — 04-ui §3).
 	const activeCompaction = $derived(findLastCompactionEntry(conversationsStore.activeMessages));
 
+	// N7: the compaction state is per-conversation — a background compaction
+	// of another conversation must not show in this conversation's gauge.
+	const compacting = $derived(
+		contextStatsStore.compacting &&
+			contextStatsStore.compactingConvId === conversationsStore.activeConversation?.id
+	);
+
 	const compactionRow = $derived.by(() => {
 		const entry = activeCompaction;
 
@@ -177,7 +184,7 @@
 		Disabled while the model responds: the dialog shows the NEXT send, and that
 		is not defined mid-stream. -->
 	<div class="flex flex-col gap-1 border-border/50 border-t pt-2">
-		{#if contextStatsStore.compacting}
+		{#if compacting}
 			<div class="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
 				<Loader2 class="h-3 w-3 animate-spin" />
 
