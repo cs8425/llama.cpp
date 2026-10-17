@@ -47,12 +47,14 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { ContentPartType, MessageRole } from '$lib/enums';
 	import {
+		apiMessageBytes,
 		buildLlmContext,
-		estimateApiMessageTokens,
-		estimateTokens,
-		SUMMARY_CONTENT_PREFIX
+		deriveRealMessageTokens,
+		messageSize,
+		SUMMARY_CONTENT_PREFIX,
+		tailStartOf
 	} from '$lib/services/context';
-	import type { ContextBuildResult } from '$lib/services/context';
+	import type { ContextBuildResult, ContextPayloadMessage } from '$lib/services/context';
 	import { chatStore, contextStatsStore, conversationsStore } from '$lib/stores';
 	import type { ApiChatMessageContentPart, ApiChatMessageData, DatabaseMessage } from '$lib/types';
 	import { formatFileSize, formatNumber } from '$lib/utils/formatters';
@@ -81,15 +83,18 @@
 	let headLength = $derived(path[0]?.role === MessageRole.SYSTEM ? 1 : 0);
 	let convId = $derived(conversationsStore.activeConversation?.id ?? null);
 	let compacting = $derived(contextStatsStore.compacting);
+	// v4: the header / total bar is the gauge's own real number (same source),
+	// never a byte estimate of the payload.
+	let contextUsed = $derived(contextStatsStore.contextUsed);
 
 	// The store methods are I7-guarded (isChatLoading / isRunning / compacting)
 	// anyway; the UI just gives feedback while the context is being modified.
 	let actionsBlocked = $derived(compacting || chatStore.isLoading || convId === null);
 
 	let percent = $derived.by(() => {
-		if (!result || nCtx === null || nCtx <= 0) return null;
+		if (nCtx === null || nCtx <= 0) return null;
 
-		return Math.min(100, (result.estimatedTokens / nCtx) * 100);
+		return Math.min(100, (contextUsed / nCtx) * 100);
 	});
 	let colorLevel = $derived(colorLevelFromPercent(percent));
 
@@ -137,22 +142,44 @@
 		kind: string;
 		message: ApiChatMessageData;
 		text: string;
-		tokens: number;
+		/** The row's real size (real tokens; tail at bytes/4; system 0) — summed for the expand description. */
+		size: number;
+		/** Main column: real tokens, `est. N` (bytes/4) for the not-yet-sent tail, `-` for the system head. */
+		main: string;
+		/** Sub column: bytes + bytes/4 estimate (reference only, v4). */
+		sub: string;
 	}
 
 	let payloadRows = $derived.by<PayloadRow[]>(() => {
 		if (!result) return [];
 
+		const real = deriveRealMessageTokens(path);
+		const tailStart = tailStartOf(path);
+		const idToIndex = new Map<string, number>();
+
+		path.forEach((message, index) => idToIndex.set(message.id, index));
+
 		// With a valid compaction the summary is the message right after the
 		// system-prompt head — that row gets its own badge instead of "user".
 		const summaryIndex = result.compaction?.boundaryValid ? headLength : -1;
 
-		return result.messages.map((message, index) => ({
-			kind: index === summaryIndex ? 'summary' : message.role,
-			message,
-			text: apiPreviewText(message),
-			tokens: estimateApiMessageTokens(message)
-		}));
+		return result.messages.map((message, index) => {
+			const sourceId = (message as ContextPayloadMessage).sourceId;
+			const dbIndex = sourceId !== undefined ? (idToIndex.get(sourceId) ?? -1) : -1;
+			const realTokens = sourceId !== undefined ? real.get(sourceId) : undefined;
+			const isTail = dbIndex >= tailStart;
+			const bytes = apiMessageBytes(message);
+			const size = realTokens ?? (isTail ? Math.round(bytes / 4) : 0);
+
+			return {
+				kind: index === summaryIndex ? 'summary' : message.role,
+				message,
+				text: apiPreviewText(message),
+				size,
+				main: realTokens !== undefined ? formatNumber(realTokens) : isTail ? `est. ${formatNumber(size)}` : '-',
+				sub: `${formatFileSize(bytes)} / ~${formatNumber(Math.round(bytes / 4))} est.`
+			};
+		});
 	});
 
 	interface DroppedRow {
@@ -230,8 +257,20 @@
 		return boundaryOptions.find((option) => option.id === selectedBoundary)?.label ?? 'No valid boundary';
 	});
 
-	// Size of the un-compacted path — what the context grows back to on expand.
-	let fullPathTokens = $derived(path.reduce((sum, message) => sum + estimateTokens(message), 0));
+	// Size of the un-compacted path in real tokens (v4): what the context
+	// grows back to on expand.
+	let fullPathTokens = $derived.by(() => {
+		const real = deriveRealMessageTokens(path);
+		const tailStart = tailStartOf(path);
+
+		return path.reduce((sum, message, i) => sum + messageSize(message, real, i >= tailStart), 0);
+	});
+
+	// Real-token total of the CURRENT payload (rows: real, tail at bytes/4,
+	// system 0) — the "from" figure of the expand description.
+	let payloadRealTokens = $derived(
+		result ? payloadRows.reduce((sum, row) => sum + row.size, 0) : 0
+	);
 
 	let expandDescription = $derived.by(() => {
 		const compaction = result?.compaction;
@@ -240,7 +279,7 @@
 
 		if (compaction.boundaryValid) {
 			return `The summary is deleted and the ${droppedRows.length} compacted messages are restored. The estimated context grows from ~${formatNumber(
-				result.estimatedTokens
+				payloadRealTokens
 			)} back to ~${formatNumber(fullPathTokens)} tokens.`;
 		}
 
@@ -580,9 +619,9 @@
 					<div class="flex flex-col gap-1">
 						<div class="flex items-center justify-between gap-2 text-xs">
 							<span>
-								<span class="text-muted-foreground">Estimated send:</span>
+								<span class="text-muted-foreground">Real context:</span>
 
-								{formatNumber(result.estimatedTokens)} tokens
+								{formatNumber(contextUsed)} tokens
 							</span>
 
 							{#if percent !== null}

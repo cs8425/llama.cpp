@@ -7,12 +7,16 @@
  * existing compaction entry to a payload is the builder's job
  * (context-builder.ts).
  *
- * Size accounting (v3 / dual-mode, context-enhance/02 §3.4): when the API has
- * an actual token count it is used at the precise decision points (trigger =
- * `timings.prompt_n`, success check = the summary response's completion
- * tokens); per-message there is no API value, so message costs are **UTF-8
- * byte counts** (image = 1000, audio/video = 3000 flat). No derived
- * proportions.
+ * Size accounting (v4, context-enhance/02 §3.4): per-message sizes are
+ * **real token counts** derived from the server's per-turn timings
+ * ({@link deriveRealMessageTokens}: assistant = predicted_n, each segment's
+ * real total attributed to its last non-assistant). The only no-data
+ * exceptions are the not-yet-sent tail (bytes/4 estimate, {@link messageSize})
+ * and the system head (0 — folded into the first segment total). Byte counts
+ * ({@link messageBytes} / {@link apiMessageBytes}) are display material only
+ * (inspector sub-column, the bytes/4 estimate) — never the primary size.
+ * The auto trigger is the real `contextStatsStore.contextUsed` (the gauge's
+ * source), never a byte sum.
  */
 
 import { AttachmentType, ContentPartType, MessageRole } from '$lib/enums';
@@ -25,8 +29,8 @@ const TOKENS_PER_IMAGE = 1000;
 /** Rough flat cost of one audio or video attachment. */
 const TOKENS_PER_AUDIO_VIDEO = 3000;
 /**
- * Minimum byte count in the summarize region for a compaction to be worth the
- * summary round-trip (02-data-model §3.3; byte count since v3).
+ * Minimum token count in the summarize region for a compaction to be worth the
+ * summary round-trip (02-data-model §3.3; real tokens since v4).
  */
 export const MIN_SUMMARIZE_TOKENS = 2000;
 
@@ -40,12 +44,13 @@ export function byteLength(text: string | undefined | null): number {
 }
 
 /**
- * Byte cost of one database message (v3): content + toolCalls JSON +
- * reasoning, each as UTF-8 bytes, plus per-attachment flat/text costs. The
- * value only decides "where to cut"; it never decides "does it fit" (the
- * server is the source of truth for that).
+ * Byte count of one database message: content + toolCalls JSON + reasoning,
+ * each as UTF-8 bytes, plus per-attachment flat/text costs. Display material
+ * only (v4): the inspector's sub-column and the not-yet-sent tail's bytes/4
+ * estimate. Never a primary size — per-message sizes are real tokens
+ * ({@link messageSize}).
  */
-export function estimateTokens(message: DatabaseMessage): number {
+export function messageBytes(message: DatabaseMessage): number {
 	let bytes = byteLength(message.content);
 
 	bytes += byteLength(message.toolCalls);
@@ -77,13 +82,13 @@ function estimateAttachmentBytes(extra: DatabaseMessageExtra): number {
 }
 
 /**
- * Byte cost of one converted API message. The inspector's payload rows are in
- * API form (the builder's output), not DB form, so they price the content
+ * Byte count of one converted API message. The inspector's payload rows are
+ * in API form (the builder's output), not DB form, so they price the content
  * parts directly: text as UTF-8 bytes, one image part = 1000, audio/video
  * parts = 3000, tool calls by serialized bytes — the same heuristics as
- * {@link estimateTokens}.
+ * {@link messageBytes}. Display material only (v4).
  */
-export function estimateApiMessageTokens(message: ApiChatMessageData): number {
+export function apiMessageBytes(message: ApiChatMessageData): number {
 	let bytes = 0;
 
 	if (typeof message.content === 'string') {
@@ -116,15 +121,150 @@ function estimateContentPartBytes(part: ApiChatMessageContentPart): number {
 }
 
 /**
+ * Real per-message token counts for a root→leaf path (v4, 02-data-model
+ * §3.4). The server reports per-request / per-assistant-turn counts only
+ * (assistant `timings`: `prompt_n` / `cache_n` / `predicted_n`), so the
+ * per-message values are derived from adjacent turns — pure real data, not
+ * estimates:
+ * - assistant `i` → `predicted_n[i]` (its turn's output);
+ * - each segment of non-assistant messages (between two measured assistants,
+ *   or before the first) → the segment's real total
+ *   `(prompt_n[i+1] + cache_n[i+1]) − (prompt_n[i] + cache_n[i]) −
+ *   predicted_n[i]` (first segment = `prompt_n[0] + cache_n[0]`), attributed
+ *   to the segment's LAST non-assistant message (the one that triggered the
+ *   next turn);
+ * - the system head → not in the map (no independent value — folded into the
+ *   first segment total);
+ * - the not-yet-sent tail (after the last assistant) → not in the map.
+ *
+ * An assistant without usable timings is skipped (its own value and the
+ * segments around it are simply absent). A negative segment total — e.g. the
+ * prompt shrank after an in-loop compaction — is clamped to 0.
+ */
+export function deriveRealMessageTokens(path: DatabaseMessage[]): Map<string, number> {
+	const real = new Map<string, number>();
+
+	interface Measured {
+		cache: number;
+		index: number;
+		predicted: number;
+		prompt: number;
+	}
+
+	const measured: Measured[] = [];
+
+	path.forEach((message, index) => {
+		if (message.role !== MessageRole.ASSISTANT) return;
+
+		const timings = message.timings;
+
+		if (timings?.prompt_n == null || timings?.predicted_n == null) return;
+
+		measured.push({
+			cache: timings.cache_n ?? 0,
+			index,
+			predicted: timings.predicted_n,
+			prompt: timings.prompt_n
+		});
+	});
+
+	if (measured.length === 0) return real;
+
+	// First segment: everything before the first measured assistant. The
+	// system head never owns a segment (it has no independent real value —
+	// 02-§3.4); when the segment holds nothing else (a degenerate
+	// [system, assistant] path) its total is simply dropped.
+	const first = measured[0];
+	const firstOwner = lastNonAssistantId(path, 0, first.index, true);
+
+	if (firstOwner !== undefined) real.set(firstOwner, first.prompt + first.cache);
+
+	for (let k = 0; k < measured.length; k++) {
+		const a = measured[k];
+
+		real.set(path[a.index].id, a.predicted);
+
+		if (k + 1 >= measured.length) continue;
+
+		const b = measured[k + 1];
+		const segmentTotal = Math.max(
+			0,
+			b.prompt + b.cache - (a.prompt + a.cache) - a.predicted
+		);
+		const owner = lastNonAssistantId(path, a.index, b.index, false);
+
+		if (owner !== undefined) real.set(owner, segmentTotal);
+	}
+
+	return real;
+}
+
+/**
+ * The id of the last non-assistant, non-system message in `path[start..to)`
+ * (`start` = `from` when `includeFrom`, else `from + 1`; exclusive `to`) —
+ * the owner of a segment's real total. The system head is skipped: it has no
+ * independent real value (02-§3.4). undefined when the segment holds none.
+ */
+function lastNonAssistantId(
+	path: DatabaseMessage[],
+	from: number,
+	to: number,
+	includeFrom: boolean
+): string | undefined {
+	const start = includeFrom ? from : from + 1;
+
+	for (let i = to - 1; i >= start; i--) {
+		if (path[i].role === MessageRole.ASSISTANT || path[i].role === MessageRole.SYSTEM) continue;
+
+		return path[i].id;
+	}
+
+	return undefined;
+}
+
+/**
+ * The first index of the not-yet-sent tail: right after the path's last
+ * assistant. A path with NO assistant has never been tokenized — the whole
+ * path is tail. A path ending on an assistant has no tail.
+ */
+export function tailStartOf(path: DatabaseMessage[]): number {
+	for (let i = path.length - 1; i >= 0; i--) {
+		if (path[i].role === MessageRole.ASSISTANT) return i + 1;
+	}
+
+	return 0;
+}
+
+/**
+ * The unified per-message size (v4): the real token count when the server
+ * data covers it, the bytes/4 estimate for the not-yet-sent tail, and 0
+ * otherwise — the system head has no independent value (it is folded into
+ * the first segment total), and a non-assistant whose segment total was
+ * attributed elsewhere carries none of its own.
+ */
+export function messageSize(
+	message: DatabaseMessage,
+	realTokens: Map<string, number>,
+	isTail: boolean
+): number {
+	const real = realTokens.get(message.id);
+
+	if (real !== undefined) return real;
+
+	return isTail ? Math.round(messageBytes(message) / 4) : 0;
+}
+
+/**
  * Synchronous "tokens saved" figure for the gauge row (04-ui §3): the
- * pre-compaction estimate minus what the compacted path currently sends.
- * The current payload is priced with the same heuristic the builder uses —
- * the whole path minus the dropped region `path[head..boundary)`, the
- * in-effect entry excluded from that region because it IS sent (as the
- * summary). With an absent boundary id (deliberate empty kept, 02-§2) the
- * dropped region is everything after the head. Returns 0 when the entry has
- * no meta, its boundary id is lost (the builder fail-opens to the full path,
- * so nothing is saved) or nothing is net saved.
+ * pre-compaction real-token total (stored in the entry's meta at summary
+ * time) minus what the compacted path currently sends. The current payload
+ * is priced with the same v4 sizes — the whole path minus the dropped region
+ * `path[head..boundary)`, the in-effect entry excluded from that region
+ * because it IS sent (as the summary). With an absent boundary id
+ * (deliberate empty kept, 02-§2) the dropped region is everything after the
+ * head. Returns 0 when the entry has no meta, its boundary id is lost (the
+ * builder fail-opens to the full path, so nothing is saved) or nothing is
+ * net saved.
  */
 export function estimateCompactionSavings(path: DatabaseMessage[], entry: DatabaseMessage): number {
 	const meta = entry.compactionMeta;
@@ -144,6 +284,10 @@ export function estimateCompactionSavings(path: DatabaseMessage[], entry: Databa
 
 	if (hasBoundary && (boundaryIndex === -1 || (headLength > 0 && boundaryIndex === 0))) return 0;
 
+	const real = deriveRealMessageTokens(path);
+	const tailStart = tailStartOf(path);
+	const size = (index: number) => messageSize(path[index], real, index >= tailStart);
+
 	const droppedEnd = hasBoundary ? boundaryIndex : path.length;
 
 	let dropped = 0;
@@ -151,10 +295,10 @@ export function estimateCompactionSavings(path: DatabaseMessage[], entry: Databa
 	for (let i = headLength; i < droppedEnd; i++) {
 		if (path[i].id === entry.id) continue;
 
-		dropped += estimateTokens(path[i]);
+		dropped += size(i);
 	}
 
-	const payload = path.reduce((sum, message) => sum + estimateTokens(message), 0) - dropped;
+	const payload = path.reduce((sum, _, i) => sum + size(i), 0) - dropped;
 
 	return Math.max(0, meta.estimatedTokensBefore - payload);
 }
@@ -197,6 +341,7 @@ export function computeSummaryMaxTokens(nCtx: number, percent: number): number {
  * under the trigger point, so the check does not fire again immediately.
  * `threshold ≤ keepTarget` (misconfiguration) → budget 0 → never compacts.
  * The old summary reserve (× 1.5) and 10% floor are gone (06-status §3.20).
+ * The budget is a real-token count (v4).
  */
 export function computeCompactionBudget(nCtx: number, settings: CompactionSettings): CompactionBudget {
 	const diff = settings.contextCompactionThreshold - settings.contextKeepTargetPercent;
@@ -229,22 +374,34 @@ export function computeCompactionBudget(nCtx: number, settings: CompactionSettin
  * and the kept region must respect I5 (≥ N user messages for a boundary cut,
  * ≥ M messages for a split cut, M = 0 by default).
  *
+ * All sizes are real tokens (v4, 02-§3.4): {@link messageSize} over the
+ * {@link deriveRealMessageTokens} map (the `realTokens` parameter, derived
+ * from `path` when omitted) — the tail at bytes/4, the system head 0.
+ *
  * @param path - The full root→leaf path (system prompt at index 0 when present).
- * @param budget - Keep budget and safety limits.
+ * @param budget - Keep budget and safety limits (token scale).
+ * @param realTokens - Per-message real token map (derived from `path` when omitted).
  * @returns The plan, or null when no compaction should happen.
  */
-export function planCompaction(path: DatabaseMessage[], budget: CompactionBudget): CompactionPlan | null {
+export function planCompaction(
+	path: DatabaseMessage[],
+	budget: CompactionBudget,
+	realTokens?: Map<string, number>
+): CompactionPlan | null {
 	if (path.length === 0) return null;
 
 	const systemStart = path[0]?.role === MessageRole.SYSTEM ? 1 : 0;
 	const length = path.length;
+	const real = realTokens ?? deriveRealMessageTokens(path);
+	const tailStart = tailStartOf(path);
+	const size = (index: number) => messageSize(path[index], real, index >= tailStart);
 
-	// suffixBytes[i] = byte count of path[i..end]; the suffix shrinks
+	// suffixTokens[i] = real tokens of path[i..end]; the suffix shrinks
 	// as i grows, so the first i whose suffix fits the budget keeps the most.
-	const suffixBytes: number[] = new Array<number>(length + 1).fill(0);
+	const suffixTokens: number[] = new Array<number>(length + 1).fill(0);
 
 	for (let i = length - 1; i >= 0; i--) {
-		suffixBytes[i] = suffixBytes[i + 1] + estimateTokens(path[i]);
+		suffixTokens[i] = suffixTokens[i + 1] + size(i);
 	}
 
 	let cutIndex = -1;
@@ -254,7 +411,7 @@ export function planCompaction(path: DatabaseMessage[], budget: CompactionBudget
 	for (let j = systemStart; j < length; j++) {
 		if (path[j].role !== MessageRole.USER) continue;
 
-		if (suffixBytes[j] > budget.keepBudgetTokens) continue;
+		if (suffixTokens[j] > budget.keepBudgetTokens) continue;
 
 		cutIndex = j;
 
@@ -269,7 +426,7 @@ export function planCompaction(path: DatabaseMessage[], budget: CompactionBudget
 		for (let j = systemStart; j <= length; j++) {
 			if (j < length && !isCuttable(path[j])) continue;
 
-			if (suffixBytes[j] > budget.keepBudgetTokens) continue;
+			if (suffixTokens[j] > budget.keepBudgetTokens) continue;
 
 			cutIndex = j;
 			isSplitTurn = true;
@@ -281,9 +438,9 @@ export function planCompaction(path: DatabaseMessage[], budget: CompactionBudget
 	if (cutIndex === -1) return null;
 
 	const toSummarize = path.slice(systemStart, cutIndex);
-	const summarizeBytes = toSummarize.reduce((sum, m) => sum + estimateTokens(m), 0);
+	const summarizeTokens = toSummarize.reduce((sum, _, i) => sum + size(systemStart + i), 0);
 
-	if (summarizeBytes < budget.minSummarizeTokens) return null;
+	if (summarizeTokens < budget.minSummarizeTokens) return null;
 
 	const kept = path.slice(cutIndex);
 
@@ -295,15 +452,17 @@ export function planCompaction(path: DatabaseMessage[], budget: CompactionBudget
 		if (keptUserMessages < budget.minKeptUserTurns) return null;
 	}
 
-	const headBytes = systemStart === 1 ? estimateTokens(path[0]) : 0;
+	const headTokens = systemStart === 1 ? size(0) : 0; // 0: the system head is folded into the first segment
 
 	return {
 		cutIndex,
-		estimatedTokensAfter: headBytes + suffixBytes[cutIndex],
-		estimatedTokensBefore: suffixBytes[0],
+		estimatedTokensAfter: headTokens + suffixTokens[cutIndex],
+		estimatedTokensBefore: suffixTokens[0],
 		firstKeptMessageId: cutIndex < length ? path[cutIndex].id : undefined,
 		isSplitTurn,
 		kept,
+		keptTokens: suffixTokens[cutIndex],
+		realMessageTokens: real,
 		systemHead: systemStart === 1 ? path[0] : null,
 		toSummarize
 	};
@@ -330,7 +489,11 @@ export function computeEffectiveWindow(nCtx: number, maxContextOverride: number)
 
 /** Parameters for the mode-specific trigger check (02-data-model §6). */
 export interface CompactionTriggerParams {
-	/** The last full prompt size: `timings.prompt_n` when the server reported it, else the path's byte count. */
+	/**
+	 * The real context usage: `contextStatsStore.contextUsed`
+	 * (= prompt_n + cache_n + predicted_n of the last turn — the gauge's own
+	 * number). Never a byte estimate (v4).
+	 */
 	lastPrompt: number;
 	/** The model context size (n_ctx). */
 	nCtx: number;
@@ -338,14 +501,14 @@ export interface CompactionTriggerParams {
 	contextCompactionThreshold: number;
 	/** `contextMaxContextOverride` (mode A, 0 = off). */
 	contextMaxContextOverride: number;
-	/** `contextKeepRecentTokens` (mode A, byte count). */
+	/** `contextKeepRecentTokens` (mode A, token count). */
 	contextKeepRecentTokens: number;
 }
 
 /**
  * Whether the auto compaction check should run (mode-specific, 02-data-model
- * §6). `lastPrompt` is the API's actual `prompt_n` when available, otherwise
- * the byte count of the path.
+ * §6). `lastPrompt` is the real context usage (the gauge's `contextUsed`;
+ * v4).
  * - A: `lastPrompt > window − keep`; `window − keep ≤ 0` → never triggers
  *   (manual compaction is unaffected);
  * - B: `lastPrompt > n_ctx × threshold%`.
@@ -363,21 +526,22 @@ export function shouldTriggerCompaction(mode: CompactionMode, params: Compaction
 
 /** Options for {@link planCompactionRecentWindow} (mode A, 02-data-model §3.3.1). */
 export interface RecentWindowOptions {
-	/** Minimum recent context to keep verbatim, in byte count (the walk's stop point). */
+	/** Minimum recent context to keep verbatim, in real tokens (the walk's stop point). */
 	keepRecentTokens: number;
 	/** Cut on a user message: minimum user messages that must stay in the kept region (I5). */
 	minKeptUserTurns: number;
 	/** Minimum total messages that must stay in the kept region (I5). */
 	minKeptMessages: number;
-	/** Minimum byte count in the summarize region; smaller regions are not worth a summary. */
+	/** Minimum token count in the summarize region; smaller regions are not worth a summary. */
 	minSummarizeTokens: number;
 }
 
 /**
  * Mode A cut-point selection: the recent-window walk (pi reference,
  * 02-data-model §3.3.1). Walks back from the last message accumulating
- * per-message byte counts until ≥ `keepRecentTokens` (the crossing point),
- * then cuts at the nearest legal cut point at/right of it.
+ * per-message REAL token counts ({@link messageSize} over the
+ * {@link deriveRealMessageTokens} map) until ≥ `keepRecentTokens` (the
+ * crossing point), then cuts at the nearest legal cut point at/right of it.
  *
  * - crossing on a tool result → the cut moves right to the next user/
  *   assistant message (a giant tool result therefore keeps the whole turn
@@ -389,30 +553,35 @@ export interface RecentWindowOptions {
  * - **never produces an empty kept**: the cut always lands on a user or
  *   assistant message (kept ≥ 1).
  *
- * Then the safety checks: summarize region ≥ `minSummarizeTokens` (bytes),
+ * Then the safety checks: summarize region ≥ `minSummarizeTokens` (tokens),
  * kept ≥ `minKeptMessages`, and — when the cut lands on a user message —
  * kept user messages ≥ `minKeptUserTurns`.
  *
  * @param path - The full root→leaf path (system prompt at index 0 when present).
- * @param opts - Keep lower bound and safety limits.
+ * @param opts - Keep lower bound and safety limits (token scale).
+ * @param realTokens - Per-message real token map (derived from `path` when omitted).
  * @returns The plan, or null when no compaction should happen.
  */
 export function planCompactionRecentWindow(
 	path: DatabaseMessage[],
-	opts: RecentWindowOptions
+	opts: RecentWindowOptions,
+	realTokens?: Map<string, number>
 ): CompactionPlan | null {
 	if (path.length === 0) return null;
 
 	const systemStart = path[0]?.role === MessageRole.SYSTEM ? 1 : 0;
 	const length = path.length;
+	const real = realTokens ?? deriveRealMessageTokens(path);
+	const tailStart = tailStartOf(path);
+	const size = (index: number) => messageSize(path[index], real, index >= tailStart);
 
 	// Walk back from the last message; the system head is never part of the
-	// walk (it is always kept and priced separately in the success check).
+	// walk (it is always kept and counts 0 — folded into the first segment).
 	let cumulative = 0;
 	let crossing = -1;
 
 	for (let i = length - 1; i >= systemStart; i--) {
-		cumulative += estimateTokens(path[i]);
+		cumulative += size(i);
 
 		if (cumulative >= opts.keepRecentTokens) {
 			crossing = i;
@@ -450,9 +619,9 @@ export function planCompactionRecentWindow(
 
 	const isSplitTurn = path[cutIndex].role === MessageRole.ASSISTANT;
 	const toSummarize = path.slice(systemStart, cutIndex);
-	const summarizeBytes = toSummarize.reduce((sum, m) => sum + estimateTokens(m), 0);
+	const summarizeTokens = toSummarize.reduce((sum, _, i) => sum + size(systemStart + i), 0);
 
-	if (summarizeBytes < opts.minSummarizeTokens) return null;
+	if (summarizeTokens < opts.minSummarizeTokens) return null;
 
 	const kept = path.slice(cutIndex);
 
@@ -464,16 +633,18 @@ export function planCompactionRecentWindow(
 		if (keptUserMessages < opts.minKeptUserTurns) return null;
 	}
 
-	const headBytes = systemStart === 1 ? estimateTokens(path[0]) : 0;
-	const keptBytes = kept.reduce((sum, m) => sum + estimateTokens(m), 0);
+	const headTokens = systemStart === 1 ? size(0) : 0;
+	const keptTokens = kept.reduce((sum, _, i) => sum + size(cutIndex + i), 0);
 
 	return {
 		cutIndex,
-		estimatedTokensAfter: headBytes + keptBytes,
-		estimatedTokensBefore: headBytes + keptBytes + summarizeBytes,
+		estimatedTokensAfter: headTokens + keptTokens,
+		estimatedTokensBefore: headTokens + keptTokens + summarizeTokens,
 		firstKeptMessageId: path[cutIndex].id,
 		isSplitTurn,
 		kept,
+		keptTokens,
+		realMessageTokens: real,
 		systemHead: systemStart === 1 ? path[0] : null,
 		toSummarize
 	};
@@ -485,7 +656,7 @@ export interface CompactionCheckParams {
 	nCtx: number;
 	/** `contextMaxContextOverride` (mode A, 0 = off). */
 	contextMaxContextOverride: number;
-	/** `contextKeepRecentTokens` (mode A, byte count). */
+	/** `contextKeepRecentTokens` (mode A, token count). */
 	contextKeepRecentTokens: number;
 	/** `contextKeepTargetPercent` (mode B, % of n_ctx). */
 	contextKeepTargetPercent: number;
@@ -495,7 +666,7 @@ export interface CompactionCheckParams {
 export interface CompactionCheckResult {
 	/** true = the compaction result is within the mode target. */
 	ok: boolean;
-	/** The post-compaction size the mode checks (A: head + summary + kept; B: head + summary). */
+	/** The post-compaction size the mode checks (A: summary + kept; B: summary) — real tokens. */
 	postSize: number;
 	/** The mode target (A: window − keep; B: keepTarget% × n_ctx). */
 	target: number;
@@ -504,13 +675,15 @@ export interface CompactionCheckResult {
 /**
  * The mode-specific "did the compaction succeed" check, evaluated once the
  * summary exists (02-data-model §6). `summarySize` is the summary's size in
- * the mode's units: the API's actual completion tokens when the server
- * reported them, else the UTF-8 byte length of the content
- * ({@link resolveSummarySize}).
- * - A: `head + summary + kept ≤ window − keep` (below the trigger point →
- *   no immediate re-trigger);
- * - B: `head + summary ≤ keepTarget% × n_ctx` (kept is already constrained
- *   to the budget by the cut point).
+ * tokens: the API's actual completion tokens when the server reported them,
+ * else the UTF-8 byte length of the content ({@link resolveSummarySize}).
+ * The kept region is priced at the plan's real tokens
+ * (`plan.keptTokens`, v4); the system head counts 0 (no independent value —
+ * folded into the first segment total).
+ * - A: `summary + kept ≤ window − keep` (below the trigger point → no
+ *   immediate re-trigger);
+ * - B: `summary ≤ keepTarget% × n_ctx` (kept is already constrained to the
+ *   budget by the cut point).
  */
 export function evaluateCompactionResult(
 	plan: CompactionPlan,
@@ -518,19 +691,16 @@ export function evaluateCompactionResult(
 	mode: CompactionMode,
 	params: CompactionCheckParams
 ): CompactionCheckResult {
-	const headBytes = plan.systemHead ? estimateTokens(plan.systemHead) : 0;
-
 	if (mode === 'recent-window') {
 		const window = computeEffectiveWindow(params.nCtx, params.contextMaxContextOverride);
 		const target = window - params.contextKeepRecentTokens;
-		const keptBytes = plan.kept.reduce((sum, m) => sum + estimateTokens(m), 0);
-		const postSize = headBytes + summarySize + keptBytes;
+		const postSize = summarySize + plan.keptTokens;
 
 		return { ok: postSize <= target, postSize, target };
 	}
 
 	const target = Math.floor((params.nCtx * params.contextKeepTargetPercent) / 100);
-	const postSize = headBytes + summarySize;
+	const postSize = summarySize;
 
 	return { ok: postSize <= target, postSize, target };
 }
@@ -538,7 +708,8 @@ export function evaluateCompactionResult(
 /**
  * Resolves the summary's size for the success check: the API's actual
  * completion tokens when reported, else the UTF-8 byte length of the
- * content (02-data-model §3.4: no API value → byte count).
+ * content (02-data-model §4: no API number → byte count — the summary's own
+ * size, distinct from per-message accounting).
  */
 export function resolveSummarySize(tokens: number | null, content: string): number {
 	return tokens ?? byteLength(content);

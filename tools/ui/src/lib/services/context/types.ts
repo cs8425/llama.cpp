@@ -37,10 +37,11 @@ export type CompactionMode = 'recent-window' | 'threshold-target';
 export type CompactionDecision = 'use' | 'retry' | 'skip';
 
 /**
- * Budget and safety limits for compaction cut-point selection.
+ * Budget and safety limits for compaction cut-point selection (v4: all
+ * counts are real tokens — 02-data-model §3.4).
  */
 export interface CompactionBudget {
-	/** Max estimated tokens for the kept suffix (path[cutIndex..end]). */
+	/** Max real tokens for the kept suffix (path[cutIndex..end]). */
 	keepBudgetTokens: number;
 	/** Boundary cut: minimum number of user messages that must stay in the kept region (I5). */
 	minKeptUserTurns: number;
@@ -51,7 +52,7 @@ export interface CompactionBudget {
 	 */
 	minKeptMessages: number;
 	/**
-	 * Minimum estimated tokens in the summarize region (path[systemStart..cutIndex));
+	 * Minimum real tokens in the summarize region (path[systemStart..cutIndex));
 	 * smaller regions are not worth a summary round-trip.
 	 */
 	minSummarizeTokens: number;
@@ -84,14 +85,30 @@ export interface CompactionPlan {
 	toSummarize: DatabaseMessage[];
 	/** `path[cutIndex..end]` — messages kept verbatim. */
 	kept: DatabaseMessage[];
-	/** Estimated tokens of the full path before compaction. */
+	/**
+	 * Real tokens of the full path before compaction (v4): the system head
+	 * counts 0 (folded into the first segment total) and the not-yet-sent
+	 * tail is estimated at bytes/4.
+	 */
 	estimatedTokensBefore: number;
 	/**
-	 * Estimated tokens of the kept window after compaction.
-	 * Excludes the not-yet-existing summary text; the real "after" size is
-	 * computable once the summary is produced.
+	 * Real tokens of the kept window after compaction (excludes the
+	 * not-yet-existing summary text; the real "after" size is computable once
+	 * the summary is produced).
 	 */
 	estimatedTokensAfter: number;
+	/**
+	 * Real tokens of the kept region (path[cutIndex..end], the tail at
+	 * bytes/4). The success check (evaluateCompactionResult) prices the
+	 * post-compaction context as summary + kept.
+	 */
+	keptTokens: number;
+	/**
+	 * Per-message real token map of the path at plan time
+	 * (deriveRealMessageTokens); the success check and the inspector read
+	 * per-message sizes from it.
+	 */
+	realMessageTokens: Map<string, number>;
 }
 
 /**
@@ -121,16 +138,25 @@ export interface ContextCompactionInfo {
 }
 
 /**
+ * One row of the built payload: the API message plus the DB id it was
+ * converted from (the compaction entry's id for the summary row). The
+ * inspector maps rows back to the per-message real tokens through it; the
+ * send path strips the field when serializing (it never reaches the wire).
+ */
+export interface ContextPayloadMessage extends ApiChatMessageData {
+	/** DB id of the message this API message was converted from. */
+	sourceId?: string;
+}
+
+/**
  * Result of {@link buildLlmContext}: the exact payload that goes to the LLM
  * plus the compaction state that produced it.
  */
 export interface ContextBuildResult {
-	/** The exact API payload (converted, attachments → content parts). */
-	messages: ApiChatMessageData[];
+	/** The exact API payload (converted, attachments → content parts), each row tagged with its source id. */
+	messages: ContextPayloadMessage[];
 	/** null = no compaction entry on the path (plain full-context send). */
 	compaction: ContextCompactionInfo | null;
-	/** Estimated tokens of the payload, from the same estimator as the policy. */
-	estimatedTokens: number;
 }
 
 /**

@@ -31,13 +31,12 @@ import {
 import { ChatService } from '$lib/services';
 import {
 	buildLlmContext,
-	byteLength,
 	computeCompactionBudget,
 	computeSummaryMaxTokens,
-	estimateApiMessageTokens,
 	MIN_SUMMARIZE_TOKENS,
 	planCompaction,
 	planCompactionRecentWindow,
+	resolveSummarySize,
 	shouldTriggerCompaction,
 	summarizeWithRetry,
 	toCompactionMode,
@@ -529,14 +528,13 @@ class AgenticStore {
 
 		if (nCtx === null || nCtx <= 0) return;
 
-		// The turn's real prompt size when the server reported it, otherwise
-		// the same estimator the policy uses (03-architecture §4.4).
-		const effectiveLastPrompt =
-			lastPrompt ??
-			(sessionMessages as ApiChatMessageData[]).reduce(
-				(sum, message) => sum + estimateApiMessageTokens(message),
-				0
-			);
+		// v4: the trigger is the real context usage (the gauge's source) — for
+		// the active conversation the gauge's own number; for a non-active flow
+		// the last turn's real prompt_n. No byte fallback: without real data
+		// the check simply does not run (fail-safe).
+		const effectiveLastPrompt = isActive ? contextStatsStore.contextUsed : lastPrompt;
+
+		if (effectiveLastPrompt == null) return;
 
 		const mode: CompactionMode = toCompactionMode(config.contextCompactionMode);
 
@@ -631,7 +629,9 @@ class AgenticStore {
 
 			sessionMessages.splice(0, sessionMessages.length, ...toAgenticMessages(messages));
 
-			const estimatedAfter = plan.estimatedTokensAfter + byteLength(cmp.content);
+			// v4: real tokens — the kept region's plan size plus the summary's
+			// own size (actual completion tokens, byte length when unreported).
+			const estimatedAfter = plan.estimatedTokensAfter + resolveSummarySize(summary.tokens, cmp.content);
 
 			toast.success(`Context compacted: ~${plan.estimatedTokensBefore} → ~${estimatedAfter} tokens`);
 		} catch (error) {

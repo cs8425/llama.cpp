@@ -3,7 +3,45 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**v4 真實 token 計數——規格定稿、待實做**（2026-10-17）——
+> **恢復點（最新）**：**v4 真實 token 計數——來源碼 9 檔 + unit `compaction-policy` 重寫完成，剩 2 unit + 4 client 測試，待使用者編譯驗證**（2026-10-17）——
+> 依 05-v4 區塊完成全部來源碼改動（明細 + 決策見 §3.25）：`compaction-policy.ts`
+> （`deriveRealMessageTokens` / `messageSize` / `tailStartOf` 新；`estimateTokens`→`messageBytes`、
+> `estimateApiMessageTokens`→`apiMessageBytes`；planner / 成功判定 / savings 全真實 token；system
+> 永當 segment owner、負段總和 clamp 0）/ `types.ts`（`CompactionPlan` + `keptTokens` +
+> `realMessageTokens`；新 `ContextPayloadMessage.sourceId`；`ContextBuildResult` 移除
+> `estimatedTokens`）/ `context-builder.ts`（逐則 `convertDbMessageToApiChatMessageData` +
+> empty-system filter mirror，每行帶 `sourceId`）/ `index.ts` exports / `stores/chat`（trigger =
+> `contextStatsStore.contextUsed`；`pathRealTokens`；`buildRegionPlan` 真實）/ `stores/agentic`
+> （trigger：active→contextUsed、非 active→該 turn 真實 prompt_n、null→不觸發）/
+> `DialogContextInspector`（標題/總和條 = gauge `contextUsed`；每則主欄 real/`-`/`est.` + 副欄
+> bytes+bytes÷4）/ `ChatMessageCompaction`（N→M 真實）/ `settings.constants`（2 條 help）。Unit
+> `compaction-policy.test.ts` 已全數重寫（token-scale fixture `assistantTimed` + 3 新 suite）。
+> **下一步（依序）**：
+> 1. `tests/unit/context-builder.test.ts`：mock 改
+>    `ChatService.convertDbMessageToApiChatMessageData`（builder 不再走
+>    `normalizeMessagesForApi`）；所有 `toEqual` 補 `sourceId`（message() 依建立順序 m1..mN）；
+>    刪 `estimatedTokens` 斷言；summary row 補 `sourceId = cmp.id` 斷言。
+> 2. `tests/unit/summarize.test.ts`：3 處 `CompactionPlan` literal（makePlan ~L141 /
+>    makePlanWithHead ~L158 / ~L376）補 `keptTokens: 0` + `realMessageTokens: new Map()`。
+> 3. client `context-inspector.svelte.test.ts`："Estimated send:" → "Real context:"；header =
+>    gauge contextUsed（建議 fixture finalAssistant 加 `timings: { prompt_n: 1500, predicted_n: 100 }`
+>    → contextUsed 1600、n_ctx 32768 → 4.9%）；舊「row 加總 = header」斷言不成立（主欄改 real：
+>    system `-`、cmp 0、kept 1500、finalAssistant 100）→ 改逐行主/副欄斷言；expand 描述數字變。
+> 4. client `context-gauge-compaction.svelte.test.ts`：saved 數字變（建議 fixture 加同 timings →
+>    saved = 1840 − 1600 = 240 → `~240 tokens saved`；不加則 1840 − 0 = 1840）。
+> 5. client `chat-message-compaction.svelte.test.ts`：`~1,840`（N 側）不變；M 側 = bytes/4
+>    （fixture 無 timings → cmp 132 bytes / 4 = 33）；expand 描述數字變（無 timings → fullPath 0）；
+>    既有斷言只查 'tokens' 存在，跑確認即可。
+> 6. `compaction-decision-card` / `settings-registry-invariants` 回歸（跑確認）。
+> 7. 全綠 → 勾 05-v4 區塊清單、§3.25 狀態改「完成並確認」、README 停點更新。
+> **驗證指令**（1–6 完成後）：`npm run check` + `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts tests/unit/context-builder.test.ts tests/unit/summarize.test.ts` + `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts tests/client/chat-message-compaction.svelte.test.ts tests/client/context-gauge-compaction.svelte.test.ts tests/client/compaction-decision-card.svelte.test.ts tests/client/settings-registry-invariants.svelte.test.ts`。
+> **實做決策待確認**（§3.25；不同意可推回）：非 active 對話 in-loop trigger = 該 turn 真實
+> prompt_n（不用 active 對話的 gauge 數）；負段總和 clamp 0；成功判定不加 system head（A:
+> postSize = summary + kept）；toast after = plan.estimatedTokensAfter +
+> resolveSummarySize(summary.tokens, cmp.content)；`estimateApiMessageTokens` 一併改名
+> `apiMessageBytes`。
+>
+> **此前恢復點**：**v4 真實 token 計數——規格定稿、待實做**（2026-10-17）——
 > 根因:Inspector 的「Estimated send」/每則「~N tok」用 **byte 數當 token**
 > (`estimateTokens`/`estimateApiMessageTokens`)÷ n_ctx(token)→ 與 gauge 真實
 > `contextUsed` 永遠對不上(380,513 vs 153,939,≈2.5 bytes/token)。v4 決策:**切點/
@@ -1497,6 +1535,80 @@ gate / settings 鏈 / 卡片）→ A（planner + 觸發/判定 + gauge）→ B�
 **取代**:v3 的「無 API 值 → UTF-8 byte 數」(02-§3.4 舊版)與「不做派生比例」;
 v1 的 char/4。設計同步:02-§3.4(v4)/§3.3/§6、03-§2/§4、04-§2/§3/§4、
 05-v4 區塊、README TL;DR。實做清單:05-v4 區塊。
+
+## 3.25 v4 真實 token 計數實做（2026-10-17；待使用者編譯驗證）
+
+> 規格:05-v4 區塊 / 02-§3.4(v4) / 04-§2/§3 / §3.24(決策)。以下為實做明細 +
+> 規格未明訂的決策(恢復點列了「待確認」,不同意可推回)。
+
+**來源碼改動(9 檔)**:
+1. `src/lib/services/context/compaction-policy.ts`(重寫):
+   - 新 `deriveRealMessageTokens(path) → Map<dbId, number>`:「measured」assistant =
+     `timings.prompt_n != null && predicted_n != null`(cache_n 缺 → 0);assistant =
+     `predicted_n`;首段 = `prompt_n[0] + cache_n[0]`;段 =
+     `(p2+c2) − (p1+c1) − predicted1`,**clamp ≥ 0**(in-loop compaction 後 prompt 縮水);
+     段總和歸該段**最後一則非-assistant、非-system**(`lastNonAssistantId`;段內只剩
+     system head 時總和丟棄——system 永不當 owner,02-§3.4「system = 0」);system/尾端
+     不入 map。無 measured assistant → 空 map。
+   - 新 `tailStartOf(path)`:最後一則 assistant 之後的 index;**無 assistant → 0**
+     (整條 path 皆尾端 = 尚未送出)。
+   - 新 `messageSize(m, real, isTail) = real ?? (isTail ? round(messageBytes/4) : 0)`。
+   - `estimateTokens` → `messageBytes`、`estimateApiMessageTokens` →
+     `apiMessageBytes`(byte 只供 inspector 副欄 + 尾端估算。**決策**:API 版一併改名
+     保持一致——規格只提 estimateTokens)。
+   - `planCompaction(path, budget, realTokens?)` / `planCompactionRecentWindow(path,
+     opts, realTokens?)`:所有 size 走 `messageSize`(realTokens 缺省時內部 derive);
+     **head = 0**(system 併入首段);plan 新欄位 `keptTokens`(kept 區真實)+
+     `realMessageTokens`(plan 時的 map,供成功判定)。
+   - `evaluateCompactionResult`:**不再加 system head**(**決策**,02-§3.4「walk 記 0」
+     的延伸):A = `summary + plan.keptTokens ≤ window − keep`;B = `summary ≤
+     keepTarget% × n_ctx`。
+   - `estimateCompactionSavings`:真實 size(結構不變:path − dropped)。
+   - `shouldTriggerCompaction` 邏輯不變;doc 改 `lastPrompt` = 真實 contextUsed。
+   - `resolveSummarySize` 不變(`tokens ?? byteLen(content)`,02-§4 E)。
+2. `types.ts`:`CompactionPlan` + `keptTokens` / `realMessageTokens`;新
+   `ContextPayloadMessage extends ApiChatMessageData { sourceId?: string }`;
+   `ContextBuildResult.messages: ContextPayloadMessage[]`、`estimatedTokens` 移除。
+3. `context-builder.ts`:新 `convertWithSourceIds` = 逐則
+   `ChatService.convertDbMessageToApiChatMessageData` + mirror `normalizeMessagesForApi`
+   的 empty-system filter(不 fork;payload 與舊路徑 bit-identical);每行 `sourceId =
+   db id`;summary row `sourceId = entry.id`。
+4. `index.ts`:exports 同步(去 estimate*,加 messageBytes / apiMessageBytes /
+   deriveRealMessageTokens / messageSize / tailStartOf / ContextPayloadMessage)。
+5. `stores/chat/index.svelte.ts`:trigger = `contextStatsStore.contextUsed`(byte
+   fallback scan 移除);toast `after = plan.estimatedTokensAfter +
+   resolveSummarySize(summary.tokens, cmp.content)`(**決策**:與成功判定同源);新
+   `pathRealTokens(path)`;`buildRegionPlan` / recompact / boundary-move 的
+   `estimatedTokensBefore` 皆真實。
+6. `stores/agentic/index.svelte.ts`:trigger = `isActive ? contextStatsStore.contextUsed
+   : lastPrompt`(**決策**:contextUsed 是 active 對話的數,非 active flow 用它是 bug;
+   非 active = 該 turn 真實 prompt_n;null → 不觸發,無 byte fallback);toast 同 chat
+   store。
+7. `DialogContextInspector.svelte`:標題/總和條 = `contextUsed` / `contextTotal`(= gauge,
+   「Real context: N tokens (P% of n_ctx)」);每則**主欄** = real(system `-`、尾端
+   `est. N` = bytes/4、path 中間未歸屬 = 0)、**副欄** = `bytes / ~bytes÷4 est.`;
+   `fullPathTokens` = 真實總和;expand 描述「from」= payload 各列 real 加總
+   (`payloadRealTokens`)。
+8. `ChatMessageCompaction.svelte`:N→M = `meta.estimatedTokensBefore`(現為真實)→
+   `real ?? bytes/4`;`droppedTokens` / `fullPathTokens` 真實。
+9. `settings.constants.ts`:`contextKeepRecentTokens` label (bytes)→(tokens) + help;
+   `contextCompactionThreshold` help「last prompt」→「real context usage (the gauge)」。
+
+**測試**:
+- `tests/unit/compaction-policy.test.ts` 全數重寫:fixture
+  `assistantTimed(id, content, prompt, predicted, cache)`;新 suite
+  `deriveRealMessageTokens`(6)/ `tailStartOf`(3)/ `messageSize`(4);
+  `planCompaction`(11)/ `planCompactionRecentWindow`(10)/ `evaluateCompactionResult`
+  (6)/ `estimateCompactionSavings`(7) 改 token-scale 期望值;byte suite 改名
+  `messageBytes` / `apiMessageBytes`(斷言不變)。
+- 未完成(恢復點列了 1–6):`context-builder.test.ts`(mock 改
+  `convertDbMessageToApiChatMessageData` + sourceId 斷言)、`summarize.test.ts`(plan
+  literal + `keptTokens` / `realMessageTokens`)、client 4 支(inspector / cmp / gauge /
+  card 回歸)。
+
+**Wire 安全**:`sendMessage` / `preEncode` 逐則 map 成
+`{content, role, tool_call_id, tool_calls, reasoning_content}` → `sourceId` 不會進
+request body(已確認 chat.service.ts:1142-1162 / 883-897)。
 
 ## 4. 驗證狀態（目前停在這）
 

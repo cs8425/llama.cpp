@@ -22,15 +22,17 @@ import {
 	type CompactionPlan,
 	type SummaryResult,
 	SUMMARY_CONTENT_PREFIX,
-	byteLength,
 	computeCompactionBudget,
 	computeSummaryMaxTokens,
-	estimateTokens,
+	deriveRealMessageTokens,
+	messageSize,
 	MIN_SUMMARIZE_TOKENS,
 	planCompaction,
 	planCompactionRecentWindow,
+	resolveSummarySize,
 	shouldTriggerCompaction,
 	summarizeWithRetry,
+	tailStartOf,
 	toCompactionMode,
 	toSummaryMode
 } from '$lib/services/context';
@@ -581,31 +583,18 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		const mode: CompactionMode = toCompactionMode(config.contextCompactionMode);
 
 		// Auto compaction needs the master switch on AND the mode-specific
-		// trigger crossed; the manual action skips both gates.
+		// trigger crossed; the manual action skips both gates. v4: the trigger
+		// is the real context usage (the gauge's own number) — never a byte
+		// estimate.
 		if (auto) {
 			if (!config.contextAutoCompaction) return;
-
-			let lastPrompt: number | null = null;
-
-			for (let i = path.length - 1; i >= 0; i--) {
-				const message = path[i];
-
-				if (message.role === MessageRole.ASSISTANT && message.timings?.prompt_n != null) {
-					lastPrompt = message.timings.prompt_n;
-
-					break;
-				}
-			}
-
-			const effectiveLastPrompt =
-				lastPrompt ?? path.reduce((sum, message) => sum + estimateTokens(message), 0);
 
 			if (
 				!shouldTriggerCompaction(mode, {
 					contextCompactionThreshold: config.contextCompactionThreshold,
 					contextKeepRecentTokens: config.contextKeepRecentTokens,
 					contextMaxContextOverride: config.contextMaxContextOverride,
-					lastPrompt: effectiveLastPrompt,
+					lastPrompt: contextStatsStore.contextUsed,
 					nCtx
 				})
 			)
@@ -686,7 +675,9 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			// pay a full re-prompt on top of the summary call.
 			await this.triggerPreEncode(preCompactionPath, cmp, cmp.content, model);
 
-			const estimatedAfter = plan.estimatedTokensAfter + byteLength(cmp.content);
+			// v4: real tokens — the kept region's plan size plus the summary's
+			// own size (actual completion tokens, byte length when unreported).
+			const estimatedAfter = plan.estimatedTokensAfter + resolveSummarySize(summary.tokens, cmp.content);
 
 			toast.success(`Context compacted: ~${plan.estimatedTokensBefore} → ~${estimatedAfter} tokens`);
 		} catch (error) {
@@ -885,7 +876,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				compactionMeta: {
 					...baseMeta,
 					...metaUpdates,
-					estimatedTokensBefore: path.reduce((sum, message) => sum + estimateTokens(message), 0),
+					estimatedTokensBefore: this.pathRealTokens(path),
 					model: model ?? undefined
 				},
 				content: `${SUMMARY_CONTENT_PREFIX} ${summary.content}`
@@ -988,7 +979,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			const updates = {
 				compactionMeta: {
 					...baseMeta,
-					estimatedTokensBefore: path.reduce((sum, message) => sum + estimateTokens(message), 0),
+					estimatedTokensBefore: this.pathRealTokens(path),
 					model: model ?? undefined
 				},
 				content: `${SUMMARY_CONTENT_PREFIX} ${summary.content}`
@@ -1086,6 +1077,18 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 	}
 
 	/**
+	 * The path's real-token total (v4): real per-message values, the
+	 * not-yet-sent tail at bytes/4, the system head 0 (folded into the first
+	 * segment total). Stored as `estimatedTokensBefore` on re-summarizations.
+	 */
+	private pathRealTokens(path: DatabaseMessage[]): number {
+		const real = deriveRealMessageTokens(path);
+		const tailStart = tailStartOf(path);
+
+		return path.reduce((sum, message, i) => sum + messageSize(message, real, i >= tailStart), 0);
+	}
+
+	/**
 	 * Root→leaf path of a conversation: the live array for the active
 	 * conversation, DB + leaf filter otherwise (same shape as loadConversation).
 	 * null when the conversation does not exist.
@@ -1164,16 +1167,21 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		entryId: string
 	): CompactionPlan {
 		const headLength = this.headLengthOf(path);
+		const real = deriveRealMessageTokens(path);
+		const tailStart = tailStartOf(path);
+		const keptTokens = path
+			.slice(boundaryIndex)
+			.reduce((sum, message, i) => sum + messageSize(message, real, boundaryIndex + i >= tailStart), 0);
 
 		return {
 			cutIndex: boundaryIndex,
-			estimatedTokensAfter: path
-				.slice(boundaryIndex)
-				.reduce((sum, message) => sum + estimateTokens(message), 0),
-			estimatedTokensBefore: path.reduce((sum, message) => sum + estimateTokens(message), 0),
+			estimatedTokensAfter: keptTokens,
+			estimatedTokensBefore: this.pathRealTokens(path),
 			firstKeptMessageId: path[boundaryIndex]?.id,
 			isSplitTurn,
 			kept: path.slice(boundaryIndex),
+			keptTokens,
+			realMessageTokens: real,
 			systemHead: headLength === 1 ? path[0] : null,
 			toSummarize: path.slice(headLength, boundaryIndex).filter((message) => message.id !== entryId)
 		};

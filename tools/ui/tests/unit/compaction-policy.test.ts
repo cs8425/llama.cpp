@@ -1,8 +1,10 @@
-// Compaction policy: size accounting and cut-point selection.
-//
-// Size accounting is v3 / dual-mode (context-enhance/02 §3.4): per-message
-// costs are UTF-8 **byte counts** (image = 1000, audio/video = 3000 flat) —
-// there is no per-message API token value, and no derived proportions.
+// v4 size accounting (context-enhance/02 §3.4): per-message sizes are REAL
+// token counts derived from the server's per-turn timings
+// (`deriveRealMessageTokens`: assistant = predicted_n, each segment's real
+// total attributed to its last non-assistant; the system head counts 0 —
+// folded into the first segment total — and the not-yet-sent tail falls back
+// to a bytes/4 estimate). Byte counts (`messageBytes` / `apiMessageBytes`)
+// are display material only (inspector sub-column, the tail estimate).
 //
 // Cut-point selection:
 // - `planCompaction` = mode B (threshold-target, upper bound): two-stage,
@@ -12,24 +14,26 @@
 //   legal point at/right of the crossing — never an empty kept.
 // The cut must never land on a tool result (I4) and the kept region must
 // respect I5. Trigger / success checks are mode-specific and shared by both
-// modes' stores.
+// modes' stores; the trigger input is the real context usage (the gauge).
 
 import { AttachmentType, ContentPartType, FileTypeAudio, MessageRole, MessageType } from '$lib/enums';
 import {
+	apiMessageBytes,
 	byteLength,
 	computeCompactionBudget,
 	computeEffectiveWindow,
 	computeSummaryMaxTokens,
-	evaluateCompactionResult,
-	estimateApiMessageTokens,
+	deriveRealMessageTokens,
 	estimateCompactionSavings,
-	estimateTokens,
+	messageBytes,
+	messageSize,
 	MIN_SUMMARIZE_TOKENS,
 	nextCompactionStep,
 	planCompaction,
 	planCompactionRecentWindow,
 	resolveSummarySize,
 	shouldTriggerCompaction,
+	tailStartOf,
 	toCompactionMode
 } from '$lib/services/context/compaction-policy';
 import type { CompactionSettings, RecentWindowOptions } from '$lib/services/context/compaction-policy';
@@ -57,6 +61,22 @@ function message(
 	} as DatabaseMessage;
 }
 
+/**
+ * An assistant message with the per-turn timings the real-token derivation
+ * reads: `prompt_n` / `cache_n` / `predicted_n`.
+ */
+function assistantTimed(
+	id: string,
+	content: string,
+	prompt: number,
+	predicted: number,
+	cache = 0
+): DatabaseMessage {
+	return message(id, MessageRole.ASSISTANT, content, {
+		timings: { cache_n: cache, predicted_n: predicted, prompt_n: prompt }
+	});
+}
+
 function budget(keepBudgetTokens: number, overrides: Partial<CompactionBudget> = {}): CompactionBudget {
 	return {
 		keepBudgetTokens,
@@ -79,10 +99,9 @@ function rw(keepRecentTokens: number, overrides: Partial<RecentWindowOptions> = 
 	};
 }
 
-// Byte semantics: 400-char ASCII content = 400 bytes (was "100 tokens" at
-// chars/4), 1600 chars = 1600 bytes.
+// Byte constants for the display-only byte suites and the tail's bytes/4
+// estimate (400-char ASCII content = 400 bytes = 100 tail tokens).
 const T100 = 'x'.repeat(400);
-const T400 = 'x'.repeat(1600);
 const TOOL_CALLS = JSON.stringify([{ function: { name: 'read_file' }, id: 'c1' }]); // 45 bytes
 
 describe('byteLength', () => {
@@ -105,10 +124,10 @@ describe('byteLength', () => {
 	});
 });
 
-describe('estimateTokens', () => {
-	it('estimates plain content at UTF-8 byte count', () => {
-		expect(estimateTokens(message('m', MessageRole.USER, T100))).toBe(400);
-		expect(estimateTokens(message('m', MessageRole.USER, ''))).toBe(0);
+describe('messageBytes (display-only byte count)', () => {
+	it('counts plain content at UTF-8 byte count', () => {
+		expect(messageBytes(message('m', MessageRole.USER, T100))).toBe(400);
+		expect(messageBytes(message('m', MessageRole.USER, ''))).toBe(0);
 	});
 
 	it('adds toolCalls and reasoning content at byte count', () => {
@@ -118,7 +137,7 @@ describe('estimateTokens', () => {
 		});
 
 		// 400 + 400 + 45
-		expect(estimateTokens(withCalls)).toBe(845);
+		expect(messageBytes(withCalls)).toBe(845);
 	});
 
 	it('prices image, audio and video attachments flat', () => {
@@ -140,9 +159,9 @@ describe('estimateTokens', () => {
 			type: AttachmentType.VIDEO
 		};
 
-		expect(estimateTokens(message('m', MessageRole.USER, '', { extra: [image] }))).toBe(1000);
-		expect(estimateTokens(message('m', MessageRole.USER, '', { extra: [audio] }))).toBe(3000);
-		expect(estimateTokens(message('m', MessageRole.USER, '', { extra: [video] }))).toBe(3000);
+		expect(messageBytes(message('m', MessageRole.USER, '', { extra: [image] }))).toBe(1000);
+		expect(messageBytes(message('m', MessageRole.USER, '', { extra: [audio] }))).toBe(3000);
+		expect(messageBytes(message('m', MessageRole.USER, '', { extra: [video] }))).toBe(3000);
 	});
 
 	it('prices text attachments by byte count and PDFs by pages or text', () => {
@@ -168,17 +187,17 @@ describe('estimateTokens', () => {
 			type: AttachmentType.PDF
 		};
 
-		expect(estimateTokens(message('m', MessageRole.USER, '', { extra: [text] }))).toBe(400);
-		expect(estimateTokens(message('m', MessageRole.USER, '', { extra: [pdfImages] }))).toBe(3000);
-		expect(estimateTokens(message('m', MessageRole.USER, '', { extra: [pdfText] }))).toBe(400);
+		expect(messageBytes(message('m', MessageRole.USER, '', { extra: [text] }))).toBe(400);
+		expect(messageBytes(message('m', MessageRole.USER, '', { extra: [pdfImages] }))).toBe(3000);
+		expect(messageBytes(message('m', MessageRole.USER, '', { extra: [pdfText] }))).toBe(400);
 	});
 });
 
-describe('estimateApiMessageTokens', () => {
-	it('estimates string content at byte count and adds reasoning and tool calls', () => {
+describe('apiMessageBytes (display-only byte count)', () => {
+	it('counts string content at byte count and adds reasoning and tool calls', () => {
 		const base: ApiChatMessageData = { content: T100, role: MessageRole.USER };
 
-		expect(estimateApiMessageTokens(base)).toBe(400);
+		expect(apiMessageBytes(base)).toBe(400);
 
 		const withExtras: ApiChatMessageData = {
 			content: '',
@@ -188,7 +207,7 @@ describe('estimateApiMessageTokens', () => {
 		};
 
 		// 400 (reasoning) + 80 (tool_calls JSON)
-		expect(estimateApiMessageTokens(withExtras)).toBe(480);
+		expect(apiMessageBytes(withExtras)).toBe(480);
 	});
 
 	it('prices content parts: text by bytes, image flat 1000, audio/video flat 3000', () => {
@@ -209,13 +228,13 @@ describe('estimateApiMessageTokens', () => {
 			role: MessageRole.USER
 		};
 
-		expect(estimateApiMessageTokens(text)).toBe(400);
-		expect(estimateApiMessageTokens(image)).toBe(1000);
-		expect(estimateApiMessageTokens(audio)).toBe(3000);
-		expect(estimateApiMessageTokens(video)).toBe(3000);
+		expect(apiMessageBytes(text)).toBe(400);
+		expect(apiMessageBytes(image)).toBe(1000);
+		expect(apiMessageBytes(audio)).toBe(3000);
+		expect(apiMessageBytes(video)).toBe(3000);
 	});
 
-	it('combines parts with the same heuristics as the DB-form estimator', () => {
+	it('combines parts with the same heuristics as the DB-form byte counter', () => {
 		const mixed: ApiChatMessageData = {
 			content: [
 				{ image_url: { url: 'data:image/png;base64,xx' }, type: ContentPartType.IMAGE_URL },
@@ -224,7 +243,161 @@ describe('estimateApiMessageTokens', () => {
 			role: MessageRole.USER
 		};
 
-		expect(estimateApiMessageTokens(mixed)).toBe(1400);
+		expect(apiMessageBytes(mixed)).toBe(1400);
+	});
+});
+
+describe('deriveRealMessageTokens', () => {
+	it('attributes the first segment (prompt_n + cache_n) to the last non-assistant before the first assistant', () => {
+		const path = [
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 1000, 200, 50)
+		];
+
+		const real = deriveRealMessageTokens(path);
+
+		expect(real.get('u1')).toBe(1050);
+		expect(real.get('a1')).toBe(200);
+		expect(real.has('sys')).toBe(false);
+	});
+
+	it('attributes each inter-assistant segment to that segment\'s last non-assistant', () => {
+		const path = [
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 1000, 200),
+			message('t1', MessageRole.TOOL, 'tool result'),
+			message('u2', MessageRole.USER, 'q2'),
+			assistantTimed('a2', 'a2', 2000, 300)
+		];
+
+		const real = deriveRealMessageTokens(path);
+
+		// segment 1 = prompt_n[a1]; segment 2 = (2000 − 1000) − 200 = 800,
+		// owned by u2 (the segment's last non-assistant — t1 precedes it)
+		expect(real.get('u1')).toBe(1000);
+		expect(real.get('a1')).toBe(200);
+		expect(real.get('u2')).toBe(800);
+		expect(real.get('a2')).toBe(300);
+		expect(real.has('t1')).toBe(false);
+		expect(real.has('sys')).toBe(false);
+	});
+
+	it('leaves the system head and the not-yet-sent tail out of the map', () => {
+		const path = [
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 1000, 100),
+			message('u2', MessageRole.USER, 'new question (not sent yet)')
+		];
+
+		const real = deriveRealMessageTokens(path);
+
+		expect(real.get('u1')).toBe(1000);
+		expect(real.get('a1')).toBe(100);
+		expect(real.has('u2')).toBe(false); // tail — never tokenized
+		expect(real.has('sys')).toBe(false);
+	});
+
+	it('returns an empty map when no assistant reports usable timings', () => {
+		const path = [
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			message('a1', MessageRole.ASSISTANT, 'a1'),
+			assistantTimed('a2', 'a2', 1000, 100)
+		];
+
+		// a1 lacks timings; a2's first segment still derives (u1 + a1 folded in)
+		expect(deriveRealMessageTokens(path).get('u1')).toBe(1000);
+		expect(deriveRealMessageTokens(path).get('a2')).toBe(100);
+		expect(deriveRealMessageTokens(path).has('a1')).toBe(false);
+
+		expect(
+			deriveRealMessageTokens([
+				message('u1', MessageRole.USER, 'q1'),
+				message('a1', MessageRole.ASSISTANT, 'a1')
+			]).size
+		).toBe(0);
+	});
+
+	it('clamps a negative segment total to 0 (the prompt shrank after an in-loop compaction)', () => {
+		const path = [
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 5000, 100),
+			message('u2', MessageRole.USER, 'q2'),
+			assistantTimed('a2', 'a2', 1000, 50)
+		];
+
+		const real = deriveRealMessageTokens(path);
+
+		expect(real.get('u1')).toBe(5000);
+		expect(real.get('a1')).toBe(100);
+		// (1000 − 5000) − 100 < 0 → 0
+		expect(real.get('u2')).toBe(0);
+		expect(real.get('a2')).toBe(50);
+	});
+});
+
+describe('tailStartOf', () => {
+	it('returns path.length when the path ends on an assistant (no tail)', () => {
+		const path = [
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 100, 10)
+		];
+
+		expect(tailStartOf(path)).toBe(2);
+	});
+
+	it('returns the index right after the last assistant when a tail follows', () => {
+		const path = [
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 100, 10),
+			message('u2', MessageRole.USER, 'q2')
+		];
+
+		expect(tailStartOf(path)).toBe(2);
+	});
+
+	it('returns 0 when the path has no assistant (nothing was ever tokenized)', () => {
+		const path = [message('sys', MessageRole.SYSTEM, 'system'), message('u1', MessageRole.USER, 'q1')];
+
+		expect(tailStartOf(path)).toBe(0);
+	});
+});
+
+describe('messageSize', () => {
+	it('prefers the real token count when the map has one', () => {
+		const m = message('m', MessageRole.USER, T100);
+
+		expect(messageSize(m, new Map([['m', 123]]), false)).toBe(123);
+		// a real value wins over the tail estimate too
+		expect(messageSize(m, new Map([['m', 123]]), true)).toBe(123);
+	});
+
+	it('falls back to bytes/4 for the not-yet-sent tail', () => {
+		const m = message('m', MessageRole.USER, T100); // 400 bytes
+
+		expect(messageSize(m, new Map(), true)).toBe(100);
+	});
+
+	it('counts 0 for a message with no real value that is not the tail (system head / folded segment)', () => {
+		const sys = message('sys', MessageRole.SYSTEM, T100);
+		const mid = message('m', MessageRole.USER, T100);
+
+		expect(messageSize(sys, new Map(), false)).toBe(0);
+		expect(messageSize(mid, new Map(), false)).toBe(0);
+	});
+
+	it('prices attachments into the tail estimate (image = 1000 → 250)', () => {
+		const image: DatabaseMessageExtra = {
+			base64Url: 'data:image/jpeg;base64,xx',
+			name: 'a.jpg',
+			type: AttachmentType.IMAGE
+		};
+		const m = message('m', MessageRole.USER, '', { extra: [image] });
+
+		expect(messageSize(m, new Map(), true)).toBe(250);
 	});
 });
 
@@ -287,58 +460,61 @@ describe('computeCompactionBudget', () => {
 	});
 });
 
-describe('planCompaction', () => {
+describe('planCompaction (mode B, real tokens)', () => {
 	it('returns null when the whole path fits the keep budget (nothing to summarize)', () => {
-		// system + 2 short turns: the earliest legal cut leaves an empty
-		// summarize region, which is below minSummarizeTokens.
+		// the earliest legal cut (u1) leaves an empty summarize region,
+		// which is below minSummarizeTokens
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
+			message('sys', MessageRole.SYSTEM, 'system'),
 			message('u1', MessageRole.USER, 'hi'),
-			message('a1', MessageRole.ASSISTANT, 'hello')
+			assistantTimed('a1', 'hello', 100, 10)
 		];
 
 		expect(planCompaction(path, budget(1000, { minSummarizeTokens: 10 }))).toBeNull();
 	});
 
 	it('cuts at a user-message boundary, keeps within budget, and honors minKeptUserTurns', () => {
-		// the first two turns are oversized so the earliest user boundary that
-		// fits the budget is u2, leaving exactly 4 user messages in the kept region
+		// sizes: u1 1600, a1 1600, u2..a5 400 each → suffix(u2) = 3200 =
+		// budget (exact fit), 4 user messages in the kept region
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100), // 400
-			message('u1', MessageRole.USER, T400), // 1600
-			message('a1', MessageRole.ASSISTANT, T400),
-			message('u2', MessageRole.USER, T400),
-			message('a2', MessageRole.ASSISTANT, T400),
-			message('u3', MessageRole.USER, T100),
-			message('a3', MessageRole.ASSISTANT, T100),
-			message('u4', MessageRole.USER, T100),
-			message('a4', MessageRole.ASSISTANT, T100),
-			message('u5', MessageRole.USER, T100),
-			message('a5', MessageRole.ASSISTANT, T100)
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 1600, 1600),
+			message('u2', MessageRole.USER, 'q2'),
+			assistantTimed('a2', 'a2', 3600, 400),
+			message('u3', MessageRole.USER, 'q3'),
+			assistantTimed('a3', 'a3', 4400, 400),
+			message('u4', MessageRole.USER, 'q4'),
+			assistantTimed('a4', 'a4', 4800, 400),
+			message('u5', MessageRole.USER, 'q5'),
+			assistantTimed('a5', 'a5', 5200, 400)
 		];
 
-		const plan = planCompaction(path, budget(5600));
+		const plan = planCompaction(path, budget(3200));
 
 		expect(plan).not.toBeNull();
 		expect(plan?.isSplitTurn).toBe(false);
 		expect(plan?.firstKeptMessageId).toBe('u2');
-		// kept = u2..a5 → 5600 bytes ≤ budget (exact fit), 4 user messages
+		// kept = u2..a5 → 3200 tokens ≤ budget (exact fit), 4 user messages
 		expect(plan?.kept.map((m) => m.id)).toEqual(['u2', 'a2', 'u3', 'a3', 'u4', 'a4', 'u5', 'a5']);
-		expect(plan?.kept.reduce((s, m) => s + estimateTokens(m), 0)).toBeLessThanOrEqual(5600);
+		expect(plan?.keptTokens).toBe(3200);
 		// summarize = u1..a1, system prompt excluded (I1); the head rides along
 		// separately for the prefix-stable summary payload (N4)
 		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['u1', 'a1']);
 		expect(plan?.systemHead?.id).toBe('sys');
-		expect(plan?.estimatedTokensBefore).toBe(9200);
+		// the system head counts 0 (folded into the first segment)
+		expect(plan?.estimatedTokensBefore).toBe(6400);
+		expect(plan?.estimatedTokensAfter).toBe(3200);
 	});
 
 	it('refuses a boundary cut that would leave fewer than minKeptUserTurns user messages', () => {
+		// sizes: u1 1000, a1 1000, u2 400, a2 400 → suffix(u2) = 800 ≤ 1000
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T100),
-			message('a1', MessageRole.ASSISTANT, T100),
-			message('u2', MessageRole.USER, T100),
-			message('a2', MessageRole.ASSISTANT, T100)
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 1000, 1000),
+			message('u2', MessageRole.USER, 'q2'),
+			assistantTimed('a2', 'a2', 2400, 400)
 		];
 
 		// only u2 can satisfy the budget (800 ≤ 1000) → 1 user message < 4
@@ -346,15 +522,17 @@ describe('planCompaction', () => {
 	});
 
 	it('splits a single oversized span at an assistant message, keeping the recent tool exchange', () => {
+		// sizes: u1 2000, a1 500, a2 1200, a3 100 (tool results 0) →
+		// suffix(a2) = 1300 > 1000, suffix(a3) = 100 ≤ 1000
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T100),
-			message('a1', MessageRole.ASSISTANT, T100, { toolCalls: TOOL_CALLS }),
-			message('t1', MessageRole.TOOL, T100, { toolCallId: 'c1' }),
-			message('a2', MessageRole.ASSISTANT, T100, { toolCalls: TOOL_CALLS }),
-			message('t2', MessageRole.TOOL, T100, { toolCallId: 'c2' }),
-			message('a3', MessageRole.ASSISTANT, T100, { toolCalls: TOOL_CALLS }),
-			message('t3', MessageRole.TOOL, T100, { toolCallId: 'c3' })
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 2000, 500),
+			message('t1', MessageRole.TOOL, 'tool result 1', { toolCallId: 'c1' }),
+			assistantTimed('a2', 'a2', 3700, 1200),
+			message('t2', MessageRole.TOOL, 'tool result 2', { toolCallId: 'c2' }),
+			assistantTimed('a3', 'a3', 5000, 100),
+			message('t3', MessageRole.TOOL, 'tool result 3', { toolCallId: 'c3' })
 		];
 
 		const plan = planCompaction(path, budget(1000, { minKeptMessages: 2 }));
@@ -369,14 +547,16 @@ describe('planCompaction', () => {
 	});
 
 	it('never cuts on a tool result, even in a pure assistant/tool alternation', () => {
+		// sizes: a1 400, a2 400, a3 400 (tool results 0) → suffix(a1) = 1200
+		// > 1000, suffix(a2) = 800 ≤ 1000
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('a1', MessageRole.ASSISTANT, T100),
-			message('t1', MessageRole.TOOL, T100, { toolCallId: 'c1' }),
-			message('a2', MessageRole.ASSISTANT, T100),
-			message('t2', MessageRole.TOOL, T100, { toolCallId: 'c2' }),
-			message('a3', MessageRole.ASSISTANT, T100),
-			message('t3', MessageRole.TOOL, T100, { toolCallId: 'c3' })
+			message('sys', MessageRole.SYSTEM, 'system'),
+			assistantTimed('a1', 'a1', 400, 400),
+			message('t1', MessageRole.TOOL, 'tool result 1', { toolCallId: 'c1' }),
+			assistantTimed('a2', 'a2', 1200, 400),
+			message('t2', MessageRole.TOOL, 'tool result 2', { toolCallId: 'c2' }),
+			assistantTimed('a3', 'a3', 2000, 400),
+			message('t3', MessageRole.TOOL, 'tool result 3', { toolCallId: 'c3' })
 		];
 
 		const plan = planCompaction(path, budget(1000));
@@ -393,11 +573,13 @@ describe('planCompaction', () => {
 	});
 
 	it('summarizes a huge single user message (split cut) when it alone exceeds the budget', () => {
+		// sizes: u1 1600 (the first segment), a1 100 → suffix(u1) = 1700 >
+		// 1000, suffix(a1) = 100 ≤ 1000
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T400), // 1600 bytes
-			message('a1', MessageRole.ASSISTANT, T100),
-			message('t1', MessageRole.TOOL, T100, { toolCallId: 'c1' })
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'x'.repeat(4000)),
+			assistantTimed('a1', 'a1', 1600, 100),
+			message('t1', MessageRole.TOOL, 'tool result', { toolCallId: 'c1' })
 		];
 
 		const plan = planCompaction(path, budget(1000));
@@ -409,10 +591,12 @@ describe('planCompaction', () => {
 	});
 
 	it('falls back to an empty kept region (all messages summarized) when nothing fits the budget', () => {
+		// sizes: u1 1600, a1 100 → suffix(a1) = 100 > 50, only the cut after
+		// the last message (0) fits
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T400), // 1600 bytes
-			message('a1', MessageRole.ASSISTANT, T100)
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'x'.repeat(4000)),
+			assistantTimed('a1', 'a1', 1600, 100)
 		];
 
 		const plan = planCompaction(path, budget(50));
@@ -423,16 +607,19 @@ describe('planCompaction', () => {
 		expect(plan?.cutIndex).toBe(3);
 		expect(plan?.firstKeptMessageId).toBeUndefined();
 		expect(plan?.kept).toEqual([]);
+		expect(plan?.keptTokens).toBe(0);
 		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['u1', 'a1']);
 	});
 
 	it('cuts after the last message (empty kept) when only the tail is oversized', () => {
+		// sizes: u1 100, a1 100, a2 4000 (t1/t2 0) → suffix(a1) = 4100,
+		// suffix(a2) = 4000 — both > 1000; only the cut after t2 fits
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T100),
-			message('a1', MessageRole.ASSISTANT, T100, { toolCalls: TOOL_CALLS }),
-			message('t1', MessageRole.TOOL, T100, { toolCallId: 'c1' }),
-			message('a2', MessageRole.ASSISTANT, 'x'.repeat(4000)), // 4000 bytes
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 100, 100),
+			message('t1', MessageRole.TOOL, 'tool result 1', { toolCallId: 'c1' }),
+			assistantTimed('a2', 'a2', 4200, 4000),
 			message('t2', MessageRole.TOOL, 'x'.repeat(4000), { toolCallId: 'c2' })
 		];
 
@@ -448,14 +635,15 @@ describe('planCompaction', () => {
 	});
 
 	it('still honors a raised minKeptMessages floor (the old behavior, opt-in)', () => {
+		// sizes: u1 1000, a1 100 → suffix(a1) = 100 ≤ 1000
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T100),
-			message('a1', MessageRole.ASSISTANT, T100, { toolCalls: TOOL_CALLS }),
-			message('t1', MessageRole.TOOL, T100, { toolCallId: 'c1' })
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 1000, 100),
+			message('t1', MessageRole.TOOL, 'tool result', { toolCallId: 'c1' })
 		];
 
-		// the budget fits the last ass+tool (846 ≤ 1000) → split at a1
+		// the budget fits the last ass+tool (100 ≤ 1000) → split at a1
 		const plan = planCompaction(path, budget(1000, { minKeptMessages: 2 }));
 
 		expect(plan?.isSplitTurn).toBe(true);
@@ -467,32 +655,35 @@ describe('planCompaction', () => {
 	});
 
 	it('returns null when the summarize region is below minSummarizeTokens', () => {
+		// no assistant reports timings → every size is 0 (nothing tokenized);
+		// the cut lands at u1, whose summarize region is empty (0 < 500)
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, 'hi'), // 2 bytes
-			message('a1', MessageRole.ASSISTANT, T100),
-			message('u2', MessageRole.USER, T100),
-			message('a2', MessageRole.ASSISTANT, T100),
-			message('u3', MessageRole.USER, T100),
-			message('a3', MessageRole.ASSISTANT, T100),
-			message('u4', MessageRole.USER, T100),
-			message('a4', MessageRole.ASSISTANT, T100)
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'hi'),
+			message('a1', MessageRole.ASSISTANT, 'a1'),
+			message('u2', MessageRole.USER, 'q2'),
+			message('a2', MessageRole.ASSISTANT, 'a2'),
+			message('u3', MessageRole.USER, 'q3'),
+			message('a3', MessageRole.ASSISTANT, 'a3'),
+			message('u4', MessageRole.USER, 'q4'),
+			message('a4', MessageRole.ASSISTANT, 'a4')
 		];
 
-		// cut at u1 → summarize region is empty (0 < 500)
 		expect(planCompaction(path, budget(3000, { minSummarizeTokens: 500 }))).toBeNull();
 	});
 
 	it('handles a path without a system prompt', () => {
+		// sizes: u1 1000, a1 1000, u2 1000, a2 1000, u3 100, a3 100, u4 100,
+		// a4 100 → suffix(u3) = 300 ≤ 1600, suffix(u2) = 2300 > 1600
 		const path = [
-			message('u1', MessageRole.USER, T100),
-			message('a1', MessageRole.ASSISTANT, T100),
-			message('u2', MessageRole.USER, T100),
-			message('a2', MessageRole.ASSISTANT, T100),
-			message('u3', MessageRole.USER, T100),
-			message('a3', MessageRole.ASSISTANT, T100),
-			message('u4', MessageRole.USER, T100),
-			message('a4', MessageRole.ASSISTANT, T100)
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 1000, 1000),
+			message('u2', MessageRole.USER, 'q2'),
+			assistantTimed('a2', 'a2', 3000, 1000),
+			message('u3', MessageRole.USER, 'q3'),
+			assistantTimed('a3', 'a3', 5000, 100),
+			message('u4', MessageRole.USER, 'q4'),
+			assistantTimed('a4', 'a4', 5200, 100)
 		];
 
 		const plan = planCompaction(path, budget(1600, { minKeptUserTurns: 2 }));
@@ -535,7 +726,7 @@ describe('computeEffectiveWindow', () => {
 	});
 });
 
-describe('shouldTriggerCompaction', () => {
+describe('shouldTriggerCompaction (trigger = real context usage, v4)', () => {
 	const base = {
 		contextCompactionThreshold: 80,
 		contextMaxContextOverride: 0,
@@ -585,6 +776,10 @@ describe('shouldTriggerCompaction', () => {
 		).toBe(false);
 	});
 
+	it('A: a zero reading (no real data) never triggers', () => {
+		expect(shouldTriggerCompaction('recent-window', { ...base, lastPrompt: 0 })).toBe(false);
+	});
+
 	it('B: triggers strictly above n_ctx × threshold%', () => {
 		// 10000 × 80% = 8000
 		expect(shouldTriggerCompaction('threshold-target', { ...base, lastPrompt: 8000 })).toBe(false);
@@ -605,16 +800,18 @@ describe('shouldTriggerCompaction', () => {
 	});
 });
 
-describe('planCompactionRecentWindow', () => {
+describe('planCompactionRecentWindow (mode A, real tokens)', () => {
 	it('stops the walk at the keep lower bound and cuts at a user crossing', () => {
+		// sizes: u1 1600, a1 400, u2 400, a2 400, u3 600, a3 400 → walk:
+		// a3 400 < 1000, u3 1000 ≥ 1000 → crossing on u3
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100), // 400
-			message('u1', MessageRole.USER, T400), // 1600
-			message('a1', MessageRole.ASSISTANT, T100),
-			message('u2', MessageRole.USER, T100),
-			message('a2', MessageRole.ASSISTANT, T100),
-			message('u3', MessageRole.USER, 'x'.repeat(600)), // walk: 400 + 600 = 1000 ≥ keep
-			message('a3', MessageRole.ASSISTANT, T100)
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 1600, 400),
+			message('u2', MessageRole.USER, 'q2'),
+			assistantTimed('a2', 'a2', 2400, 400),
+			message('u3', MessageRole.USER, 'q3'),
+			assistantTimed('a3', 'a3', 3400, 400)
 		];
 
 		const plan = planCompactionRecentWindow(path, rw(1000));
@@ -623,22 +820,26 @@ describe('planCompactionRecentWindow', () => {
 		expect(plan?.isSplitTurn).toBe(false);
 		expect(plan?.cutIndex).toBe(5);
 		expect(plan?.firstKeptMessageId).toBe('u3');
-		// kept is exactly the keep lower bound (600 + 400 = 1000 bytes)
+		// kept is exactly the keep lower bound (600 + 400 = 1000 tokens)
 		expect(plan?.kept.map((m) => m.id)).toEqual(['u3', 'a3']);
+		expect(plan?.keptTokens).toBe(1000);
 		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['u1', 'a1', 'u2', 'a2']);
 		expect(plan?.systemHead?.id).toBe('sys');
-		expect(plan?.estimatedTokensAfter).toBe(1400); // head 400 + kept 1000
-		expect(plan?.estimatedTokensBefore).toBe(4200);
+		// the system head counts 0 (folded into the first segment)
+		expect(plan?.estimatedTokensAfter).toBe(1000);
+		expect(plan?.estimatedTokensBefore).toBe(3800);
 	});
 
 	it('cuts at the rightmost legal cut when the crossing lands on the trailing tool', () => {
+		// sizes: u1 1000, a1 100, a2 100, t2 = tail estimate (16000 bytes →
+		// 4000) → walk: t2 4000 ≥ 1000 → crossing on the trailing tool
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T100),
-			message('a1', MessageRole.ASSISTANT, T100, { toolCalls: TOOL_CALLS }),
-			message('t1', MessageRole.TOOL, T100, { toolCallId: 'c1' }),
-			message('a2', MessageRole.ASSISTANT, T100, { toolCalls: TOOL_CALLS }),
-			message('t2', MessageRole.TOOL, 'x'.repeat(16000)) // walk stops inside this tool
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 1000, 100),
+			message('t1', MessageRole.TOOL, 'tool result 1', { toolCallId: 'c1' }),
+			assistantTimed('a2', 'a2', 1200, 100),
+			message('t2', MessageRole.TOOL, 'x'.repeat(16000), { toolCallId: 'c2' })
 		];
 
 		const plan = planCompactionRecentWindow(path, rw(1000));
@@ -653,13 +854,16 @@ describe('planCompactionRecentWindow', () => {
 	});
 
 	it('moves the cut right to the next legal point when the crossing lands on a mid-path tool', () => {
+		// sizes: u1 1000, a1 100, t1 1200 (the segment's real total), a2 100,
+		// t2 = tail (small) → walk: t2 ~0, a2 100, t1 1300 ≥ 1000 → crossing
+		// on the mid-path tool
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T100),
-			message('a1', MessageRole.ASSISTANT, T100, { toolCalls: TOOL_CALLS }),
-			message('t1', MessageRole.TOOL, 'x'.repeat(1200)), // walk: 400 + 484 + 1200 ≥ keep
-			message('a2', MessageRole.ASSISTANT, T100, { toolCalls: TOOL_CALLS }),
-			message('t2', MessageRole.TOOL, T100, { toolCallId: 'c2' })
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 1000, 100),
+			message('t1', MessageRole.TOOL, 'x'.repeat(4000), { toolCallId: 'c1' }),
+			assistantTimed('a2', 'a2', 2300, 100),
+			message('t2', MessageRole.TOOL, 'ok', { toolCallId: 'c2' })
 		];
 
 		const plan = planCompactionRecentWindow(path, rw(1000));
@@ -675,9 +879,9 @@ describe('planCompactionRecentWindow', () => {
 
 	it('returns null when the walk never reaches keep (whole path < keep)', () => {
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T100),
-			message('a1', MessageRole.ASSISTANT, T100)
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 100, 100)
 		];
 
 		expect(planCompactionRecentWindow(path, rw(2000))).toBeNull();
@@ -688,13 +892,15 @@ describe('planCompactionRecentWindow', () => {
 	});
 
 	it('never produces an empty kept (the cut always lands on a kept message)', () => {
+		// sizes: u0 1000, a0 100, u1 2000, a1 100, t1 = tail (0) → walk:
+		// t1 0, a1 100, u1 2100 ≥ 1000 → crossing on u1 (user)
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u0', MessageRole.USER, T100),
-			message('a0', MessageRole.ASSISTANT, T100),
-			message('u1', MessageRole.USER, 'x'.repeat(4000)), // walk stops here (user)
-			message('a1', MessageRole.ASSISTANT, T100),
-			message('t1', MessageRole.TOOL, T100, { toolCallId: 'c1' })
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u0', MessageRole.USER, 'q0'),
+			assistantTimed('a0', 'a0', 1000, 100),
+			message('u1', MessageRole.USER, 'x'.repeat(4000)),
+			assistantTimed('a1', 'a1', 3100, 100),
+			message('t1', MessageRole.TOOL, 'tool result', { toolCallId: 'c1' })
 		];
 
 		const plan = planCompactionRecentWindow(path, rw(1000));
@@ -707,18 +913,19 @@ describe('planCompactionRecentWindow', () => {
 	});
 
 	it('honors the minKeptMessages floor', () => {
+		// sizes: u0 1000, a0 100, u1 100, a1 100 → walk (keep 250): a1 100,
+		// u1 200, a0 300 ≥ 250 → crossing on a0 → kept = [a0, u1, a1]
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u0', MessageRole.USER, T100),
-			message('a0', MessageRole.ASSISTANT, T100),
-			message('u1', MessageRole.USER, T100),
-			message('a1', MessageRole.ASSISTANT, T100)
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u0', MessageRole.USER, 'q0'),
+			assistantTimed('a0', 'a0', 1000, 100),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 1200, 100)
 		];
 
-		// walk: 400 + 400 + 1200 ≥ 1000 → crossing on a0 → kept = [a0, u1, a1]
-		expect(planCompactionRecentWindow(path, rw(1000, { minKeptMessages: 4 }))).toBeNull();
+		expect(planCompactionRecentWindow(path, rw(250, { minKeptMessages: 4 }))).toBeNull();
 
-		const plan = planCompactionRecentWindow(path, rw(1000, { minKeptMessages: 3 }));
+		const plan = planCompactionRecentWindow(path, rw(250, { minKeptMessages: 3 }));
 
 		expect(plan).not.toBeNull();
 		expect(plan?.cutIndex).toBe(2);
@@ -726,12 +933,14 @@ describe('planCompactionRecentWindow', () => {
 	});
 
 	it('honors minKeptUserTurns for a user cut', () => {
+		// sizes: u0 1600, a0 100, u1 800, a1 400 → walk: a1 400, u1 1200 ≥
+		// 1000 → crossing on u1 (user) → kept = [u1, a1]
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u0', MessageRole.USER, T400),
-			message('a0', MessageRole.ASSISTANT, T100),
-			message('u1', MessageRole.USER, 'x'.repeat(800)), // walk: 400 + 800 ≥ 1000
-			message('a1', MessageRole.ASSISTANT, T100)
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u0', MessageRole.USER, 'q0'),
+			assistantTimed('a0', 'a0', 1600, 100),
+			message('u1', MessageRole.USER, 'x'.repeat(2000)),
+			assistantTimed('a1', 'a1', 2500, 400)
 		];
 
 		// kept = [u1, a1] → 1 user message
@@ -744,48 +953,53 @@ describe('planCompactionRecentWindow', () => {
 	});
 
 	it('returns null when the summarize region is below minSummarizeTokens', () => {
+		// sizes: u0 200, a0 200, u1 800, a1 100 → walk: a1 100, u1 900,
+		// a0 1100 ≥ 1000 → crossing on a0 → summarize region = [u0] = 200
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
+			message('sys', MessageRole.SYSTEM, 'system'),
 			message('u0', MessageRole.USER, 'x'.repeat(200)),
-			message('a0', MessageRole.ASSISTANT, 'x'.repeat(200)),
-			message('u1', MessageRole.USER, 'x'.repeat(800)), // walk: 400 + 800 ≥ 1000
-			message('a1', MessageRole.ASSISTANT, T100)
+			assistantTimed('a0', 'a0', 200, 200),
+			message('u1', MessageRole.USER, 'x'.repeat(800)),
+			assistantTimed('a1', 'a1', 1200, 100)
 		];
 
-		// summarize region = u0 + a0 = 400 bytes
-		expect(planCompactionRecentWindow(path, rw(1000, { minSummarizeTokens: 401 }))).toBeNull();
-		expect(planCompactionRecentWindow(path, rw(1000, { minSummarizeTokens: 400 }))).not.toBeNull();
+		expect(planCompactionRecentWindow(path, rw(1000, { minSummarizeTokens: 201 }))).toBeNull();
+		expect(planCompactionRecentWindow(path, rw(1000, { minSummarizeTokens: 200 }))).not.toBeNull();
 	});
 
 	it('handles a path without a system prompt', () => {
+		// sizes: u0 1000, a0 100, u1 800, a1 100 → walk: a1 100, u1 900,
+		// a0 1000 ≥ 1000 → crossing on a0 → kept = [a0, u1, a1]
 		const path = [
-			message('u0', MessageRole.USER, T100),
-			message('a0', MessageRole.ASSISTANT, T100),
-			message('u1', MessageRole.USER, 'x'.repeat(800)), // walk: 400 + 800 ≥ 1000
-			message('a1', MessageRole.ASSISTANT, T100)
+			message('u0', MessageRole.USER, 'q0'),
+			assistantTimed('a0', 'a0', 1000, 100),
+			message('u1', MessageRole.USER, 'x'.repeat(2000)),
+			assistantTimed('a1', 'a1', 1900, 100)
 		];
 
 		const plan = planCompactionRecentWindow(path, rw(1000));
 
 		expect(plan).not.toBeNull();
-		expect(plan?.firstKeptMessageId).toBe('u1');
+		expect(plan?.firstKeptMessageId).toBe('a0');
 		expect(plan?.systemHead).toBeNull();
-		expect(plan?.estimatedTokensAfter).toBe(1200); // no head
+		expect(plan?.estimatedTokensAfter).toBe(1000); // no head
 		expect(plan?.estimatedTokensBefore).toBe(2000);
 	});
 });
 
-describe('evaluateCompactionResult', () => {
-	function makePlan(keptContent: string, head: string | null): CompactionPlan {
-		const kept = message('k', MessageRole.USER, keptContent);
+describe('evaluateCompactionResult (real tokens, v4)', () => {
+	function makePlan(keptTokens: number, head: string | null): CompactionPlan {
+		const kept = message('k', MessageRole.USER, 'recent question');
 
 		return {
 			cutIndex: 1,
-			estimatedTokensAfter: 0,
+			estimatedTokensAfter: keptTokens,
 			estimatedTokensBefore: 0,
 			firstKeptMessageId: kept.id,
 			isSplitTurn: false,
 			kept: [kept],
+			keptTokens,
+			realMessageTokens: new Map<string, number>(),
 			systemHead: head === null ? null : message('sys', MessageRole.SYSTEM, head),
 			toSummarize: [message('u', MessageRole.USER, 'old')]
 		};
@@ -798,61 +1012,61 @@ describe('evaluateCompactionResult', () => {
 		nCtx: 10000
 	};
 
-	it('A: head + summary + kept ≤ window − keep (kept enters the check)', () => {
-		const plan = makePlan('x'.repeat(1000), 'h'.repeat(400));
+	it('A: summary + kept ≤ window − keep (kept enters the check; the head is folded in)', () => {
+		const plan = makePlan(1000, 'h'.repeat(400));
 
-		// target = 10000 − 2000 = 8000; 400 + 6600 + 1000 = 8000 → ok (≤)
-		expect(evaluateCompactionResult(plan, 6600, 'recent-window', aParams)).toEqual({
+		// target = 10000 − 2000 = 8000; 7000 + 1000 = 8000 → ok (≤)
+		expect(evaluateCompactionResult(plan, 7000, 'recent-window', aParams)).toEqual({
 			ok: true,
 			postSize: 8000,
 			target: 8000
 		});
-		expect(evaluateCompactionResult(plan, 6601, 'recent-window', aParams)).toEqual({
+		expect(evaluateCompactionResult(plan, 7001, 'recent-window', aParams)).toEqual({
 			ok: false,
 			postSize: 8001,
 			target: 8000
 		});
 	});
 
+	it('A: the system head is NOT counted on top (no independent real value)', () => {
+		// with and without a system head the check is identical
+		const withHead = makePlan(1000, 'h'.repeat(400));
+		const withoutHead = makePlan(1000, null);
+
+		expect(evaluateCompactionResult(withHead, 7000, 'recent-window', aParams)).toEqual(
+			evaluateCompactionResult(withoutHead, 7000, 'recent-window', aParams)
+		);
+	});
+
 	it('A: the override shrinks the window and the target', () => {
-		const plan = makePlan('x'.repeat(1000), 'h'.repeat(400));
+		const plan = makePlan(1000, 'h'.repeat(400));
 
 		// window = min(10000, 5000) = 5000 − 2000 = 3000
 		const params = { ...aParams, contextMaxContextOverride: 5000 };
 
-		expect(evaluateCompactionResult(plan, 1600, 'recent-window', params)).toEqual({
+		expect(evaluateCompactionResult(plan, 2000, 'recent-window', params)).toEqual({
 			ok: true,
 			postSize: 3000,
 			target: 3000
 		});
-		expect(evaluateCompactionResult(plan, 1601, 'recent-window', params)).toEqual({
+		expect(evaluateCompactionResult(plan, 2001, 'recent-window', params)).toEqual({
 			ok: false,
 			postSize: 3001,
 			target: 3000
 		});
 	});
 
-	it('A: without a system head the head bytes are 0', () => {
-		const plan = makePlan('x'.repeat(1000), null);
-
-		expect(evaluateCompactionResult(plan, 7000, 'recent-window', aParams)).toEqual({
-			ok: true,
-			postSize: 8000,
-			target: 8000
-		});
-	});
-
-	it('B: head + summary ≤ keepTarget% × n_ctx (kept does NOT enter the check)', () => {
-		const plan = makePlan('x'.repeat(1000), 'h'.repeat(400));
+	it('B: summary ≤ keepTarget% × n_ctx (kept does NOT enter the check)', () => {
+		const plan = makePlan(1000, 'h'.repeat(400));
 		const bParams = { ...aParams };
 
-		// target = floor(10000 × 50%) = 5000; 400 + 4600 = 5000 → ok (≤)
-		expect(evaluateCompactionResult(plan, 4600, 'threshold-target', bParams)).toEqual({
+		// target = floor(10000 × 50%) = 5000
+		expect(evaluateCompactionResult(plan, 5000, 'threshold-target', bParams)).toEqual({
 			ok: true,
 			postSize: 5000,
 			target: 5000
 		});
-		expect(evaluateCompactionResult(plan, 4601, 'threshold-target', bParams)).toEqual({
+		expect(evaluateCompactionResult(plan, 5001, 'threshold-target', bParams)).toEqual({
 			ok: false,
 			postSize: 5001,
 			target: 5000
@@ -860,9 +1074,9 @@ describe('evaluateCompactionResult', () => {
 	});
 
 	it('B: a large kept region does not affect the result', () => {
-		const plan = makePlan('x'.repeat(9000), 'h'.repeat(400));
+		const plan = makePlan(9000, 'h'.repeat(400));
 
-		expect(evaluateCompactionResult(plan, 4600, 'threshold-target', aParams)).toEqual({
+		expect(evaluateCompactionResult(plan, 5000, 'threshold-target', aParams)).toEqual({
 			ok: true,
 			postSize: 5000,
 			target: 5000
@@ -870,9 +1084,11 @@ describe('evaluateCompactionResult', () => {
 	});
 
 	it('B: ignores the window parameters (mode-specific formula)', () => {
-		const plan = makePlan('x'.repeat(1000), 'h'.repeat(400));
+		const plan = makePlan(1000, 'h'.repeat(400));
 
-		expect(evaluateCompactionResult(plan, 4600, 'threshold-target', { ...aParams, contextMaxContextOverride: 100 })).toEqual({
+		expect(
+			evaluateCompactionResult(plan, 5000, 'threshold-target', { ...aParams, contextMaxContextOverride: 100 })
+		).toEqual({
 			ok: true,
 			postSize: 5000,
 			target: 5000
@@ -912,7 +1128,7 @@ describe('nextCompactionStep', () => {
 	});
 });
 
-describe('estimateCompactionSavings', () => {
+describe('estimateCompactionSavings (real tokens, v4)', () => {
 	function compaction(
 		id: string,
 		firstKeptMessageId: string,
@@ -926,47 +1142,49 @@ describe('estimateCompactionSavings', () => {
 		});
 	}
 
-	it('subtracts the current payload (path minus dropped region) from the pre-compaction estimate', () => {
-		// sys 400, u1 400, a1 400, cmp 800, u2 400 → total 2400, dropped 800,
-		// payload 1600 → 2000 − 1600 = 400
+	it('subtracts the current payload (path minus dropped region) from the pre-compaction total', () => {
+		// real: u1 1500, a1 300; tail u2 = 400 bytes / 4 = 100; the entry and
+		// the system head count 0 → total 1900, dropped 1800, payload 100
+		// → 2000 − 100 = 1900
 		const cmp = compaction('cmp', 'u2', 2000);
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T100),
-			message('a1', MessageRole.ASSISTANT, T100),
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 1500, 300),
 			cmp,
 			message('u2', MessageRole.USER, T100)
 		];
 
-		expect(estimateCompactionSavings(path, cmp)).toBe(400);
+		expect(estimateCompactionSavings(path, cmp)).toBe(1900);
 	});
 
 	it('keeps an older compaction entry inside the dropped region out of the payload', () => {
-		// sys 400, u1 400, oldCmp 400, a1 400, newCmp 800, u2 400 → total 2800,
-		// dropped = u1 + oldCmp + a1 = 1200, payload = sys + newCmp + u2 = 1600
-		// → 1700 − 1600 = 100
+		// real: the first segment (1500) is owned by oldCmp (the last
+		// non-assistant before a1); a1 300; tail u2 100 → total 1900,
+		// dropped = oldCmp + a1 = 1800 (newCmp excluded — it is sent),
+		// payload 100 → 2000 − 100 = 1900
 		const oldCmp = message('oldCmp', MessageRole.USER, 'z'.repeat(400), {
 			compactionMeta: { estimatedTokensBefore: 300, firstKeptMessageId: 'a1', summarizedCount: 1 },
 			type: MessageType.COMPACTION
 		});
-		const newCmp = compaction('newCmp', 'u2', 1700);
+		const newCmp = compaction('newCmp', 'u2', 2000);
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T100),
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
 			oldCmp,
-			message('a1', MessageRole.ASSISTANT, T100),
+			assistantTimed('a1', 'a1', 1500, 300),
 			newCmp,
 			message('u2', MessageRole.USER, T100)
 		];
 
-		expect(estimateCompactionSavings(path, newCmp)).toBe(100);
+		expect(estimateCompactionSavings(path, newCmp)).toBe(1900);
 	});
 
 	it('returns 0 when the boundary no longer exists on the path (fail-open full send)', () => {
 		const cmp = compaction('cmp', 'missing-id', 450);
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T100),
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
 			cmp
 		];
 
@@ -976,8 +1194,8 @@ describe('estimateCompactionSavings', () => {
 	it('returns 0 when the boundary points at the system prompt (corrupt data)', () => {
 		const cmp = compaction('cmp', 'sys', 450);
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T100),
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
 			cmp
 		];
 
@@ -987,8 +1205,8 @@ describe('estimateCompactionSavings', () => {
 	it('returns 0 when the entry has no compactionMeta', () => {
 		const broken = message('cmp', MessageRole.USER, 'y'.repeat(800), { type: MessageType.COMPACTION });
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T100),
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
 			broken
 		];
 
@@ -996,28 +1214,28 @@ describe('estimateCompactionSavings', () => {
 	});
 
 	it('counts the whole post-head path as dropped for an empty-kept entry (absent boundary id)', () => {
+		// real: u1 1500, a1 300; the entry is the tail → 800 bytes / 4 = 200
+		// → dropped 1800, payload 200 → 2200 − 200 = 2000
 		const cmp = message('cmp', MessageRole.USER, 'y'.repeat(800), {
-			compactionMeta: { estimatedTokensBefore: 2000, summarizedCount: 2 },
+			compactionMeta: { estimatedTokensBefore: 2200, summarizedCount: 2 },
 			type: MessageType.COMPACTION
 		});
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T100),
-			message('a1', MessageRole.ASSISTANT, T100),
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 1500, 300),
 			cmp
 		];
 
-		// dropped = u1 + a1 = 800 (the entry is the summary, not dropped);
-		// payload = sys + cmp = 1200 → 2000 − 1200 = 800
-		expect(estimateCompactionSavings(path, cmp)).toBe(800);
+		expect(estimateCompactionSavings(path, cmp)).toBe(2000);
 	});
 
-	it('clamps to 0 when the pre-compaction estimate is below the current payload', () => {
+	it('clamps to 0 when the pre-compaction total is below the current payload', () => {
 		const cmp = compaction('cmp', 'u2', 100);
 		const path = [
-			message('sys', MessageRole.SYSTEM, T100),
-			message('u1', MessageRole.USER, T100),
-			message('a1', MessageRole.ASSISTANT, T100),
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u1', MessageRole.USER, 'q1'),
+			assistantTimed('a1', 'a1', 1500, 300),
 			cmp,
 			message('u2', MessageRole.USER, T100)
 		];

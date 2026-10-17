@@ -5,25 +5,30 @@
  * `planCompaction` (mode B) / `planCompactionRecentWindow` (mode A) decide
  * where a compaction cuts; `summarizeMessages` / `summarizeWithRetry` produce
  * the summary text (the latter runs the shared over-target mechanism:
- * success check → retry → user gate).
+ * success check → retry → user gate). Per-message sizes are real tokens
+ * (`deriveRealMessageTokens` + `messageSize`, v4); byte counts are display
+ * material only.
  */
 
 export { buildLlmContext, findLastCompactionEntry } from './context-builder';
 export {
+	apiMessageBytes,
 	computeCompactionBudget,
 	computeEffectiveWindow,
 	computeSummaryMaxTokens,
-	estimateApiMessageTokens,
+	deriveRealMessageTokens,
 	estimateCompactionSavings,
-	estimateTokens,
 	byteLength,
 	evaluateCompactionResult,
+	messageBytes,
+	messageSize,
 	MIN_SUMMARIZE_TOKENS,
 	nextCompactionStep,
 	planCompaction,
 	planCompactionRecentWindow,
 	resolveSummarySize,
 	shouldTriggerCompaction,
+	tailStartOf,
 	toCompactionMode
 } from './compaction-policy';
 export type {
@@ -56,5 +61,6 @@ export type {
 	CompactionPlan,
 	ContextBuildOptions,
 	ContextBuildResult,
-	ContextCompactionInfo
+	ContextCompactionInfo,
+	ContextPayloadMessage
 } from './types';

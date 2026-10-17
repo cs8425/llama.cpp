@@ -17,18 +17,19 @@
  * - a PRESENT `firstKeptMessageId` that no longer exists → fail-open, send
  *   the full path (I3).
  *
- * Conversion reuses `ChatService.normalizeMessagesForApi` (per-message
- * `convertDbMessageToApiChatMessageData` + empty-system filter) — no fork.
+ * Conversion reuses `ChatService.convertDbMessageToApiChatMessageData`
+ * per message (the same conversion `normalizeMessagesForApi` applies) plus
+ * its empty-system filter — no fork. The 1:1 DB→API mapping is kept (each
+ * row carries `sourceId`) so the inspector can map rows back to the
+ * per-message real tokens (v4, 02-§3.4).
  * Note: `chat.service.ts` will import this module in Phase 1; the resulting
  * cycle is safe because `ChatService` is only referenced at call time.
  */
 
 import { MessageRole, MessageType } from '$lib/enums';
 import { ChatService } from '$lib/services/chat.service';
-import type { ApiChatMessageData } from '$lib/types/api';
 import type { DatabaseMessage } from '$lib/types/database';
-import { estimateApiMessageTokens, estimateTokens } from './compaction-policy';
-import type { ContextBuildOptions, ContextBuildResult } from './types';
+import type { ContextBuildOptions, ContextBuildResult, ContextPayloadMessage } from './types';
 
 function isCompactionEntry(message: DatabaseMessage): boolean {
 	return message.type === MessageType.COMPACTION;
@@ -43,15 +44,40 @@ export function findLastCompactionEntry(path: DatabaseMessage[]): DatabaseMessag
 	return null;
 }
 
-function stripReasoning(
-	messages: ApiChatMessageData[],
-	strip: boolean
-): ApiChatMessageData[] {
-	if (!strip) return messages;
-
-	return messages.map((msg) =>
-		msg.reasoning_content ? { ...msg, reasoning_content: undefined } : msg
+/**
+ * Converts DB messages to the API form, keeping the 1:1 mapping to the DB
+ * ids (`sourceId`). Mirrors `normalizeMessagesForApi` exactly — per-message
+ * `convertDbMessageToApiChatMessageData` + the empty-system filter — so the
+ * payload is bit-identical to the current send path.
+ */
+async function convertWithSourceIds(
+	messages: DatabaseMessage[],
+	excludeReasoning: boolean
+): Promise<ContextPayloadMessage[]> {
+	const converted = await Promise.all(
+		messages.map((message) => ChatService.convertDbMessageToApiChatMessageData(message))
 	);
+
+	const out: ContextPayloadMessage[] = [];
+
+	messages.forEach((message, i) => {
+		const api = converted[i];
+		const stripped =
+			excludeReasoning && api.reasoning_content ? { ...api, reasoning_content: undefined } : api;
+
+		// Mirror normalizeMessagesForApi: empty system messages are dropped.
+		if (
+			message.role === MessageRole.SYSTEM &&
+			typeof stripped.content === 'string' &&
+			stripped.content.trim() === ''
+		) {
+			return;
+		}
+
+		out.push({ ...stripped, sourceId: message.id });
+	});
+
+	return out;
 }
 
 /**
@@ -60,7 +86,8 @@ function stripReasoning(
  *
  * @param path - The root→leaf message path in DB form.
  * @param options - `excludeReasoning` mirrors the existing context switch.
- * @returns The converted payload, the compaction state and the token estimate.
+ * @returns The converted payload (each row tagged with its source id) and
+ *   the compaction state.
  */
 export async function buildLlmContext(
 	path: DatabaseMessage[],
@@ -68,18 +95,12 @@ export async function buildLlmContext(
 ): Promise<ContextBuildResult> {
 	const excludeReasoning = options.excludeReasoning === true;
 
-	const convert = async (messages: DatabaseMessage[]): Promise<ApiChatMessageData[]> =>
-		stripReasoning(await ChatService.normalizeMessagesForApi(messages), excludeReasoning);
-
-	const pathTokens = path.reduce((sum, message) => sum + estimateTokens(message), 0);
-
 	const entry = findLastCompactionEntry(path);
 
 	if (!entry) {
 		return {
 			compaction: null,
-			estimatedTokens: pathTokens,
-			messages: await convert(path)
+			messages: await convertWithSourceIds(path, excludeReasoning)
 		};
 	}
 
@@ -112,8 +133,7 @@ export async function buildLlmContext(
 				entryId: entry.id,
 				firstKeptMessageId: boundaryId
 			},
-			estimatedTokens: pathTokens,
-			messages: await convert(path)
+			messages: await convertWithSourceIds(path, excludeReasoning)
 		};
 	}
 
@@ -125,25 +145,19 @@ export async function buildLlmContext(
 
 	// The summary travels as a plain user turn so every chat template accepts it
 	// (same pattern as the isSynthetic cwd messages); `type: compaction` is only
-	// read by the renderer.
-	const summary: ApiChatMessageData = {
+	// read by the renderer. Its sourceId is the entry's id (the inspector maps
+	// it to the entry's real token count).
+	const summary: ContextPayloadMessage = {
 		content: entry.content,
-		role: MessageRole.USER
+		role: MessageRole.USER,
+		sourceId: entry.id
 	};
 
 	const messages = [
-		...(await convert(head)),
+		...(await convertWithSourceIds(head, excludeReasoning)),
 		summary,
-		...(await convert(kept))
+		...(await convertWithSourceIds(kept, excludeReasoning))
 	];
-
-	// Price the exact outgoing payload (API form) with the same estimator the
-	// inspector's payload rows use, so the header and the rows can never
-	// disagree (WYSIWYG; v3 byte semantics).
-	const estimatedTokens = messages.reduce(
-		(sum, message) => sum + estimateApiMessageTokens(message),
-		0
-	);
 
 	return {
 		compaction: {
@@ -154,7 +168,6 @@ export async function buildLlmContext(
 			entryId: entry.id,
 			firstKeptMessageId: boundaryId
 		},
-		estimatedTokens,
 		messages
 	};
 }

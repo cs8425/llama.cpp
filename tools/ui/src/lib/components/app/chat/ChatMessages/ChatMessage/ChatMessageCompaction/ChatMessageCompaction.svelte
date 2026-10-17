@@ -4,7 +4,13 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { MessageRole } from '$lib/enums';
-	import { estimateTokens, SUMMARY_CONTENT_PREFIX } from '$lib/services/context';
+	import {
+		deriveRealMessageTokens,
+		messageBytes,
+		messageSize,
+		SUMMARY_CONTENT_PREFIX,
+		tailStartOf
+	} from '$lib/services/context';
 	import { chatStore, contextStatsStore, conversationsStore } from '$lib/stores';
 	import type { DatabaseMessage } from '$lib/types';
 	import { formatNumber, formatTime } from '$lib/utils/formatters';
@@ -46,8 +52,19 @@
 		return `${date.toLocaleDateString()} ${formatTime(date)}`;
 	});
 
-	// Current size of the entry itself, from the same estimator the policy uses.
-	let summaryTokens = $derived(estimateTokens(message));
+	// v4: real per-message tokens (server timings); the not-yet-sent tail is
+	// estimated at bytes/4, the system head counts 0.
+	let realTokens = $derived(deriveRealMessageTokens(path));
+	let tailStart = $derived(tailStartOf(path));
+
+	// Current size of the entry itself (v4): the real token count when the
+	// server data covers it, else the bytes/4 estimate (the entry is usually
+	// the not-yet-sent tail).
+	let summaryTokens = $derived.by(() => {
+		const real = realTokens.get(message.id);
+
+		return real ?? Math.round(messageBytes(message) / 4);
+	});
 
 	// Absent boundary id = deliberate empty kept (02-§2): the summary covers
 	// everything before the entry. (A meta-less entry reads the same — the
@@ -73,8 +90,10 @@
 
 	// What expand grows the context back to: the full path, and what the
 	// summary currently covers on it (the entry itself is the summary, not
-	// covered content — excluded). Display only, same estimator as the policy.
-	let fullPathTokens = $derived(path.reduce((sum, msg) => sum + estimateTokens(msg), 0));
+	// covered content — excluded). Display only, real tokens (v4).
+	let fullPathTokens = $derived.by(
+		() => path.reduce((sum, msg, i) => sum + messageSize(msg, realTokens, i >= tailStart), 0)
+	);
 
 	// Exclusive end of the covered region: the boundary when present, the end
 	// of the path for an empty-kept entry, nothing when the boundary is lost
@@ -94,7 +113,11 @@
 
 		return path
 			.slice(headLength, droppedEnd)
-			.reduce((sum, msg) => (msg.id === message.id ? sum : sum + estimateTokens(msg)), 0);
+			.reduce(
+				(sum, msg, i) =>
+					msg.id === message.id ? sum : sum + messageSize(msg, realTokens, headLength + i >= tailStart),
+				0
+			);
 	});
 
 	let expandDescription = $derived.by(() => {
