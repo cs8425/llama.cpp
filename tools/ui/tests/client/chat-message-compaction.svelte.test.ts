@@ -5,9 +5,9 @@
 // entirely when `contextShowCompactionEntries` is off. P2.5 adds the
 // manual-intervention actions in the expanded region, all spied on the
 // chatStore: edit the summary in place (prefix stripped), re-summarize and
-// restore the full context (with a confirmation dialog). N3: while
-// `contextStatsStore.compacting` the action row is replaced by a Stop button
-// calling `stopCompaction`.
+// restore the full context (with a confirmation dialog). N3: while the
+// entry's conversation is compacting (N7 per-conv `setCompacting(convId)`) the
+// action row is replaced by a Stop button calling `stopCompaction`.
 //
 // Run: npx vitest --project=client --run tests/client/chat-message-compaction.svelte.test.ts
 
@@ -140,7 +140,7 @@ function findRowButton(row: HTMLElement, label: string): HTMLButtonElement | nul
 afterEach(() => {
 	vi.restoreAllMocks();
 	conversationsStore.activeMessages = [];
-	contextStatsStore.compacting = false;
+	contextStatsStore.setCompacting(null);
 });
 
 // --- tests -----------------------------------------------------------------
@@ -376,7 +376,7 @@ describe('ChatMessageCompaction entry actions (Phase 2 P2.5)', () => {
 
 	it('shows a Stop button in place of the actions while compacting', async () => {
 		buildFixture();
-		contextStatsStore.compacting = true;
+		contextStatsStore.setCompacting('cmp-conv');
 
 		const { row, unmount } = await openExpandedEntry();
 
@@ -393,7 +393,7 @@ describe('ChatMessageCompaction entry actions (Phase 2 P2.5)', () => {
 
 	it('Stop calls stopCompaction while a summary is in flight', async () => {
 		buildFixture();
-		contextStatsStore.compacting = true;
+		contextStatsStore.setCompacting('cmp-conv');
 		const stopSpy = vi.spyOn(chatStore, 'stopCompaction');
 
 		const { row, unmount } = await openExpandedEntry();
