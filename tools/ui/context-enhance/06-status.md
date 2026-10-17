@@ -3,7 +3,33 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**雙 mode 實做（共用 + A + B）來源碼完成、unit/client 測試未寫，待使用者編譯驗證**（2026-10-17）
+> **恢復點（最新）**：**雙 mode 測試已寫（unit 重寫/更新 + client 新 suite + 1 項
+> 回歸修正）、待使用者編譯驗證**（2026-10-17）——依 05-雙 mode 清單 +
+> §3.23 下一步 1–3 完成全部測試（**無來源碼改動**）：
+> ① `tests/unit/compaction-policy.test.ts` **重寫**（byte 語義 + v3 差值公式 +
+> 8 個新 suite：`byteLength` / `toCompactionMode` / `computeEffectiveWindow` /
+> `shouldTriggerCompaction` / `planCompactionRecentWindow` /
+> `evaluateCompactionResult` / `resolveSummarySize` / `nextCompactionStep`；
+> 既有 11 支 `planCompaction` 逐支重調、`estimateCompactionSavings` fixture
+> 重算）；② `tests/unit/summarize.test.ts` 更新（既有 payload 測試加
+> `{ content, tokens }` 斷言；新 `SummaryResult` suite 3 支；新
+> `summarizeWithRetry` suite 8 支，含 mode A kept bytes 進判定
+> （postSize 10401 vs target 8000））；③
+> `tests/client/compaction-decision-card.svelte.test.ts` **新**（卡片 6 支：
+> A/B 標籤 / attempts 註記 / 三選項 resolve gate；store gate 層 3 支：
+> request → pending → resolve('use') / abort → 'skip' / 已 abort 立即 'skip'）；
+> ④ 回歸修正（規劃未列、實做必要）：`tests/client/context-gauge-compaction.svelte.test.ts`
+> 硬編碼 `~1,794 tokens saved`（chars/4 時代 estimate 值）→ `~1,658`（byte
+> 語義：payload 16+132+19+15 = 182；1840−182 = 1658）+ 註解。`context-builder.test.ts`
+> （期望值用同一 `estimateTokens` 計算、自適應）與 `settings-registry-invariants`
+> （generic）零改動、待跑確認。**下一步**＝使用者跑 `npm run check` + unit
+> 3 支（compaction-policy / summarize / context-builder）+ client 5 支
+> （settings-registry-invariants / compaction-decision-card + 回歸
+> chat-message-compaction / context-inspector / context-gauge-compaction）→
+> 全綠 → 勾 05-雙 mode 清單測試項、§3.22/§3.23 狀態改「完成並確認」、README
+> 停點更新。另剩：Phase 1 的 5.8 手動驗收 + Phase 3 可選後續。
+>
+> 此前恢復點：**雙 mode 實做（共用 + A + B）來源碼完成、unit/client 測試未寫，待使用者編譯驗證**（2026-10-17）
 > ——依 05-雙 mode 清單完成全部來源碼改動：共用基礎（timings 解析 /
 > `summarizeMessages` 回傳 `{content, tokens}` / byte 計數 / 共用超標機制
 > `summarizeWithRetry`（retry + gate）/ settings 鏈（`contextCompactionMode`
@@ -77,7 +103,7 @@
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
-| 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | 🚧 規格定稿（2026-10-17）；**來源碼完成（共用 + A + B，§3.23）、unit/client 測試未寫**，待使用者 check 驗證 |
+| 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | 🚧 規格定稿（2026-10-17）；**來源碼 + 測試完成（共用 + A + B，§3.23）**，待使用者 check + unit + client 驗證 |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
 | 下一輪 — 5 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式 / N5 summary mode 設定，§5c） | ✅ **N1–N5 全部完成並確認**：N1（§3.13：改 n_ctx × %）；N2（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；N3（§3.15：手動壓縮 Stop 鍵）；N4（§3.18：prefix-stable default + 附件原樣送 + reasoning 跟隨主送出開關；第一輪 test bug 已修、重跑全綠）；N5（§3.19：`contextSummaryMode` SELECT 設定） |
@@ -1235,14 +1261,16 @@ boundary 切維持原規則（整個最後一個 turn 要放得下 budget）。
   回同一 CompactionPlan 型別）。
 
 **狀態**：規格定稿（Q1–Q3）；02/03/04/05 已同步；**來源碼完成（2026-10-17，
-§3.23，18 檔，已逐檔確認存在且與明細一致）、測試未寫**。實做順序已照規劃執行：
-共用基礎（timings 解析 / `{content, tokens}` / byte 計數 / 重試+gate /
-settings 鏈 / 卡片）→ A（planner + 觸發/判定 + gauge）→ B（budget 公式 +
-觸發/判定）。下一步 = 測試（見 §3.23「下一步」1–5）→ 使用者跑 `npm run check` +
-unit（compaction-policy / summarize / context-builder）+ client
-（settings-registry-invariants + compaction-decision-card + 回歸）驗證。
+§3.23，18 檔，已逐檔確認存在且與明細一致）+ 測試已寫（2026-10-17，見 §3.23
+「下一步」執行記錄）**、待使用者編譯驗證。實做順序已照規劃執行：共用基礎
+（timings 解析 / `{content, tokens}` / byte 計數 / 重試+gate / settings 鏈 /
+卡片）→ A（planner + 觸發/判定 + gauge）→ B（budget 公式 + 觸發/判定）→
+測試（unit 重寫/更新 + client 新 suite + 1 項回歸修正）。下一步 = 使用者跑
+`npm run check` + unit（compaction-policy / summarize / context-builder）+
+client（settings-registry-invariants + compaction-decision-card + 回歸）驗證 →
+全綠 → 勾 05-雙 mode 清單、狀態改「完成並確認」。
 
-## 3.23 雙 mode 實做（共用 + A + B）（2026-10-17；來源碼完成、測試未寫，待編譯驗證）
+## 3.23 雙 mode 實做（共用 + A + B）（2026-10-17；來源碼 + 測試完成、待編譯驗證）
 
 > 實做順序照 §3.22：共用基礎 → A → B。本輪一次完成三個層（同一個可編譯
 > 單位，末尾以使用者 check + 測試收口）。
@@ -1310,7 +1338,7 @@ unit（compaction-policy / summarize / context-builder）+ client
 - `ContextGaugePopup` 的 `gaugeTotal` derived 讀 `gauge.contextTotal`（getter）
   + `settingsStore.config`——反應性應正常。
 
-**下一步（測試，本輪未做）**：
+**下一步（測試）— 2026-10-17 第二輪已寫完、待使用者驗證**：
 
 1. `tests/unit/compaction-policy.test.ts` **重寫**：既有 estimate 用例全部改
    byte 語義（T100 = 400 bytes）；`computeCompactionBudget` 改新公式（含
@@ -1343,6 +1371,52 @@ unit（compaction-policy / summarize / context-builder）+ client
    context-gauge-compaction）。
 6. 全綠 → 勾 05-雙 mode 清單（共用/A/B 三塊）、§3.22/§3.23 狀態改「完成並
    確認」、README 停點更新（剩 5.8 手動驗收 + Phase 3 可選後續）。
+
+**執行記錄（2026-10-17 第二輪：測試全部寫完、零來源碼改動）**：
+
+1. `tests/unit/compaction-policy.test.ts` 照 1 重寫：T100 = 400 bytes /
+   T400 = 1600 bytes；`computeCompactionBudget` 改差值公式（含
+   threshold ≤ keepTarget → 0、floor 8193×30% = 2457）；`planCompaction`
+   11 支重調（boundary 5600 恰好切 u2 / minKeptUserTurns 1000 / split 1000 /
+   never-cut-tool 1000 / huge user 1000 / minSummarize budget 3000 + min 500 /
+   no-system 1600 / minKeptMessages floor 1000 / empty kept 50、1000）；
+   `estimateCompactionSavings` fixture 重算（cmp = 'y'×800 = 800 bytes；
+   期望值 400 / 500 / 800、0 系維持）；8 個新 suite 全寫（recent-window：
+   下限精確停止（walk 400+600 = 1000 切 user）/ 尾端 tool 交叉 → 最右合法
+   切點（a2 + t2 16000B 整輪保留）/ 中段 tool 交叉 → 右移 a2 / 未達 → null /
+   A 不空 kept / I5 兩下限 / minSummarize / 無 system head / 空 path；
+   trigger：A ≤/> 邊界 + headroom ≤ 0 + override 縮窗、B ≤/> + mode 分離；
+   evaluate：A/B ≤/> 邊界 + override + kept 進（A）/不進（B）判定 + 無 head；
+   `resolveSummarySize` 123 / null→6（CJK）/ 0 為真實值；`nextCompactionStep`
+   1/3/≤0）。
+2. `tests/unit/summarize.test.ts` 照 2 更新：既有 prefix-stable payload 測試加
+   `{ content: 'the summary', tokens: null }` 斷言；新 `SummaryResult`
+   suite（trim + 無 timings → null / `predicted_n: 123` 抓取 / timings 缺
+   predicted_n → null）；新 `summarizeWithRetry` suite 8 支（一次過 /
+   超標 6000B > 5000 retry×3 無 gate fail-open / gate use（含 postSize 6000 /
+   target 5000 參數斷言）/ gate skip → null / gate retry 重新計數（2 calls）/
+   maxAttempts 0 無限（3 calls、無 gate）/ mode A kept bytes 進判定（head
+   400 + summary 1 + kept 10000 = 10401 > 8000 → gate；同 plan 在 B 為
+   401 ≤ 5000 不超 —— 釘死 A 公式）/ nCtx 0 → 不判定無 gate）。
+3. `tests/client/compaction-decision-card.svelte.test.ts` 照 3 新建：卡片 6
+   支（A 標籤 window target + `~12,345 of ~8,000 allowed` + (after 3
+   attempts) + 三按鈕 / B 標籤 keep target / attempts 1 省註記 / 三選項
+   resolve `onDecision('use'/'retry'/'skip')`）+ store gate 層 3 支（request →
+   `getPendingCompactionDecision` = request → resolve('use') → promise 解
+   'use' + pending 清 / abort → 'skip' + 清 / 已 abort → 立即 'skip'）；
+   `afterEach` 以 resolve('skip') 清殘留 pending。
+4. **回歸修正（規劃未列、實做必要）**：`tests/client/context-gauge-compaction.svelte.test.ts`
+   的 `~1,794 tokens saved` 是硬編碼 estimate 值（chars/4 時代）→ byte 語義
+   `~1,658`（fixture：system 16 / assistant 84（toolCalls JSON 84B）/ cmp 132 /
+   kept 19 / final 15 → payload 182；1840 − 182 = 1658）+ fixture 註解更新。
+   另兩支回歸確認零改動：`context-inspector`（row 和 = header、自適應）、
+   `chat-message-compaction`（`~1,840` 為 fixture 存的 `estimatedTokensBefore`
+   非計算值）。
+5. 項目 4 如預期：`settings-registry-invariants` generic、零改動；
+   `context-builder.test.ts` 期望值用同一 `estimateTokens` 計算 → 自適應、
+   零改動（兩者皆待使用者跑確認）。
+6. **下一步＝使用者跑**（指令見文件頭恢復點）：`npm run check` + unit 3 支 +
+   client 5 支 → 全綠 → 項目 6（勾 05、狀態改「完成並確認」、README 更新）。
 
 ## 4. 驗證狀態（目前停在這）
 
@@ -1587,6 +1661,24 @@ endpoint）。（N6 編譯/測試確認 ✅ 已完成並確認，見下方 N6 �
   函式計算 → byte 化預期自適應零改動（待跑確認）。
   ⑤ `settings-registry-invariants` generic（iterates `SETTING_CONFIG_DEFAULT`）
   → 4 新 key + `dependsOnValue` 預期零改動（待跑確認）。
+  待使用者跑：`npm run check` +
+  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
+  `npx vitest --project=unit --run tests/unit/summarize.test.ts` +
+  `npx vitest --project=unit --run tests/unit/context-builder.test.ts` +
+  `npx vitest --project=client --run tests/client/settings-registry-invariants.svelte.test.ts` +
+  `npx vitest --project=client --run tests/client/compaction-decision-card.svelte.test.ts` +
+  client 回歸 `chat-message-compaction` / `context-inspector` /
+  `context-gauge-compaction`。全綠 → 勾 05-雙 mode 清單測試項、§3.22/§3.23 狀態
+  改「完成並確認」、README 停點更新。
+- **雙 mode 測試已寫、待使用者編譯驗證**（2026-10-17；零來源碼改動、4 測試
+  檔：2 unit 重寫/更新 + 1 client 新 suite + 1 回歸修正）：
+  ① `tests/unit/compaction-policy.test.ts` 重寫（byte 語義 + v3 差值公式 +
+  8 新 suite + 既有 11 支重調 + savings fixture 重算）；②
+  `tests/unit/summarize.test.ts` + `SummaryResult` 3 支 + `summarizeWithRetry`
+  8 支 + 既有 payload 測試加 `{ content, tokens }` 斷言；③
+  `tests/client/compaction-decision-card.svelte.test.ts` 新（卡片 6 +
+  store gate 3）；④ `tests/client/context-gauge-compaction.svelte.test.ts`
+  `~1,794` → `~1,658`（byte 語義；細節見 §3.23 執行記錄 4）。
   待使用者跑：`npm run check` +
   `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
   `npx vitest --project=unit --run tests/unit/summarize.test.ts` +

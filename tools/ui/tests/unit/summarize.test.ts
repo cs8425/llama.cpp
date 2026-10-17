@@ -1,6 +1,12 @@
 // buildSummaryTranscript: the plain-text transcript fed to the summary call.
 // Attachments must become placeholders (never base64), tool calls reduce to
 // their names, and empty messages drop out entirely.
+//
+// summarizeMessages returns a SummaryResult { content, tokens }: the trimmed
+// text plus the server's actual completion tokens (timings.predicted_n) when
+// reported, null otherwise. summarizeWithRetry is the shared over-target
+// mechanism for both compaction modes: summarize → mode-specific success
+// check → retry × maxAttempts → user gate (use / retry / skip).
 
 import { AttachmentType, MessageRole, MessageType } from '$lib/enums';
 import { ChatService } from '$lib/services/chat.service';
@@ -9,9 +15,12 @@ import {
 	DEFAULT_SUMMARY_PROMPT,
 	SPLIT_TURN_SUMMARY_PROMPT,
 	summarizeMessages,
+	summarizeWithRetry,
 	toSummaryMode
 } from '$lib/services/context/summarize';
+import type { CompactionSummaryGate, SummarizeWithRetryOptions } from '$lib/services/context/summarize';
 import type { CompactionPlan } from '$lib/services/context/types';
+import type { ChatMessageTimings, SettingsChatServiceOptions } from '$lib/types';
 import type { DatabaseMessage } from '$lib/types/database';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -212,7 +221,11 @@ describe('summarizeMessages (prefix-stable payload, N4)', () => {
 		vi.mocked(ChatService.sendMessage).mockResolvedValue('the summary');
 		const plan = makePlanWithHead();
 
-		await summarizeMessages(plan, null);
+		const result = await summarizeMessages(plan, null);
+
+		// the return value is the SummaryResult: trimmed content, no timings
+		// reported by this mock → null tokens
+		expect(result).toEqual({ content: 'the summary', tokens: null });
 
 		// Head and region go through the same conversion as the main send path,
 		// so the prefix is identical to the conversation payload's prefix.
@@ -281,6 +294,225 @@ describe('summarizeMessages (prefix-stable payload, N4)', () => {
 		expect(vi.mocked(ChatService.sendMessage).mock.calls.at(-1)?.[1]).toMatchObject({
 			excludeReasoningFromContext: true
 		});
+	});
+});
+
+// --- summarizeMessages return value (dual-mode SummaryResult) ---------------
+
+describe('summarizeMessages (SummaryResult)', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('trims the content and reports null tokens when the server sent no timings', async () => {
+		vi.mocked(ChatService.sendMessage).mockResolvedValue('  padded summary  ');
+
+		const result = await summarizeMessages(makePlan(), null);
+
+		expect(result).toEqual({ content: 'padded summary', tokens: null });
+	});
+
+	it('captures the actual completion tokens from the response timings', async () => {
+		vi.mocked(ChatService.sendMessage).mockImplementation(
+			async (_messages: unknown, options?: SettingsChatServiceOptions) => {
+				options?.onComplete?.('the summary', undefined, { predicted_n: 123 });
+				return 'the summary';
+			}
+		);
+
+		const result = await summarizeMessages(makePlan(), null);
+
+		expect(result).toEqual({ content: 'the summary', tokens: 123 });
+	});
+
+	it('reports null tokens when the timings lack predicted_n', async () => {
+		vi.mocked(ChatService.sendMessage).mockImplementation(
+			async (_messages: unknown, options?: SettingsChatServiceOptions) => {
+				options?.onComplete?.('the summary', undefined, { prompt_n: 42 });
+				return 'the summary';
+			}
+		);
+
+		const result = await summarizeMessages(makePlan(), null);
+
+		expect(result).toEqual({ content: 'the summary', tokens: null });
+	});
+});
+
+// --- summarizeWithRetry (shared over-target mechanism, both modes) ----------
+
+function baseRetryOptions(overrides: Partial<SummarizeWithRetryOptions> = {}): SummarizeWithRetryOptions {
+	return {
+		checkParams: {
+			contextKeepRecentTokens: 2000,
+			contextKeepTargetPercent: 50,
+			contextMaxContextOverride: 0,
+			nCtx: 10000
+		},
+		compactionMode: 'threshold-target',
+		maxAttempts: 3,
+		nCtx: 10000,
+		...overrides
+	};
+}
+
+/** Mock the summary call with a fixed content (optionally reporting timings). */
+function mockSummary(content: string, timings?: ChatMessageTimings) {
+	vi.mocked(ChatService.sendMessage).mockImplementation(
+		async (_messages: unknown, options?: SettingsChatServiceOptions) => {
+			options?.onComplete?.(content, undefined, timings);
+			return content;
+		}
+	);
+}
+
+/** Plan with a 400-byte head and a 10 000-byte kept region (mode A pricing). */
+function makeBigKeptPlan(): CompactionPlan {
+	const head = message(MessageRole.SYSTEM, 'h'.repeat(400));
+	const kept = message(MessageRole.USER, 'x'.repeat(10000));
+
+	return {
+		cutIndex: 1,
+		estimatedTokensAfter: 0,
+		estimatedTokensBefore: 0,
+		firstKeptMessageId: kept.id,
+		isSplitTurn: false,
+		kept: [kept],
+		systemHead: head,
+		toSummarize: [message(MessageRole.USER, 'old')]
+	};
+}
+
+describe('summarizeWithRetry', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('passes a within-target summary on the first attempt', async () => {
+		mockSummary('short summary');
+
+		const result = await summarizeWithRetry(makePlan(), null, undefined, baseRetryOptions());
+
+		expect(result).toEqual({ content: 'short summary', tokens: null });
+		expect(vi.mocked(ChatService.sendMessage)).toHaveBeenCalledTimes(1);
+	});
+
+	it('retries up to maxAttempts and accepts the result when there is no gate (fail-open)', async () => {
+		mockSummary('x'.repeat(6000)); // 6000 > 5000 (B: keepTarget 50% of 10000)
+
+		const result = await summarizeWithRetry(makePlan(), null, undefined, baseRetryOptions({ maxAttempts: 3 }));
+
+		expect(result?.content).toBe('x'.repeat(6000));
+		expect(vi.mocked(ChatService.sendMessage)).toHaveBeenCalledTimes(3);
+	});
+
+	it('accepts the over-target summary when the gate says use', async () => {
+		mockSummary('x'.repeat(6000));
+		const gate: CompactionSummaryGate = { requestDecision: vi.fn().mockResolvedValue('use') };
+
+		const result = await summarizeWithRetry(makePlan(), null, undefined, baseRetryOptions({ gate, maxAttempts: 1 }));
+
+		expect(result?.content).toBe('x'.repeat(6000));
+		expect(gate.requestDecision).toHaveBeenCalledWith({
+			attempts: 1,
+			mode: 'threshold-target',
+			postSize: 6000,
+			target: 5000
+		});
+		expect(vi.mocked(ChatService.sendMessage)).toHaveBeenCalledTimes(1);
+	});
+
+	it('returns null (no entry) when the gate says skip', async () => {
+		mockSummary('x'.repeat(6000));
+		const gate: CompactionSummaryGate = { requestDecision: vi.fn().mockResolvedValue('skip') };
+
+		const result = await summarizeWithRetry(makePlan(), null, undefined, baseRetryOptions({ gate, maxAttempts: 1 }));
+
+		expect(result).toBeNull();
+	});
+
+	it('recomputes the attempt counter after a gate retry and succeeds on the next pass', async () => {
+		let calls = 0;
+
+		vi.mocked(ChatService.sendMessage).mockImplementation(
+			async (_messages: unknown, options?: SettingsChatServiceOptions) => {
+				calls++;
+				const content = calls === 1 ? 'x'.repeat(6000) : 'short now';
+
+				options?.onComplete?.(content, undefined, undefined);
+				return content;
+			}
+		);
+		const gate: CompactionSummaryGate = { requestDecision: vi.fn().mockResolvedValue('retry') };
+
+		const result = await summarizeWithRetry(makePlan(), null, undefined, baseRetryOptions({ gate, maxAttempts: 1 }));
+
+		expect(result).toEqual({ content: 'short now', tokens: null });
+		expect(gate.requestDecision).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(ChatService.sendMessage)).toHaveBeenCalledTimes(2);
+	});
+
+	it('retries without limit when maxAttempts ≤ 0, until within target (no gate)', async () => {
+		let calls = 0;
+
+		vi.mocked(ChatService.sendMessage).mockImplementation(
+			async (_messages: unknown, options?: SettingsChatServiceOptions) => {
+				calls++;
+				const content = calls < 3 ? 'x'.repeat(6000) : 'fits';
+
+				options?.onComplete?.(content, undefined, undefined);
+				return content;
+			}
+		);
+		const gate: CompactionSummaryGate = { requestDecision: vi.fn().mockResolvedValue('use') };
+
+		const result = await summarizeWithRetry(makePlan(), null, undefined, baseRetryOptions({ gate, maxAttempts: 0 }));
+
+		expect(result?.content).toBe('fits');
+		expect(vi.mocked(ChatService.sendMessage)).toHaveBeenCalledTimes(3);
+		expect(gate.requestDecision).not.toHaveBeenCalled();
+	});
+
+	it('prices the kept region into the check in mode A (head + summary + kept ≤ window − keep)', async () => {
+		mockSummary('s'); // 1 byte
+		const gate: CompactionSummaryGate = { requestDecision: vi.fn().mockResolvedValue('use') };
+
+		// A: 400 (head) + 1 (summary) + 10000 (kept) = 10401 > 10000 − 2000 =
+		// 8000 → over target. The same plan would be within target in mode B
+		// (400 + 1 = 401 ≤ 5000) — this pins the mode-A formula.
+		const result = await summarizeWithRetry(makeBigKeptPlan(), null, undefined, baseRetryOptions({
+			compactionMode: 'recent-window',
+			gate,
+			maxAttempts: 1
+		}));
+
+		expect(result?.content).toBe('s');
+		expect(gate.requestDecision).toHaveBeenCalledWith({
+			attempts: 1,
+			mode: 'recent-window',
+			postSize: 10401,
+			target: 8000
+		});
+	});
+
+	it('skips the check entirely when nCtx is unknown (≤ 0)', async () => {
+		mockSummary('x'.repeat(6000));
+		const gate: CompactionSummaryGate = { requestDecision: vi.fn().mockResolvedValue('use') };
+
+		const result = await summarizeWithRetry(makePlan(), null, undefined, baseRetryOptions({
+			checkParams: {
+				contextKeepRecentTokens: 2000,
+				contextKeepTargetPercent: 50,
+				contextMaxContextOverride: 0,
+				nCtx: 0
+			},
+			gate,
+			nCtx: 0
+		}));
+
+		expect(result?.content).toBe('x'.repeat(6000));
+		expect(gate.requestDecision).not.toHaveBeenCalled();
+		expect(vi.mocked(ChatService.sendMessage)).toHaveBeenCalledTimes(1);
 	});
 });
 
