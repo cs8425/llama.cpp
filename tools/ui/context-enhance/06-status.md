@@ -3,12 +3,13 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新；2026-11-04：N7 client 跑測第一輪 10/12、第二輪 11/12、
-> 第三輪回歸 14/17（`context-gauge-compaction` 1 支 + `context-inspector`
-> 2 支）、第四輪 9/11（`chat-message-compaction` 2 支）——8 支失敗根因全在
-> 測試檔（第一/二輪見下；第三/四輪 = 舊測試只設 `compacting = true`、未帶
-> N7 per-conv 的 `compactingConvId`），全數已修、來源碼零改動，待使用者重跑
-> 確認；明細見 §2u「第一～四輪跑測修復」/ §3.26）**：
+> **恢復點（最新；2026-11-04：N7 ✅ 完成並確認——四輪 client 跑測 8 支失敗
+> 根因全在測試檔（第一/二輪：異步 mount 未等 / conversation 未入 list /
+> Svelte 5 `$derived` cache 過期；第三/四輪：舊測試未帶 per-conv
+> `compactingConvId`），全數已修、來源碼零改動；使用者 2026-11-04 重跑
+> `chat-message-compaction` 11/11 + `npm run check` + 4 回歸檔
+> （`chat-message-compacting` / `context-gauge-compaction` / `context-inspector` /
+> `compaction-decision-card`）全綠，05-N7 清單已勾；明細見 §2u / §3.26）**：
 >
 > N7 已實做（設計 04-§4.2 / 05-N7 / §3.26；實做明細見 §2u）：`compactingConvId` +
 > 原子 `setCompacting`（全 codebase `compacting` 寫入皆改走它、四條路徑）；
@@ -22,37 +23,16 @@
 > 讓位；Stop 分派 `isRunning ? stopGeneration : stopCompaction`）；既有三個
 > `compacting` 消費者改 per-conv；新 client suite 11 支。
 >
-> **待使用者執行**：`npx vitest --project=client --run
-> tests/client/context-gauge-compaction.svelte.test.ts
-> tests/client/context-inspector.svelte.test.ts`（+ `npm run check`；
-> 回歸 `chat-message-compacting` / `chat-message-compaction` /
-> `compaction-decision-card`）；綠後勾 05-N7 清單 +
-> 手動驗收（05-§3 #8–#12）。
->
-> 跑測史（明細見 §2u）：第一輪 10/12（cmp row `LazyChatMessage` 異步 mount
-> 未等 → `waitFor` 輪詢；conversation 未入 list → `setActiveConversation` 連
-> list 一起寫；n_ctx 鏈未 mock 全）；第二輪 11/12（剩 1 支 = Svelte 5
-> `$derived` cache 過期：`contextStatsStore.activeModelId`（`contextTotal`
-> 上游）已被同檔較早測試求值成 null，spy 上游 `modelsStore.activeModelId`
-> getter 不會 invalidate 它 → 改直接 mock 葉值 `contextStatsStore.contextTotal`；
-> 教訓見 §6）；第三輪（回歸 2 檔）14/17（剩 3 支 = 舊測試只設
-> `contextStatsStore.compacting = true`、未帶 N7 per-conv 的
-> `compactingConvId` → gauge 行 / inspector Stop 列的 derived 恆 false →
-> 改 `setCompacting(convId)` + gauge 測試補 active conversation；來源碼零改動）；
-> 第四輪（使用者跑，2026-11-04）：`chat-message-compaction` 9/11（剩 2 支
-> Stop 測試 = 與第三輪同根因：舊測試只設 `compacting = true`、未帶 per-conv
-> `compactingConvId` → cmp row 的 `compacting` derived 恆 false → Stop 列不
-> 渲染）→ 改 `setCompacting('cmp-conv')` + `afterEach` 改 `setCompacting(null)`；
-> 來源碼零改動（`src/` + `tests/` 已無任何其他直接寫 `compacting` 之處）。
+> 跑測史（四輪、根因明細見 §2u「跑測記錄」）：第一輪 10/12 / 第二輪 11/12 /
+> 第三輪回歸 14/17 / 第四輪 9/11，全數已修（測試檔、來源碼零改動）並確認全綠。
 >
 > **剩（依序）**：
-> 1. **N7 跑測修復（第一輪 2 支 + 第二輪 1 支 + 第三輪 3 支 + 第四輪 2 支、
->    全在測試檔、來源碼零改動）、待使用者重跑確認**（明細見 §2u / §3.26）→
->    綠後勾 05-N7 清單 + 手動驗收（05-§3 #8–#12）。
-> 2. Phase 1 5.8 手動驗收（§4 清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）。
-> 3. Phase 3 可選後續（05-§1）。
+> 1. **手動驗收（未做、可一併驗）**：N7 5 項（05-§3 #8–#12）+ Phase 1 5.8
+>    （§4 清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）。
+> 2. Phase 3 可選後續（05-§1）。
 >
-> **此前里程碑（皆完成並確認）**：v4 真實 token 計數（2026-10-17，
+> **此前里程碑（皆完成並確認）**：N7（2026-11-04，§2u/§3.26）→ v4 真實
+> token 計數（2026-10-17，
 > §3.24/§3.25）→ 雙 mode 共用+A+B（2026-10-17，§3.22/§3.23）→
 > N6 空 kept（2026-10-17，§3.21）→ N1–N5（2026-07-22，§3.13–§3.19）→
 > Phase 2 P2.1–P2.6 → Phase 1 5.1–5.7 → Phase 0（逐項最終驗證狀態見 §4）。
@@ -66,7 +46,7 @@
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
 | v4 — 真實 token 計數（§3.24/§3.25） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` 82/82 / `context-builder` / `summarize` + client `context-inspector` / `chat-message-compaction` / `context-gauge-compaction` / `compaction-decision-card` / `settings-registry-invariants` 全綠；第一輪 9 失敗已修、3 根因全在測試檔，見 §3.25 / 檔首恢復點；05-v4 清單已全勾） |
-| N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（§3.26/§2u） | 🚧 **已實做；四輪跑測 8 支失敗根因全在測試檔、已修、來源碼零改動、待使用者重跑確認**（2026-11-04；queue 不 block + 指標列 + per-conv `compactingConvId` + sendMessage guard + finalizer 自動送 + client 11 支） |
+| N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（§3.26/§2u） | ✅ **完成並確認**（2026-11-04：四輪跑測 8 支失敗全在測試檔已修、來源碼零改動；使用者重跑 `chat-message-compaction` 11/11 + check + 4 回歸檔全綠；queue 不 block + 指標列 + per-conv `compactingConvId` + sendMessage guard + finalizer 自動送 + client 11 支；手動驗收 #8–#12 未做） |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
@@ -535,7 +515,7 @@ shrink-to-fit 異常仍在，改明確寫 `w-[min(100vw,42rem)]`。
      第一視口之下、跳頂可用；**無水平溢出**（§2s 第 3 輪 `w-full` 修復回歸確認，可一併驗）。
   → 全部通過，§2t 完成。
 
-## 2u. N7 壓縮進行中：queue + in-chat 指標列（Stop）（已實做 2026-11-04；第一輪跑測 10/12、第二輪 11/12，3 失敗已修、待重跑）
+## 2u. N7 壓縮進行中：queue + in-chat 指標列（Stop）（✅ 完成並確認 2026-11-04）
 
 > 設計：04-§4.2；實做清單：05-N7；決策與競態分析：§3.26（使用者 2026-11-04
 > 確認 D1–D5）。
@@ -558,112 +538,39 @@ shrink-to-fit 異常仍在，改明確寫 `w-[min(100vw,42rem)]`。
 - 三個既有 `compacting` 消費者改 per-conv（gauge 行 / cmp row Stop 與
   actionsBlocked / inspector actionsBlocked）。
 
-### 第一輪跑測修復（2026-11-04；client 10/12，2 失敗全在測試檔、來源碼零改動）
+### 跑測記錄（四輪、2026-11-04；8 支失敗全在測試檔、來源碼零改動；使用者重跑全綠確認）
 
-1. **`yields to the cmp row when the tail is a compaction entry`**（body 找不到
-   「Context compacted」）：cmp row 由 `LazyChatMessage` 經 IntersectionObserver
-   **異步** mount（`rootMargin 200%`），單一 `tick()` 不足以等到 mount；
-   indicator row 的讓位是同步 derived（已正確隱藏）→ 測試改 `await
-   waitFor(cmpRow)` 輪詢（`chat-message-compaction` suite 同款 helper；該
-   suite 一直綠即此機制可用）。
-2. **`auto-sends the queued message when the summary call is aborted`**
-   （`runCompactionSummary` 0 次呼叫）雙根因，皆在測試設定的 coverage：
-   - (a) `resolveConversationPath` 先查 `conversationsStore.conversations`
-     list（找不到 → null → `compactConversation` 提前 return）；測試只設
-     `activeConversation`。→ `setActiveConversation` 改連 list 一起寫 +
-     `afterEach` 清 `conversations = []`。
-   - (b) active conv 的 n_ctx 走 `contextStatsStore.contextTotal`（gauge 同源）
-     = `activeModelId ? getModelContextSize(activeModelId) : null`；test env
-     無 served model → `activeModelId` null → 只 mock `getModelContextSize`
-     永遠不會被讀到。→ 補 `vi.spyOn(modelsStore, 'activeModelId',
-     'get').mockReturnValue('test-model')`（`context-inspector` suite 同款
-     pattern）。⚠️ 當輪假設「derived 首次求值在 `compactConversation` 內
-     （spy 已就位）」——**此假設錯誤**，見下「第二輪跑測修復」。
-   - fixture 驗證（沙箱實算 `deriveRealMessageTokens` +
-     `planCompactionRecentWindow`）：5 對 × 5000 → user 段總和 0（clamped）、
-     assistant 各 5000；crossing 落 a2（idx 4）→ split-turn cut；
-     summarize 10000 ≥ `MIN_SUMMARIZE_TOKENS` 2000；kept 7 ≥ `minKeptMessages`
-     0；split → 免 `minKeptUserTurns` → **plan 成立**、summary 呼叫可達。
-   - 來源碼判斷：`getContextSizeForConversation` 對 active conv 用 gauge 同源
-     的 `contextTotal` 是設計語義（production 有 active conv 必有 loaded
-     model）→ 不改來源、改測試。
+- **第一輪 `chat-message-compacting` 10/12（2）**：① cmp row 由
+  `LazyChatMessage` 經 IntersectionObserver **異步** mount、單一 `tick()` 不足
+  → `await waitFor(cmpRow)` 輪詢；② `auto-sends the queued message when the
+  summary call is aborted`（`runCompactionSummary` 0 次呼叫）：測試只設
+  `activeConversation` 未入 `conversations` list（`resolveConversationPath`
+  回 null 提前 return）+ n_ctx 鏈（`contextTotal` → `activeModelId` →
+  `getModelContextSize`）未 mock 全 → `setActiveConversation` 連 list 一起寫
+  + 補 model mock（當輪假設「derived 首次求值在 spy 之後」錯誤，見第二輪）。
+- **第二輪 `chat-message-compacting` 11/12（1）**：同一支測試，真根因 =
+  Svelte 5 `$derived` cache 過期——上游 `activeModelId` derived 已被同檔較早
+  測試求值成 null，spy 上游 getter **不會 invalidate** 它 → 改直接 pin 被測
+  路徑讀的葉值 `vi.spyOn(contextStatsStore, 'contextTotal', 'get')
+  .mockReturnValue(256000)`（教訓已併入 §6）。
+- **第三輪回歸 `context-gauge-compaction` 7/8 + `context-inspector` 12/14
+  （3）**：舊測試只設 `compacting = true`、未帶 N7 per-conv 的
+  `compactingConvId` → gauge 行 / inspector Stop 列 derived 恆 false → 改
+  `setCompacting(convId)` + `afterEach` 改 `setCompacting(null)` + gauge 測試補
+  active conversation。
+- **第四輪 `chat-message-compaction` 9/11（2）**：2 支 Stop 測試與第三輪同根因
+  （cmp row 的 `compacting` derived 恆 false → Stop 列不渲染）→
+  `setCompacting('cmp-conv')` + `afterEach` 改 `setCompacting(null)`；全
+  codebase grep 確認無其他直接寫 `compacting` 之處。
 
-### 第二輪跑測修復（2026-11-04；client 11/12，1 失敗、測試檔、來源碼零改動）
+### 驗證狀態（✅ 使用者 2026-11-04 重跑全綠、N7 確認）
 
-- **`auto-sends the queued message when the summary call is aborted`**（仍
-  `runCompactionSummary` 0 次呼叫）：第一輪 (b) 的假設錯誤——Svelte 5 `$derived`
-  是 lazy + cached：`contextStatsStore.activeModelId`（`contextTotal` 的上游
-  derived）已被**同檔更前面的測試**求值過——finalizer 的第一支
-  （"settles without a plan"）`compactConversation` →
-  `getContextSizeForConversation` → 讀 `contextTotal`（無 model spy → null），
-  module-singleton store 的 derived cache 跨測試不清除；`vi.spyOn(modelsStore,
-  'activeModelId', 'get')` 只是換 getter，**不會 invalidate** 它追蹤的依賴
-  （models list / `isRouterMode` 等 state）→ derived 維持 clean →
-  `contextTotal` 永遠回 stale null → `nCtx === null` → 提前 return（finalizer
-  照常跑、所以該測試其餘斷言全過）。`context-inspector` suite 同款 pattern
-  綠的原因：它的**首次**求值發生在 spy 安裝**之後**（dialog render 讀
-  `contextTotal`），derived 經 mock 求值、不再追蹤任何依賴。
-- 修法：不改上游、直接 pin 被測路徑讀的**葉值**——`vi.spyOn(
-  contextStatsStore, 'contextTotal', 'get').mockReturnValue(256000)`
-  （`getContextSizeForConversation` 對 active conv 讀的正是這個值）；上游兩
-  mock（`activeModelId` getter / `getModelContextSize`）與 `modelsStore`
-  import 移除。finalizer 第一支（依賴 `contextTotal` null 才 early exit）不受
-  影響：測試順序執行、spy 由 `afterEach` 的 `vi.restoreAllMocks()` 還原。
-- 教訓（後續 suite 注意）：對 module-singleton store 的 `$derived` 鏈 mock
-  時，spying 上游 plain getter **不等於**讓下游 derived 重新求值；要 pin 就
-  pin 被測路徑直接讀的葉值（或改寫 `$state` 來源讓依賴正常 invalidate）。
-
-### 第三輪跑測修復（2026-11-04；回歸 2 檔 14/17，3 失敗、測試檔、來源碼零改動）
-
-- **`context-gauge-compaction` 1 支 + `context-inspector` 2 支**：N7 把
-  `compacting` 狀態改為 per-conv（`compactingConvId` + `setCompacting`），三個
-  消費者（gauge 行 / inspector Stop 列 + actionsBlocked / cmp row）皆以
-  `compacting && compactingConvId === activeConvId` derive；舊測試只設
-  `contextStatsStore.compacting = true`（`compactingConvId` 維持 null；gauge 測試
-  甚至無 active conversation）→ derived 恆 false：
-  - gauge 「Compacting context…」列永不渲染 → `waitFor` 5s timeout；
-  - inspector 渲染一般 action 列（無 Stop）→ 文字斷言失敗 +
-    `findDialogButton('Stop')` null → `click(null)` TypeError。
-- 修法（`chat-message-compacting` suite 同款 pattern、來源碼零改動）：
-  - gauge 測試：補 `setActiveConversation()`（production 中 gauge 恆在 active
-    conversation 的 chat form 內）+ `setCompacting('gauge-conv')`；
-  - inspector 2 支：`setCompacting('insp-conv')`；
-  - 兩檔 `afterEach`：`compacting = false` → `setCompacting(null)`（連
-    `compactingConvId` 一起清，防跨測試泄漏）。
-
-### 第四輪跑測修復（2026-11-04；`chat-message-compaction` 9/11，2 失敗、測試檔、來源碼零改動）
-
-- **2 支 Stop 測試**（「shows a Stop button in place of the actions while
-  compacting」/「Stop calls stopCompaction while a summary is in flight」）：
-  與第三輪同根因——N7 後 `ChatMessageCompaction` 的 `compacting` derived 是
-  `compacting && compactingConvId === message.convId`（per-conv），舊測試只設
-  `contextStatsStore.compacting = true`（`compactingConvId` 維持 null）→
-  derived 恆 false → 渲染一般 action 列（Edit / Re-summarize / Restore）、Stop
-  列不渲染 → `findRowButton(row, 'Stop')` null（第二支再 `click(null)`
-  TypeError）。
-- 修法（第三輪同款、來源碼零改動）：2 支測試 `setCompacting('cmp-conv')`
-  （fixture convId）+ `afterEach` 改 `setCompacting(null)`（連
-  `compactingConvId` 一起清，防跨測試泄漏）+ 檔頭註解同步 per-conv 語義。
-- 已全 codebase grep `\.compacting = true|false`：`src/` + `tests/` 皆零命中，
-  本檔是最後一處（`chat-message-compacting` 新 suite 與第三輪修過的 gauge /
-  inspector 皆已走 `setCompacting`）。
-
-### 驗證狀態
-- 第一輪（使用者跑，2026-11-04）：client `chat-message-compacting` **10/12**
-  （上列 2 支失敗）→ 已修（測試檔）。
-- 第二輪（使用者跑，2026-11-04）：client `chat-message-compacting` **11/12**
-  （只剩 "aborted" 一支；根因 = Svelte 5 `$derived` cache 過期，見上
-  「第二輪跑測修復」）→ 已修（測試檔）。
-- 第三輪（使用者跑，2026-11-04）：回歸 2 檔 `context-gauge-compaction`
-  **7/8** + `context-inspector` **12/14**（3 失敗 = 舊測試未帶 per-conv
-  `compactingConvId`，見上「第三輪跑測修復」）→ 已修（測試檔）。
-- 第四輪（使用者跑，2026-11-04）：`chat-message-compaction` **9/11**（2 失敗
-  = 同第三輪根因，見上「第四輪跑測修復」）→ 已修（測試檔）。
-- **待使用者重跑**：`npx vitest --project=client --run
-  tests/client/chat-message-compaction.svelte.test.ts`（+ `npm run check`；
-  回歸 `chat-message-compacting` / `context-gauge-compaction` /
-  `context-inspector` / `compaction-decision-card`）；綠後勾 05-N7 清單 +
-  手動驗收（05-§3 #8–#12）。
+- `npx vitest --project=client --run
+  tests/client/chat-message-compaction.svelte.test.ts` **11/11**
+- `npm run check` 0 錯
+- 回歸 `chat-message-compacting` / `context-gauge-compaction` /
+  `context-inspector` / `compaction-decision-card` 全綠
+- 05-N7 清單已勾（手動驗收 #8–#12 未做，見檔首「剩」）
 
 ## 3. 決策記錄（與規劃文件的差異，實做 Phase 1 前必讀）
 
@@ -1499,7 +1406,7 @@ v1 的 char/4。設計同步:02-§3.4(v4)/§3.3/§6、03-§2/§4、04-§2/§3/§
 `{content, role, tool_call_id, tool_calls, reasoning_content}` → `sourceId` 不會進
 request body(已確認 chat.service.ts:1142-1162 / 883-897)。
 
-## 3.26 N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（分析 + 決策 2026-11-04；✅ 已實做 2026-11-04，跑測修復兩輪、待重跑確認）
+## 3.26 N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（分析 + 決策 2026-11-04；✅ 完成並確認 2026-11-04）
 
 > 觸發：使用者要求「自動壓縮同時 user 輸入的部份，UI 要有明確提示（類似
 > Summarized message 列）+ 可中止 + 阻止輸入」。檢視現有 code 後改採
@@ -1556,16 +1463,13 @@ request body(已確認 chat.service.ts:1142-1162 / 883-897)。
 
 - ✅ **已實做（2026-11-04）**——明細見 §2u（store 層五處 + 新元件 +
   `ChatMessages` 插入 + 三個消費者 per-conv + client 11 支）。
-- 🚧 **跑測（2026-11-04）：第一輪 client 10/12、第二輪 11/12、第三輪回歸
-  14/17（`context-gauge-compaction` 7/8 + `context-inspector` 12/14）、第四輪
-  `chat-message-compaction` 9/11**——8 支失敗根因全在測試檔（LazyChatMessage
-  異步 mount 未等 / conversation 未入 list / Svelte 5 `$derived` cache 過期 →
-  `contextTotal` stale null / 舊測試未帶 per-conv `compactingConvId`（第三 +
-  第四輪）），已修、來源碼零改動（明細見 §2u「第一～四輪跑測修復」）；
-  **待使用者重跑確認**（`npx vitest --project=client --run
-  tests/client/chat-message-compaction.svelte.test.ts` + `npm run check` +
-  回歸 `chat-message-compacting` / `context-gauge-compaction` /
-  `context-inspector` / `compaction-decision-card`）。
+- ✅ **跑測（2026-11-04，使用者確認全綠）**：四輪 8 支失敗全在測試檔
+  （LazyChatMessage 異步 mount 未等 / conversation 未入 list / Svelte 5
+  `$derived` cache 過期 → `contextTotal` stale null / 舊測試未帶 per-conv
+  `compactingConvId`（第三 + 第四輪）），全數已修、來源碼零改動（根因明細見
+  §2u「跑測記錄」）；最終重跑 `chat-message-compaction` 11/11 + `npm run
+  check` + 回歸 `chat-message-compacting` / `context-gauge-compaction` /
+  `context-inspector` / `compaction-decision-card` 全綠。
 - 實做順序（依建議完成）：context-stats flag → chatStore guard + finalizer →
   agentic flag → `abortCurrentFlow` → 指標列元件 + `ChatMessages` 插入 →
   client 測試 → （待）手動驗收（05-§3 新增 5 項，#8–#12）。
@@ -1625,14 +1529,11 @@ request body(已確認 chat.service.ts:1142-1162 / 883-897)。
   `compaction-decision-card` / `settings-registry-invariants` 全綠
   （第一輪 9 失敗已修、3 根因全在測試檔，見 §3.25；entry=bytes/4
   使用者確認）。
-- **N7 🚧（已實做、待重跑確認）**：client `chat-message-compacting`
-  第一輪 10/12 / 第二輪 11/12 + 第三輪回歸 14/17（`context-gauge-compaction`
-  7/8 / `context-inspector` 12/14）+ 第四輪 `chat-message-compaction` 9/11——
-  8 支失敗根因全在測試檔（LazyChatMessage 異步 mount 未等 / conversation 未入
-  list / Svelte 5 `$derived` cache 過期 → `contextTotal` stale null / 舊測試未
-  帶 per-conv `compactingConvId`（第三 + 第四輪）），已修、來源碼零改動（明細
-  見 §2u「第一～四輪跑測修復」；derived-cache 教訓見 §6）；待使用者重跑
-  （指令見檔首）。
+- **N7 ✅（完成並確認，2026-11-04）**：四輪跑測 8 支失敗全在測試檔（根因
+  索引見 §2u「跑測記錄」；derived-cache 教訓見 §6），已修、來源碼零改動；
+  使用者重跑 `chat-message-compaction` 11/11 + `npm run check` + 回歸
+  `chat-message-compacting` / `context-gauge-compaction` / `context-inspector` /
+  `compaction-decision-card` 全綠；05-N7 清單已勾（手動驗收 #8–#12 未做）。
 - **Phase 1 5.8 手動驗收（未做；可與 v4 一併驗）**：
   1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
   2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。

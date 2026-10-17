@@ -15,11 +15,10 @@
 > default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status §3.18）；
 > **N5 ✅ 完成並確認**（新設定 `contextSummaryMode`：summary 的 prompt
 > 模式開放給 user 選，見 06-status §3.19））。
-> **目前停點**：**N7 壓縮進行中（queue + in-chat 指標列 + Stop）已實做，
-> 四輪 client 跑測 8 支失敗根因全在測試檔（第一輪 10/12、第二輪 11/12、
-> 第三輪回歸 14/17、第四輪 `chat-message-compaction` 9/11；第三/四輪 = 舊
-> 測試未帶 per-conv `compactingConvId`）、已修、來源碼零改動、待使用者重跑
-> 確認**（2026-11-04；明細見 06-status 檔首恢復點 / §2u「第一～四輪跑測修復」/ §3.26）。此前：**v4 真實 token 計數 ✅ 完成並確認**
+> **目前停點**：**N7 壓縮進行中（queue + in-chat 指標列 + Stop）✅ 完成並確認**
+> （2026-11-04；四輪 client 跑測 8 支失敗全在測試檔已修、來源碼零改動，使用者
+> 重跑 `chat-message-compaction` 11/11 + `npm run check` + 4 回歸檔全綠、
+> 05-N7 清單已勾；明細見 06-status 檔首恢復點 / §2u / §3.26）。此前：**v4 真實 token 計數 ✅ 完成並確認**
 > （2026-10-17；`npm run check` + unit 3 支 + client 5 支全綠，見 06-status
 > 檔首恢復點 / §3.25）。
 > v4 = 計數/觸發/成功判定/
@@ -38,12 +37,8 @@
 > N6（split 切允許空 kept，2026-10-17）；N1–N5（2026-07-22：summary 上限
 > n_ctx × % / keep target 設定 / Stop 鍵 / prefix-stable default /
 > `contextSummaryMode` 設定）。
-> **剩**：**N7 第一輪 2 支 + 第二輪 1 支 + 第三輪 3 支 + 第四輪 2 支測試失敗已修（全在測試檔、來源碼零改動）、待使用者重跑確認**
-> （已實做；2026-11-04；post-flow 自動
-> 壓縮 fire-and-forget 與新送出的競態修復——見 06-status §3.26 / §2u /
-> 04-§4.2 / 05-N7）+ Phase 1 5.8 手動驗收
-> （見 06-status §4 清單；A/B mode 行為 + v4 顯示可一併驗；N7 手動驗收
-> #8–#12）+ Phase 3
+> **剩**：**手動驗收（未做、可一併驗）**：N7 5 項（05-§3 #8–#12）+ Phase 1 5.8
+> （見 06-status §4 清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）+ Phase 3
 > 可選後續（兩段式 summary / per-conversation
 > 覆蓋 / 合併重摘要提示 / summary 獨立 model / endpoint / gauge savings
 > 顯示，見 05-§1；
