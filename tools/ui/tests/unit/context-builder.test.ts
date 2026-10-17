@@ -1,25 +1,24 @@
 // buildLlmContext: the single choke point from database path to exact API
 // payload. ChatService is mocked with a faithful stand-in for
-// normalizeMessagesForApi (per-message {content, role, reasoning_content} +
-// empty-system filter) so the tests pin the windowing/insertion semantics.
+// convertDbMessageToApiChatMessageData (per-message {content, role,
+// reasoning_content}) so the tests pin the windowing/insertion semantics;
+// the empty-system filter is applied by the builder itself (it mirrors
+// normalizeMessagesForApi, v4).
 
 import { MessageRole, MessageType } from '$lib/enums';
-import { estimateTokens } from '$lib/services/context/compaction-policy';
 import { buildLlmContext, findLastCompactionEntry } from '$lib/services/context/context-builder';
 import type { CompactionMeta, DatabaseMessage } from '$lib/types/database';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('$lib/services/chat.service', () => ({
 	ChatService: {
-		normalizeMessagesForApi: vi.fn(async (messages: DatabaseMessage[]) =>
-			messages
-				.filter((m) => !(m.role === MessageRole.SYSTEM && !m.content.trim()))
-				.map((m) => ({
-					content: m.content,
-					role: m.role,
-					...(m.reasoningContent ? { reasoning_content: m.reasoningContent } : {})
-				}))
-		)
+		// Faithful stand-in for the DB→API conversion. The empty-system filter
+		// lives in the builder (it mirrors normalizeMessagesForApi), not here.
+		convertDbMessageToApiChatMessageData: vi.fn(async (m: DatabaseMessage) => ({
+			content: m.content,
+			role: m.role,
+			...(m.reasoningContent ? { reasoning_content: m.reasoningContent } : {})
+		}))
 	}
 }));
 
@@ -83,14 +82,11 @@ describe('buildLlmContext', () => {
 
 		expect(result.compaction).toBeNull();
 		expect(result.messages).toEqual([
-			{ content: 'you are helpful', role: MessageRole.SYSTEM },
-			{ content: 'hello', role: MessageRole.USER },
-			{ content: 'hi there', role: MessageRole.ASSISTANT },
-			{ content: 'again', role: MessageRole.USER }
+			{ content: 'you are helpful', role: MessageRole.SYSTEM, sourceId: sys.id },
+			{ content: 'hello', role: MessageRole.USER, sourceId: u1.id },
+			{ content: 'hi there', role: MessageRole.ASSISTANT, sourceId: a1.id },
+			{ content: 'again', role: MessageRole.USER, sourceId: u2.id }
 		]);
-		expect(result.estimatedTokens).toBe(
-			[sys, u1, a1, u2].reduce((sum, m) => sum + estimateTokens(m), 0)
-		);
 	});
 
 	it('builds [system, summary, kept…] for a single compaction entry', async () => {
@@ -104,10 +100,10 @@ describe('buildLlmContext', () => {
 		const result = await buildLlmContext([sys, u1, a1, u2, a2, cmp]);
 
 		expect(result.messages).toEqual([
-			{ content: 'you are helpful', role: MessageRole.SYSTEM },
-			{ content: 'SUMMARY OF EARLIER', role: MessageRole.USER },
-			{ content: 'second question', role: MessageRole.USER },
-			{ content: 'second answer', role: MessageRole.ASSISTANT }
+			{ content: 'you are helpful', role: MessageRole.SYSTEM, sourceId: sys.id },
+			{ content: 'SUMMARY OF EARLIER', role: MessageRole.USER, sourceId: cmp.id },
+			{ content: 'second question', role: MessageRole.USER, sourceId: u2.id },
+			{ content: 'second answer', role: MessageRole.ASSISTANT, sourceId: a2.id }
 		]);
 		expect(result.compaction).toEqual({
 			boundaryValid: true,
@@ -126,7 +122,8 @@ describe('buildLlmContext', () => {
 
 		expect(result.messages[0]).toEqual({
 			content: 'system prompt',
-			role: MessageRole.SYSTEM
+			role: MessageRole.SYSTEM,
+			sourceId: sys.id
 		});
 		// u1 is the boundary: nothing was dropped
 		expect(result.compaction?.droppedCount).toBe(0);
@@ -145,10 +142,10 @@ describe('buildLlmContext', () => {
 
 		// only the last entry is in effect; cmp1 sat in the summarize region
 		expect(result.messages).toEqual([
-			{ content: 'sys', role: MessageRole.SYSTEM },
-			{ content: 'NEW SUMMARY', role: MessageRole.USER },
-			{ content: 'q2', role: MessageRole.USER },
-			{ content: 'a2', role: MessageRole.ASSISTANT }
+			{ content: 'sys', role: MessageRole.SYSTEM, sourceId: sys.id },
+			{ content: 'NEW SUMMARY', role: MessageRole.USER, sourceId: cmp2.id },
+			{ content: 'q2', role: MessageRole.USER, sourceId: u2.id },
+			{ content: 'a2', role: MessageRole.ASSISTANT, sourceId: a2.id }
 		]);
 		expect(result.compaction?.entryId).toBe(cmp2.id);
 	});
@@ -167,12 +164,12 @@ describe('buildLlmContext', () => {
 
 		// the in-effect entry (cmp2) is not sent twice; cmp1 rides along as user
 		expect(result.messages).toEqual([
-			{ content: 'sys', role: MessageRole.SYSTEM },
-			{ content: 'NEW SUMMARY', role: MessageRole.USER },
-			{ content: 'a1', role: MessageRole.ASSISTANT },
-			{ content: 'OLD SUMMARY', role: MessageRole.USER },
-			{ content: 'q2', role: MessageRole.USER },
-			{ content: 'a2', role: MessageRole.ASSISTANT }
+			{ content: 'sys', role: MessageRole.SYSTEM, sourceId: sys.id },
+			{ content: 'NEW SUMMARY', role: MessageRole.USER, sourceId: cmp2.id },
+			{ content: 'a1', role: MessageRole.ASSISTANT, sourceId: a1.id },
+			{ content: 'OLD SUMMARY', role: MessageRole.USER, sourceId: cmp1.id },
+			{ content: 'q2', role: MessageRole.USER, sourceId: u2.id },
+			{ content: 'a2', role: MessageRole.ASSISTANT, sourceId: a2.id }
 		]);
 	});
 
@@ -190,12 +187,12 @@ describe('buildLlmContext', () => {
 		const result = await buildLlmContext([sys, u1, a1, u2, a2, cmp, u3, a3]);
 
 		expect(result.messages).toEqual([
-			{ content: 'sys', role: MessageRole.SYSTEM },
-			{ content: 'SUMMARY', role: MessageRole.USER },
-			{ content: 'q2', role: MessageRole.USER },
-			{ content: 'a2', role: MessageRole.ASSISTANT },
-			{ content: 'q3', role: MessageRole.USER },
-			{ content: 'a3', role: MessageRole.ASSISTANT }
+			{ content: 'sys', role: MessageRole.SYSTEM, sourceId: sys.id },
+			{ content: 'SUMMARY', role: MessageRole.USER, sourceId: cmp.id },
+			{ content: 'q2', role: MessageRole.USER, sourceId: u2.id },
+			{ content: 'a2', role: MessageRole.ASSISTANT, sourceId: a2.id },
+			{ content: 'q3', role: MessageRole.USER, sourceId: u3.id },
+			{ content: 'a3', role: MessageRole.ASSISTANT, sourceId: a3.id }
 		]);
 		expect(result.compaction?.droppedCount).toBe(2);
 	});
@@ -215,7 +212,7 @@ describe('buildLlmContext', () => {
 			firstKeptMessageId: 'deleted-message-id'
 		});
 		expect(result.messages).toHaveLength(4);
-		expect(result.messages[0]).toEqual({ content: 'sys', role: MessageRole.SYSTEM });
+		expect(result.messages[0]).toEqual({ content: 'sys', role: MessageRole.SYSTEM, sourceId: sys.id });
 	});
 
 	it('fails open when the boundary points at the system prompt (corrupt data)', async () => {
@@ -241,8 +238,8 @@ describe('buildLlmContext', () => {
 
 		// payload = [system, summary]; this is NOT the I3 fail-open
 		expect(result.messages).toEqual([
-			{ content: 'sys', role: MessageRole.SYSTEM },
-			{ content: 'SUMMARY', role: MessageRole.USER }
+			{ content: 'sys', role: MessageRole.SYSTEM, sourceId: sys.id },
+			{ content: 'SUMMARY', role: MessageRole.USER, sourceId: cmp.id }
 		]);
 		expect(result.compaction).toEqual({
 			boundaryValid: true,
@@ -263,9 +260,9 @@ describe('buildLlmContext', () => {
 		const result = await buildLlmContext([sys, u1, a1, cmp, u2]);
 
 		expect(result.messages).toEqual([
-			{ content: 'sys', role: MessageRole.SYSTEM },
-			{ content: 'SUMMARY', role: MessageRole.USER },
-			{ content: 'q2', role: MessageRole.USER }
+			{ content: 'sys', role: MessageRole.SYSTEM, sourceId: sys.id },
+			{ content: 'SUMMARY', role: MessageRole.USER, sourceId: cmp.id },
+			{ content: 'q2', role: MessageRole.USER, sourceId: u2.id }
 		]);
 		expect(result.compaction?.droppedCount).toBe(2);
 		expect(result.compaction?.boundaryValid).toBe(true);
@@ -281,8 +278,8 @@ describe('buildLlmContext', () => {
 		expect(result.compaction?.boundaryValid).toBe(true);
 		expect(result.compaction?.firstKeptMessageId).toBeUndefined();
 		expect(result.messages).toEqual([
-			{ content: 'sys', role: MessageRole.SYSTEM },
-			{ content: 'SUMMARY', role: MessageRole.USER }
+			{ content: 'sys', role: MessageRole.SYSTEM, sourceId: sys.id },
+			{ content: 'SUMMARY', role: MessageRole.USER, sourceId: cmp.id }
 		]);
 	});
 
@@ -294,8 +291,8 @@ describe('buildLlmContext', () => {
 		const result = await buildLlmContext([sys, u1, cmp]);
 
 		expect(result.messages).toEqual([
-			{ content: 'SUMMARY', role: MessageRole.USER },
-			{ content: 'q1', role: MessageRole.USER }
+			{ content: 'SUMMARY', role: MessageRole.USER, sourceId: cmp.id },
+			{ content: 'q1', role: MessageRole.USER, sourceId: u1.id }
 		]);
 	});
 
@@ -311,8 +308,13 @@ describe('buildLlmContext', () => {
 		expect(withReasoning.messages[2]).toEqual({
 			content: 'a1',
 			reasoning_content: 'thinking…',
-			role: MessageRole.ASSISTANT
+			role: MessageRole.ASSISTANT,
+			sourceId: a1.id
 		});
-		expect(withoutReasoning.messages[2]).toEqual({ content: 'a1', role: MessageRole.ASSISTANT });
+		expect(withoutReasoning.messages[2]).toEqual({
+			content: 'a1',
+			role: MessageRole.ASSISTANT,
+			sourceId: a1.id
+		});
 	});
 });

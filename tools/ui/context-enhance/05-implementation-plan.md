@@ -195,7 +195,7 @@
 payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點可前移
 恢復 kept;無 cmp 對話行為不變。
 
-### v4 — 真實 token 計數（2026-10-17 使用者定稿；🚧 來源碼 + policy unit 完成，剩 2 unit + 4 client 測試）
+### v4 — 真實 token 計數（2026-10-17 使用者定稿；🚧 來源碼 + 全部測試更新完成並靜態核實，待使用者編譯驗證）
 
 > 背景:Context Inspector 的「Estimated send」與每則「~N tok」用
 > `estimateTokens`/`estimateApiMessageTokens` 的 **UTF-8 byte 數**當 token 顯示、
@@ -227,11 +227,14 @@ payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點�
 - [x] unit:`deriveRealMessageTokens`(assistant/段總和/首段/多非-assistant/尾端);
       `messageSize`(真實/尾端 bytes/4/非尾端 0);切點 A/B + 成功判定吃真實 token;
       觸發 `contextUsed`(=0 不觸發)——`compaction-policy.test.ts` 全數重寫完成
-- [ ] client:Inspector 標題＝gauge、主欄真實/`-`/`est.`、副欄 bytes+bytes/4;
-      cmp「N→M」真實（4 client 測試 stale 待更新,逐檔明細見 06-status §3.25）
-- [ ] 回歸:`compaction-policy` ✅ 已重寫 / `context-builder` 待改 token 尺度
+- [x] client:Inspector 標題＝gauge、主欄真實/`-`/`est.`、副欄 bytes+bytes/4;
+      cmp「N→M」真實（2026-10-17 本輪 4 client 測試全數更新完成並靜態核實,
+      逐檔明細見 06-status §3.25；含修 `DialogContextInspector` `row.tokens`
+      模板殘留 bug；待使用者編譯驗證）
+- [x] 回歸:`compaction-policy` ✅ 已重寫 / `context-builder` 已改 token 尺度
       期望值 + `sourceId` 斷言（mock 改 `convertDbMessageToApiChatMessageData`）
-      / `summarize` 3 處 `CompactionPlan` literal 補 `keptTokens` / `realMessageTokens`
+      / `summarize` 3 處 `CompactionPlan` literal 補 `keptTokens` /
+      `realMessageTokens`（mode A postSize 依 `keptTokens` 重算 = 10001）
 
 ✅ 驗收:Inspector 標題/總和條＝gauge 真實值(同單位同量級);每則主欄真實、
 副欄 bytes+bytes/4;切點/觸發/成功判定全真實 token;無資料例外(system、尚未送出

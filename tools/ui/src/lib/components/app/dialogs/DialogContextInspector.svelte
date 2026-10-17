@@ -797,7 +797,7 @@
 										>{row.text}</span>
 
 										<span class="text-muted-foreground font-mono shrink-0 pt-0.5 text-[10px]">
-											~{formatNumber(row.tokens)} tok
+											{row.main} <span class="opacity-60">({row.sub})</span>
 										</span>
 									</button>
 

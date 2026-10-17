@@ -43,9 +43,10 @@ function makeMessage(overrides: Partial<DatabaseMessage>): DatabaseMessage {
 
 /**
  * Path: system, user, assistant(tool_calls) → tool, cmp, user, assistant.
- * Byte estimate (v3): system 16, user 19, assistant 84, tool 13, cmp 132,
- * kept 19, final 15 → payload = 16 + 132 + 19 + 15 = 182,
- * saved = 1840 − 182 = 1,658.
+ * v4: the savings figure is `estimatedTokensBefore` (1840 real tokens at
+ * summary time) minus the real-token size of the current payload (the whole
+ * path minus the dropped region) — with no server timings on the fixture
+ * every message prices at 0, so saved = 1840 − 0 = 1,840.
  */
 function buildCompactedFixture(): void {
 	const system = makeMessage({ content: 'You are helpful.', role: MessageRole.SYSTEM, type: MessageType.SYSTEM });
@@ -158,7 +159,7 @@ describe('gauge popup compaction row (Phase 2 P2.6)', () => {
 			) ?? null
 		);
 
-		expect(row.textContent?.trim()).toBe('Compacted: 3 messages · ~1,658 tokens saved');
+		expect(row.textContent?.trim()).toBe('Compacted: 3 messages · ~1,840 tokens saved');
 		// the inspector entry stays below the row
 		await expect.element(screen.getByText('Inspect what the LLM sees →')).toBeVisible();
 		expect(bodyText()).not.toContain('Compacting context…');

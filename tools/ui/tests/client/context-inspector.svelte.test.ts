@@ -1,9 +1,12 @@
 // Pins the context inspector (context-enhance Phase 1 5.7 + Phase 2 P2.4):
 // the dialog must show the exact payload `buildLlmContext` produces for the
-// active path (WYSIWYG with the send path) — payload rows with role badges
-// and token estimates, the compacted-out region, the fail-open boundary
-// warning and a Copy JSON action that replaces base64 bodies with
-// placeholders. P2.4 adds the manual-intervention actions, all spied on the
+// active path (WYSIWYG with the send path) — payload rows with role badges,
+// a per-row main column of REAL tokens (system '-', segment totals,
+// predicted_n; the not-yet-sent tail at bytes/4) plus a bytes/bytes÷4
+// sub-column, the header bound to the gauge's own `contextUsed`, the
+// compacted-out region, the fail-open boundary warning and a Copy JSON
+// action that replaces base64 bodies with placeholders. P2.4 adds the
+// manual-intervention actions, all spied on the
 // chatStore: edit the summary in place (prefix stripped), move the kept-from
 // boundary through the grouped select, Compact now, Expand (with
 // confirmation) and Re-summarize; while `contextStatsStore.compacting` the
@@ -91,7 +94,15 @@ function buildCompactedFixture(): {
 			summarizedCount: 3
 		}
 	});
-	const finalAssistant = makeMessage({ content: 'you are welcome', role: MessageRole.ASSISTANT });
+	const finalAssistant = makeMessage({
+		content: 'you are welcome',
+		role: MessageRole.ASSISTANT,
+		// v4: the last turn's server timings — the gauge's real context is
+		// prompt_n + cache_n + predicted_n = 1,600, and the derived
+		// per-message map prices the final assistant at 100 and the segment
+		// before it (owned by the last non-assistant = the kept user) at 1,500.
+		timings: { prompt_n: 1500, predicted_n: 100 }
+	});
 
 	conversationsStore.activeMessages = [system, user, assistant, tool, cmp, kept, finalAssistant];
 
@@ -127,6 +138,12 @@ function payloadRowButtons(): HTMLButtonElement[] {
 
 function dialogButtons(): HTMLButtonElement[] {
 	return [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')];
+}
+
+// The row's token cell: main column (real tokens — '-', 'est. N' or a number)
+// followed by the sub-column (bytes / bytes÷4 estimate).
+function tokenCell(row: HTMLButtonElement): string {
+	return row.querySelector('span.font-mono')?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 }
 
 function findDialogButton(label: string): HTMLButtonElement | null {
@@ -179,11 +196,15 @@ describe('DialogContextInspector (read-only, Phase 1)', () => {
 
 		const text = dialogText();
 
-		// header: model, n_ctx and the estimate bar (percent of n_ctx)
+		// header: model, n_ctx and the real-context bar — the gauge's own
+		// number (prompt_n + cache_n + predicted_n of the last turn), never a
+		// byte estimate of the payload
 		expect(text).toContain('test-model');
 		expect(text).toContain('32,768');
 		expect(text).toContain('% of n_ctx');
-		expect(text).toContain('Estimated send:');
+		expect(text).toContain('Real context:');
+		expect(text).toContain('1,600 tokens');
+		expect(text).toContain('4.9% of n_ctx');
 
 		// payload = system, summary, kept user, final assistant (cmp node itself is not re-sent)
 		expect(text).toContain('(4 messages)');
@@ -203,15 +224,12 @@ describe('DialogContextInspector (read-only, Phase 1)', () => {
 		expect(text).toContain('help me fix the bug');
 		expect(text).toContain('(tool_calls)');
 
-		// per-row token estimates sum up to the header estimate
-		const rowTokens = payloadRowButtons()
-			.map((row) => Number(row.textContent?.match(/~([\d,]+) tok/)?.[1]?.replace(/,/g, '')))
-			.filter((n) => Number.isFinite(n));
-
-		expect(rowTokens).toHaveLength(4);
-		const headerTokens = Number(text.match(/Estimated send:\s*([\d,]+) tokens/)?.[1]?.replace(/,/g, ''));
-
-		expect(rowTokens.reduce((a, b) => a + b, 0)).toBe(headerTokens);
+		// v4 per-row columns: main = real tokens (system '-', the segment
+		// total, predicted_n), sub = bytes / bytes÷4 estimate
+		expect(tokenCell(payloadRowButtons()[0])).toBe('- (16 Bytes / ~4 est.)');
+		expect(tokenCell(payloadRowButtons()[1])).toBe('- (132 Bytes / ~33 est.)');
+		expect(tokenCell(payloadRowButtons()[2])).toBe('1,500 (19 Bytes / ~5 est.)');
+		expect(tokenCell(payloadRowButtons()[3])).toBe('100 (15 Bytes / ~4 est.)');
 
 		unmount();
 	});

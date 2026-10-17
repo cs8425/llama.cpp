@@ -3,37 +3,41 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新；2026-10-17 本輪已對來源碼靜態核實、無代碼改動）**：
-> **v4 真實 token 計數——來源碼 9 檔 + unit `compaction-policy` 重寫完成；
-> 剩 2 unit + 4 client 測試（皆 stale，逐檔明細見 §3.25「測試」），
+> **恢復點（最新；2026-10-17 本輪：v4 全部 6 支測試檔更新完成 + 1 處來源殘留
+> bug 已修，靜態核實、未執行任何指令）：**
+> **v4 真實 token 計數——來源碼 9 檔 + 2 unit + 4 client 測試全數更新，
 > 待使用者編譯驗證**
 >
-> 上一輪 session 超上下文限制中斷、狀態未寫完；本輪逐檔核實：
-> - ✅ 來源碼 9 檔全到位（§3.25）：`compaction-policy.ts`（v4 全函式；全 repo
->   搜 `estimateTokens` / `estimateApiMessageTokens` / `ContextBuildResult`
->   的 `estimatedTokens` 皆零殘留）、`types.ts`（`keptTokens` /
->   `realMessageTokens` / `sourceId`）、`context-builder.ts`（`convertWithSourceIds`
->   逐則 + 每行 `sourceId`）、`index.ts`（exports 同步）、`stores/chat`
->   （trigger = `contextStatsStore.contextUsed` + `pathRealTokens`）、
->   `stores/agentic`（`effectiveLastPrompt = isActive ? contextUsed : lastPrompt`）、
->   `DialogContextInspector` / `ChatMessageCompaction`（v4 顯示）、
->   `settings.constants`（2 條 help 已改）。gauge popup 零改動（走
->   `estimateCompactionSavings` 純函式、自動變真實 token）。
-> - ✅ `tests/unit/compaction-policy.test.ts` 已全數重寫（17 suite 全 v4）。
-> - ❌ 剩 4 個測試檔 stale = **下一輪的全部工作**：`context-builder.test.ts`
->   （import 已除名的 `estimateTokens` → 整 suite 0 test）、`summarize.test.ts`
->   （3 處 `CompactionPlan` literal 缺新欄位）、`context-inspector.svelte.test.ts`
->   （`Estimated send:` → `Real context:`、「row 加總 = header」不變式失效）、
->   `context-gauge-compaction.svelte.test.ts`（saved `~1,658` byte 語義失效）；
->   `chat-message-compaction` / `compaction-decision-card` /
->   `settings-registry-invariants` 回歸。
+> 本輪（依 §3.25「測試」明細）：
+> - ✅ `tests/unit/context-builder.test.ts`：import 除 `estimateTokens`、mock 改
+>   `ChatService.convertDbMessageToApiChatMessageData`（empty-system filter 在
+>   builder 端）、刪 `result.estimatedTokens` 斷言、所有 `result.messages`
+>   `toEqual` 補 `sourceId`（summary row = `cmp.id`）。
+> - ✅ `tests/unit/summarize.test.ts`：3 處 `CompactionPlan` literal 補
+>   `keptTokens` + `realMessageTokens: new Map()`；`makeBigKeptPlan`
+>   `keptTokens: 10000`、mode A postSize 期望改 10001（= summary 1 +
+>   `plan.keptTokens`、head 不加）。
+> - ✅ `tests/client/context-inspector.svelte.test.ts`：finalAssistant fixture 加
+>   `timings: { prompt_n: 1500, predicted_n: 100 }`（contextUsed = 1600、
+>   n_ctx 32768 → 4.9%）；`Estimated send:` → `Real context:`；舊「row 加總 =
+>   header」不變式改**逐列主/副欄斷言**（system/summary `-`、kept 1,500、
+>   final 100 + `Bytes / ~N est.` 副欄；新增 `tokenCell` helper）。
+> - ✅ `tests/client/context-gauge-compaction.svelte.test.ts`：`~1,658`（v3 byte
+>   語義）→ `~1,840`（v4：fixture 無 timings → payload 計 0）。
+> - 🐛 **來源殘留 bug 已修**：`DialogContextInspector.svelte` payload row 模板
+>   引用 `row.tokens`（`PayloadRow` 無此欄位、只有 `size`/`main`/`sub`）→
+>   `npm run check` 必掛 + runtime NaN；依 04-§2.2 設計改渲染
+>   `{row.main} <span class="opacity-60">({row.sub})</span>`。
+> - 回歸 3 檔靜態掃描無 token 相關斷言、零改動：`chat-message-compaction`
+>   （L159 `~1,840` = `meta.estimatedTokensBefore`、不變；M 側 = 132B/4 = 33）/
+>   `compaction-decision-card`（props 自含 postSize/target）/
+>   `settings-registry-invariants`（純 load/sync/reset 不變式）。
 >
 > **下一步（依序）**：
-> 1. 依 §3.25「測試」明細更新上述 4 個 stale 測試檔（+ 3 回歸檔跑確認）。
-> 2. 使用者跑：`npm run check` +
+> 1. 使用者跑：`npm run check` +
 >    `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts tests/unit/context-builder.test.ts tests/unit/summarize.test.ts`
 >    + `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts tests/client/chat-message-compaction.svelte.test.ts tests/client/context-gauge-compaction.svelte.test.ts tests/client/compaction-decision-card.svelte.test.ts tests/client/settings-registry-invariants.svelte.test.ts`。
-> 3. 全綠 → 勾 05-v4 區塊清單、§3.25 狀態改「完成並確認」、README 停點更新。
+> 2. 全綠 → 勾 05-v4 區塊清單、§3.25 狀態改「完成並確認」、README 停點更新。
 >
 > **實做決策待確認**（§3.25；不同意可推回）：非 active 對話 in-loop trigger =
 > 該 turn 真實 prompt_n（不用 active 對話的 gauge 數）；負段總和 clamp 0；
@@ -55,7 +59,7 @@
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
-| v4 — 真實 token 計數（§3.24/§3.25） | 🚧 實做中：來源碼 9 檔 + unit `compaction-policy` 重寫完成（2026-10-17 靜態核實）；剩 2 unit + 4 client 測試（stale，逐檔明細見 §3.25），待使用者編譯驗證 |
+| v4 — 真實 token 計數（§3.24/§3.25） | 🚧 待編譯驗證：來源碼 9 檔 + 2 unit + 4 client 測試全數更新（2026-10-17 本輪靜態核實；含修 `DialogContextInspector` `row.tokens` 殘留 bug），待使用者編譯驗證 |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
@@ -1254,7 +1258,7 @@ gate / settings 鏈 / 卡片）→ A（planner + 觸發/判定 + gauge）→ B�
 v1 的 char/4。設計同步:02-§3.4(v4)/§3.3/§6、03-§2/§4、04-§2/§3/§4、
 05-v4 區塊、README TL;DR。實做清單:05-v4 區塊。
 
-## 3.25 v4 真實 token 計數實做（2026-10-17；來源碼 + policy unit 完成並靜態核實，剩 2 unit + 4 client 測試）
+## 3.25 v4 真實 token 計數實做（2026-10-17；來源碼 + 全部測試更新完成並靜態核實，待使用者編譯驗證）
 
 > 規格:05-v4 區塊 / 02-§3.4(v4) / 04-§2/§3 / §3.24(決策)。以下為實做明細 +
 > 規格未明訂的決策(恢復點列了「待確認」,不同意可推回)。
@@ -1306,46 +1310,47 @@ v1 的 char/4。設計同步:02-§3.4(v4)/§3.3/§6、03-§2/§4、04-§2/§3/§
    「Real context: N tokens (P% of n_ctx)」);每則**主欄** = real(system `-`、尾端
    `est. N` = bytes/4、path 中間未歸屬 = 0)、**副欄** = `bytes / ~bytes÷4 est.`;
    `fullPathTokens` = 真實總和;expand 描述「from」= payload 各列 real 加總
-   (`payloadRealTokens`)。
+   (`payloadRealTokens`)。⚠️ 本輪補修:payload row 模板殘留 `row.tokens`（`PayloadRow`
+   無此欄位 → svelte-check 必掛 + runtime NaN）,依 04-§2.2 改渲染
+   `{row.main} <span class="opacity-60">({row.sub})</span>`。
 8. `ChatMessageCompaction.svelte`:N→M = `meta.estimatedTokensBefore`(現為真實)→
    `real ?? bytes/4`;`droppedTokens` / `fullPathTokens` 真實。
 9. `settings.constants.ts`:`contextKeepRecentTokens` label (bytes)→(tokens) + help;
    `contextCompactionThreshold` help「last prompt」→「real context usage (the gauge)」。
 
-**測試**:
+**測試**（2026-10-17 本輪全數更新完成、靜態核實；待使用者編譯驗證）:
 - ✅ `tests/unit/compaction-policy.test.ts` 全數重寫（2026-10-17 本輪已核實）：
   fixture `assistantTimed(id, content, prompt, predicted, cache)`；新 suite
   `deriveRealMessageTokens`(6) / `tailStartOf`(3) / `messageSize`(4)；
   `planCompaction`(11) / `planCompactionRecentWindow`(10) /
   `evaluateCompactionResult`(6) / `estimateCompactionSavings`(7) 改 token-scale
   期望值；byte suite 改名 `messageBytes` / `apiMessageBytes`（斷言不變）。
-- ❌ 未完成（4 檔 stale，2026-10-17 本輪逐行核實；**下一輪的全部工作**）：
-  1. `tests/unit/context-builder.test.ts`：L7 import `estimateTokens`
-     （已除名 → 整 suite 0 test）；L12–24 mock `normalizeMessagesForApi`
-     → 改 mock `ChatService.convertDbMessageToApiChatMessageData`（builder
-     不再走 `normalizeMessagesForApi`）；L91 刪 `result.estimatedTokens` 斷言
-     （欄位已移除）；所有 `result.messages` 的 `toEqual` 補 `sourceId`
-     （`message()` 依建立順序 m1..mN；summary row = `cmp.id`）。
-  2. `tests/unit/summarize.test.ts`：3 處 `CompactionPlan` literal 補
-     `keptTokens` + `realMessageTokens: new Map()`（`makePlan` L141 /
-     `makePlanWithHead` L158 / `makeBigKeptPlan` L370）；
-     `normalizeMessagesForApi` mock 保留（summarize.ts L220–221 仍在用）；
-     `makeBigKeptPlan` 的 mode A postSize 期望改依 `plan.keptTokens`
-     重算（v4 成功判定讀 `keptTokens`、非 kept 的 bytes）。
-  3. `tests/client/context-inspector.svelte.test.ts`：L186/L212
-     `Estimated send:` → `Real context:`；舊「row 加總 = header」不變式失效
-     （主欄 = real：system `-`、cmp 0、kept real、尾端 `est.`；header = gauge
-     `contextUsed`）→ 改逐行主/副欄斷言；建議 finalAssistant fixture 加
-     `timings: { prompt_n: 1500, predicted_n: 100 }` → contextUsed 1600、
-     n_ctx 32768 → ≈5%；expand 描述數字變。
-  4. `tests/client/context-gauge-compaction.svelte.test.ts`：L161
-     `~1,658 tokens saved`（byte 語義）→ v4 `estimateCompactionSavings` =
-     1840 − real payload（fixture 無 timings → 0）= `~1,840`；或 fixture 加
-     同 timings → `~240`。
-- 回歸（跑確認）：`tests/client/chat-message-compaction.svelte.test.ts`
-  （L159 `~1,840` N 側不變；M 側 = real ?? bytes/4 → fixture 無 timings →
-  cmp 132B/4 = `~33`；expand 描述數字變）、`compaction-decision-card` /
-  `settings-registry-invariants`。
+- ✅ `tests/unit/context-builder.test.ts`：import 除 `estimateTokens`；mock 改
+  `ChatService.convertDbMessageToApiChatMessageData`（per-message
+  `{content, role, reasoning_content?}`；empty-system filter 在 builder 端）；
+  刪 `result.estimatedTokens` 斷言；所有 `result.messages` `toEqual` 補
+  `sourceId`（`message()` 依建立順序 m1..mN；summary row = `cmp.id`）。
+- ✅ `tests/unit/summarize.test.ts`：3 處 `CompactionPlan` literal 補
+  `keptTokens` + `realMessageTokens: new Map()`（`makePlan` / `makePlanWithHead`
+  keptTokens 10；`makeBigKeptPlan` keptTokens 10000）；`normalizeMessagesForApi`
+  mock 保留（summarize.ts 仍在用）；mode A postSize 期望 10401 → **10001**
+  （= summary 1 + `plan.keptTokens`；v4 成功判定不讀 head bytes）。
+- ✅ `tests/client/context-inspector.svelte.test.ts`：finalAssistant fixture 加
+  `timings: { prompt_n: 1500, predicted_n: 100 }` → contextUsed 1600、n_ctx
+  32768 → 4.9%；`Estimated send:` → `Real context:`；舊「row 加總 = header」
+  不變式改**逐列主/副欄斷言**（新 `tokenCell` helper 抓 `span.font-mono`）：
+  system `- (16 Bytes / ~4 est.)`、summary `- (132 Bytes / ~33 est.)`、kept
+  `1,500 (19 Bytes / ~5 est.)`（首段真實總和歸該段最後一則非-assistant）、
+  final `100 (15 Bytes / ~4 est.)`（predicted_n）。
+- ✅ `tests/client/context-gauge-compaction.svelte.test.ts`：`~1,658`（v3 byte
+  語義）→ `~1,840`（v4 `estimateCompactionSavings` = 1840 − real payload；
+  fixture 無 timings → payload 計 0）；fixture 註解同步。
+- 回歸（跑確認；本輪靜態掃描皆無 token 相關斷言、零改動）：
+  `tests/client/chat-message-compaction.svelte.test.ts`（L159 `~1,840` N 側 =
+  `meta.estimatedTokensBefore` 不變；M 側 = real ?? bytes/4 → fixture 無
+  timings → cmp 132B/4 = `~33`；expand 描述斷言為通用文案）/
+  `compaction-decision-card`（props 自含 postSize/target）/
+  `settings-registry-invariants`（純 load/sync/reset 不變式）。
 
 **Wire 安全**:`sendMessage` / `preEncode` 逐則 map 成
 `{content, role, tool_call_id, tool_calls, reasoning_content}` → `sourceId` 不會進

@@ -149,6 +149,8 @@ function makePlan(): CompactionPlan {
 		firstKeptMessageId: kept.id,
 		isSplitTurn: false,
 		kept: [kept],
+		keptTokens: 10,
+		realMessageTokens: new Map(),
 		systemHead: null,
 		toSummarize: [summarized]
 	};
@@ -173,6 +175,8 @@ function makePlanWithHead(): CompactionPlan {
 		firstKeptMessageId: kept.id,
 		isSplitTurn: false,
 		kept: [kept],
+		keptTokens: 10,
+		realMessageTokens: new Map(),
 		systemHead: head,
 		toSummarize
 	};
@@ -366,7 +370,11 @@ function mockSummary(content: string, timings?: ChatMessageTimings) {
 	);
 }
 
-/** Plan with a 400-byte head and a 10 000-byte kept region (mode A pricing). */
+/**
+ * Plan with a 400-byte head and a 10 000-token kept region (mode A pricing,
+ * v4: the success check reads the plan's real kept tokens — the system head
+ * counts 0, folded into the first segment total, not byte sizes).
+ */
 function makeBigKeptPlan(): CompactionPlan {
 	const head = message(MessageRole.SYSTEM, 'h'.repeat(400));
 	const kept = message(MessageRole.USER, 'x'.repeat(10000));
@@ -378,6 +386,8 @@ function makeBigKeptPlan(): CompactionPlan {
 		firstKeptMessageId: kept.id,
 		isSplitTurn: false,
 		kept: [kept],
+		keptTokens: 10000,
+		realMessageTokens: new Map(),
 		systemHead: head,
 		toSummarize: [message(MessageRole.USER, 'old')]
 	};
@@ -473,13 +483,14 @@ describe('summarizeWithRetry', () => {
 		expect(gate.requestDecision).not.toHaveBeenCalled();
 	});
 
-	it('prices the kept region into the check in mode A (head + summary + kept ≤ window − keep)', async () => {
+	it('prices the kept region into the check in mode A (summary + kept ≤ window − keep)', async () => {
 		mockSummary('s'); // 1 byte
 		const gate: CompactionSummaryGate = { requestDecision: vi.fn().mockResolvedValue('use') };
 
-		// A: 400 (head) + 1 (summary) + 10000 (kept) = 10401 > 10000 − 2000 =
-		// 8000 → over target. The same plan would be within target in mode B
-		// (400 + 1 = 401 ≤ 5000) — this pins the mode-A formula.
+		// A: 1 (summary) + 10000 (plan.keptTokens) = 10001 > 10000 − 2000 =
+		// 8000 → over target. The system head counts 0 (v4). The same plan
+		// would be within target in mode B (1 ≤ 5000) — this pins the
+		// mode-A formula.
 		const result = await summarizeWithRetry(makeBigKeptPlan(), null, undefined, baseRetryOptions({
 			compactionMode: 'recent-window',
 			gate,
@@ -490,7 +501,7 @@ describe('summarizeWithRetry', () => {
 		expect(gate.requestDecision).toHaveBeenCalledWith({
 			attempts: 1,
 			mode: 'recent-window',
-			postSize: 10401,
+			postSize: 10001,
 			target: 8000
 		});
 	});
