@@ -32,12 +32,8 @@ import {
 	nextCompactionStep,
 	resolveSummarySize
 } from './compaction-policy';
-import type {
-	CompactionCheckParams,
-	CompactionDecision,
-	CompactionMode
-} from './compaction-policy';
-import type { CompactionPlan } from './types';
+import type { CompactionCheckParams } from './compaction-policy';
+import type { CompactionDecision, CompactionMode, CompactionPlan } from './types';
 
 /**
  * Fixed prefix stored in the compaction entry's content so the model knows the
@@ -234,7 +230,7 @@ export async function summarizeMessages(
 	const response = await ChatService.sendMessage(
 		messages,
 		{
-			onComplete: (_content, _reasoningContent, timings) => {
+			onComplete: (_content: string, _reasoningContent: string | undefined, timings: ChatMessageTimings | undefined) => {
 				responseTimings = timings;
 			},
 			excludeReasoningFromContext: options.excludeReasoning === true,

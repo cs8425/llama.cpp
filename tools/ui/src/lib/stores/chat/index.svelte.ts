@@ -1139,6 +1139,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				requestDecision: (p) => agenticStore.requestCompactionDecision({ ...p, convId }, signal)
 			},
 			maxAttempts: config.contextSummaryMaxAttempts,
+			nCtx,
 			// unknown context size → summarizeMessages' built-in 1024 default
 			maxTokens:
 				nCtx > 0

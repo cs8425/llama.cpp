@@ -83,7 +83,7 @@ function rw(keepRecentTokens: number, overrides: Partial<RecentWindowOptions> = 
 // chars/4), 1600 chars = 1600 bytes.
 const T100 = 'x'.repeat(400);
 const T400 = 'x'.repeat(1600);
-const TOOL_CALLS = JSON.stringify([{ function: { name: 'read_file' }, id: 'c1' }]); // 46 bytes
+const TOOL_CALLS = JSON.stringify([{ function: { name: 'read_file' }, id: 'c1' }]); // 45 bytes
 
 describe('byteLength', () => {
 	it('counts ASCII one byte per character', () => {
@@ -117,8 +117,8 @@ describe('estimateTokens', () => {
 			toolCalls: TOOL_CALLS
 		});
 
-		// 400 + 400 + 46
-		expect(estimateTokens(withCalls)).toBe(846);
+		// 400 + 400 + 45
+		expect(estimateTokens(withCalls)).toBe(845);
 	});
 
 	it('prices image, audio and video attachments flat', () => {
@@ -187,8 +187,8 @@ describe('estimateApiMessageTokens', () => {
 			tool_calls: [{ function: { arguments: '{}', name: 'read_file' }, id: 'c1', type: 'function' }]
 		};
 
-		// 400 (reasoning) + 84 (tool_calls JSON)
-		expect(estimateApiMessageTokens(withExtras)).toBe(484);
+		// 400 (reasoning) + 80 (tool_calls JSON)
+		expect(estimateApiMessageTokens(withExtras)).toBe(480);
 	});
 
 	it('prices content parts: text by bytes, image flat 1000, audio/video flat 3000', () => {
@@ -942,9 +942,9 @@ describe('estimateCompactionSavings', () => {
 	});
 
 	it('keeps an older compaction entry inside the dropped region out of the payload', () => {
-		// sys 400, u1 400, oldCmp 400, a1 400, newCmp 800, u2 400 → total 2400,
-		// dropped = u1 + oldCmp + a1 = 1200, payload = sys + newCmp + u2 = 1200
-		// → 1700 − 1200 = 500
+		// sys 400, u1 400, oldCmp 400, a1 400, newCmp 800, u2 400 → total 2800,
+		// dropped = u1 + oldCmp + a1 = 1200, payload = sys + newCmp + u2 = 1600
+		// → 1700 − 1600 = 100
 		const oldCmp = message('oldCmp', MessageRole.USER, 'z'.repeat(400), {
 			compactionMeta: { estimatedTokensBefore: 300, firstKeptMessageId: 'a1', summarizedCount: 1 },
 			type: MessageType.COMPACTION
@@ -959,7 +959,7 @@ describe('estimateCompactionSavings', () => {
 			message('u2', MessageRole.USER, T100)
 		];
 
-		expect(estimateCompactionSavings(path, newCmp)).toBe(500);
+		expect(estimateCompactionSavings(path, newCmp)).toBe(100);
 	});
 
 	it('returns 0 when the boundary no longer exists on the path (fail-open full send)', () => {

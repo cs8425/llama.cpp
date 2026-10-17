@@ -3,7 +3,29 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**雙 mode 測試已寫（unit 重寫/更新 + client 新 suite + 1 項
+> **恢復點（最新）**：**第一輪 check + unit 驗證的錯誤已修（11 type errors + 3 test
+> failures）、待使用者重跑確認**（2026-10-17）——使用者跑 `npm run check` + unit
+> `compaction-policy` 回報 11 型別錯誤（3 檔）+ 3 支測試失敗；全部定位為**型別/
+> 測試硬編碼層面的 mechanical 錯誤、來源碼邏輯無誤**，已修：
+> ① `SettingsEntry` 補 `dependsOnValue?: string`（`settings.d.ts`；registry 4 處 +
+> `toSettingsSection` mapping 共 5 錯）；
+> ② `summarize.ts` import 修正：`CompactionDecision` / `CompactionMode` 改從
+> `./types`（定義所在）import（原誤寫 `./compaction-policy`）；`onComplete` 參數補
+> 顯式型別（同 `flows.svelte.ts` 慣例）；
+> ③ stores/chat `runCompactionSummary` 的 `summarizeWithRetry` 呼叫補 top-level
+> `nCtx`（`SummarizeWithRetryOptions` 必填、函式內 `nCtx > 0` gate 使用）；
+> ④ 測試期望值修正（實作 byte 語義正確、測試硬編碼算錯）：`estimateTokens`
+> 846→845（`TOOL_CALLS` 實際 45 bytes 非 46）、`estimateApiMessageTokens`
+> 484→480（tool_calls JSON 實際 80 bytes 非 84）、`estimateCompactionSavings`
+> 500→100（註解誤把 newCmp 當 400 bytes、`compaction()` helper 實為 800）+ 註解
+> 同步。**無來源碼邏輯改動**。下一步＝使用者重跑 `npm run check` + unit 3 支
+> （compaction-policy / summarize / context-builder）+ client 5 支（
+> settings-registry-invariants / compaction-decision-card + 回歸
+> chat-message-compaction / context-inspector / context-gauge-compaction）→ 全綠 →
+> 勾 05-雙 mode 清單測試項、§3.22/§3.23 狀態改「完成並確認」、README 停點更新。
+> 另剩：Phase 1 的 5.8 手動驗收 + Phase 3 可選後續。
+>
+> 此前恢復點：**雙 mode 測試已寫（unit 重寫/更新 + client 新 suite + 1 項
 > 回歸修正）、待使用者編譯驗證**（2026-10-17）——依 05-雙 mode 清單 +
 > §3.23 下一步 1–3 完成全部測試（**無來源碼改動**）：
 > ① `tests/unit/compaction-policy.test.ts` **重寫**（byte 語義 + v3 差值公式 +
