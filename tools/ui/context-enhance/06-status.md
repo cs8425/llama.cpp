@@ -3,179 +3,49 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**v4 真實 token 計數——來源碼 9 檔 + unit `compaction-policy` 重寫完成，剩 2 unit + 4 client 測試，待使用者編譯驗證**（2026-10-17）——
-> 依 05-v4 區塊完成全部來源碼改動（明細 + 決策見 §3.25）：`compaction-policy.ts`
-> （`deriveRealMessageTokens` / `messageSize` / `tailStartOf` 新；`estimateTokens`→`messageBytes`、
-> `estimateApiMessageTokens`→`apiMessageBytes`；planner / 成功判定 / savings 全真實 token；system
-> 永當 segment owner、負段總和 clamp 0）/ `types.ts`（`CompactionPlan` + `keptTokens` +
-> `realMessageTokens`；新 `ContextPayloadMessage.sourceId`；`ContextBuildResult` 移除
-> `estimatedTokens`）/ `context-builder.ts`（逐則 `convertDbMessageToApiChatMessageData` +
-> empty-system filter mirror，每行帶 `sourceId`）/ `index.ts` exports / `stores/chat`（trigger =
-> `contextStatsStore.contextUsed`；`pathRealTokens`；`buildRegionPlan` 真實）/ `stores/agentic`
-> （trigger：active→contextUsed、非 active→該 turn 真實 prompt_n、null→不觸發）/
-> `DialogContextInspector`（標題/總和條 = gauge `contextUsed`；每則主欄 real/`-`/`est.` + 副欄
-> bytes+bytes÷4）/ `ChatMessageCompaction`（N→M 真實）/ `settings.constants`（2 條 help）。Unit
-> `compaction-policy.test.ts` 已全數重寫（token-scale fixture `assistantTimed` + 3 新 suite）。
+> **恢復點（最新；2026-10-17 本輪已對來源碼靜態核實、無代碼改動）**：
+> **v4 真實 token 計數——來源碼 9 檔 + unit `compaction-policy` 重寫完成；
+> 剩 2 unit + 4 client 測試（皆 stale，逐檔明細見 §3.25「測試」），
+> 待使用者編譯驗證**
+>
+> 上一輪 session 超上下文限制中斷、狀態未寫完；本輪逐檔核實：
+> - ✅ 來源碼 9 檔全到位（§3.25）：`compaction-policy.ts`（v4 全函式；全 repo
+>   搜 `estimateTokens` / `estimateApiMessageTokens` / `ContextBuildResult`
+>   的 `estimatedTokens` 皆零殘留）、`types.ts`（`keptTokens` /
+>   `realMessageTokens` / `sourceId`）、`context-builder.ts`（`convertWithSourceIds`
+>   逐則 + 每行 `sourceId`）、`index.ts`（exports 同步）、`stores/chat`
+>   （trigger = `contextStatsStore.contextUsed` + `pathRealTokens`）、
+>   `stores/agentic`（`effectiveLastPrompt = isActive ? contextUsed : lastPrompt`）、
+>   `DialogContextInspector` / `ChatMessageCompaction`（v4 顯示）、
+>   `settings.constants`（2 條 help 已改）。gauge popup 零改動（走
+>   `estimateCompactionSavings` 純函式、自動變真實 token）。
+> - ✅ `tests/unit/compaction-policy.test.ts` 已全數重寫（17 suite 全 v4）。
+> - ❌ 剩 4 個測試檔 stale = **下一輪的全部工作**：`context-builder.test.ts`
+>   （import 已除名的 `estimateTokens` → 整 suite 0 test）、`summarize.test.ts`
+>   （3 處 `CompactionPlan` literal 缺新欄位）、`context-inspector.svelte.test.ts`
+>   （`Estimated send:` → `Real context:`、「row 加總 = header」不變式失效）、
+>   `context-gauge-compaction.svelte.test.ts`（saved `~1,658` byte 語義失效）；
+>   `chat-message-compaction` / `compaction-decision-card` /
+>   `settings-registry-invariants` 回歸。
+>
 > **下一步（依序）**：
-> 1. `tests/unit/context-builder.test.ts`：mock 改
->    `ChatService.convertDbMessageToApiChatMessageData`（builder 不再走
->    `normalizeMessagesForApi`）；所有 `toEqual` 補 `sourceId`（message() 依建立順序 m1..mN）；
->    刪 `estimatedTokens` 斷言；summary row 補 `sourceId = cmp.id` 斷言。
-> 2. `tests/unit/summarize.test.ts`：3 處 `CompactionPlan` literal（makePlan ~L141 /
->    makePlanWithHead ~L158 / ~L376）補 `keptTokens: 0` + `realMessageTokens: new Map()`。
-> 3. client `context-inspector.svelte.test.ts`："Estimated send:" → "Real context:"；header =
->    gauge contextUsed（建議 fixture finalAssistant 加 `timings: { prompt_n: 1500, predicted_n: 100 }`
->    → contextUsed 1600、n_ctx 32768 → 4.9%）；舊「row 加總 = header」斷言不成立（主欄改 real：
->    system `-`、cmp 0、kept 1500、finalAssistant 100）→ 改逐行主/副欄斷言；expand 描述數字變。
-> 4. client `context-gauge-compaction.svelte.test.ts`：saved 數字變（建議 fixture 加同 timings →
->    saved = 1840 − 1600 = 240 → `~240 tokens saved`；不加則 1840 − 0 = 1840）。
-> 5. client `chat-message-compaction.svelte.test.ts`：`~1,840`（N 側）不變；M 側 = bytes/4
->    （fixture 無 timings → cmp 132 bytes / 4 = 33）；expand 描述數字變（無 timings → fullPath 0）；
->    既有斷言只查 'tokens' 存在，跑確認即可。
-> 6. `compaction-decision-card` / `settings-registry-invariants` 回歸（跑確認）。
-> 7. 全綠 → 勾 05-v4 區塊清單、§3.25 狀態改「完成並確認」、README 停點更新。
-> **驗證指令**（1–6 完成後）：`npm run check` + `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts tests/unit/context-builder.test.ts tests/unit/summarize.test.ts` + `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts tests/client/chat-message-compaction.svelte.test.ts tests/client/context-gauge-compaction.svelte.test.ts tests/client/compaction-decision-card.svelte.test.ts tests/client/settings-registry-invariants.svelte.test.ts`。
-> **實做決策待確認**（§3.25；不同意可推回）：非 active 對話 in-loop trigger = 該 turn 真實
-> prompt_n（不用 active 對話的 gauge 數）；負段總和 clamp 0；成功判定不加 system head（A:
-> postSize = summary + kept）；toast after = plan.estimatedTokensAfter +
-> resolveSummarySize(summary.tokens, cmp.content)；`estimateApiMessageTokens` 一併改名
-> `apiMessageBytes`。
+> 1. 依 §3.25「測試」明細更新上述 4 個 stale 測試檔（+ 3 回歸檔跑確認）。
+> 2. 使用者跑：`npm run check` +
+>    `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts tests/unit/context-builder.test.ts tests/unit/summarize.test.ts`
+>    + `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts tests/client/chat-message-compaction.svelte.test.ts tests/client/context-gauge-compaction.svelte.test.ts tests/client/compaction-decision-card.svelte.test.ts tests/client/settings-registry-invariants.svelte.test.ts`。
+> 3. 全綠 → 勾 05-v4 區塊清單、§3.25 狀態改「完成並確認」、README 停點更新。
 >
-> **此前恢復點**：**v4 真實 token 計數——規格定稿、待實做**（2026-10-17）——
-> 根因:Inspector 的「Estimated send」/每則「~N tok」用 **byte 數當 token**
-> (`estimateTokens`/`estimateApiMessageTokens`)÷ n_ctx(token)→ 與 gauge 真實
-> `contextUsed` 永遠對不上(380,513 vs 153,939,≈2.5 bytes/token)。v4 決策:**切點/
-> 觸發/成功判定/Inspector 全用真實 token**(`deriveRealMessageTokens`:assistant=
-> predicted_n、段真實總和歸該段最後非-assistant)、**觸發 = 真實 `contextUsed`**
-> (gauge 同源)、無資料例外(system/尚未送出尾端)才 `bytes/4`;Inspector 主欄真實 +
-> 副欄 bytes/bytes÷4;設定數字不變(現 token 尺度)。**下一步 = 依 05-v4 區塊實做**
-> （§3.24 決策、02-§3.4(v4)/04-§2/§3/§4 設計）。
+> **實做決策待確認**（§3.25；不同意可推回）：非 active 對話 in-loop trigger =
+> 該 turn 真實 prompt_n（不用 active 對話的 gauge 數）；負段總和 clamp 0；
+> 成功判定不加 system head（A: postSize = summary + kept）；toast after =
+> plan.estimatedTokensAfter + resolveSummarySize(summary.tokens, cmp.content)；
+> `estimateApiMessageTokens` 一併改名 `apiMessageBytes`。
 >
-> **此前恢復點**：**雙 mode（共用 + A + B）✅ 完成並確認**（2026-10-17）——
-> 使用者重跑上一恢復點的 4 條指令：`npm run check` + client
-> `compaction-decision-card`（9/9）+ client `context-inspector`（14/14）+ unit
-> `context-builder` 回歸，**全綠**（第一輪的 2 支 client 失敗——卡片標記空白 +
-> builder summary 段 char/4 遺漏——已修，明細見 §4）；併上上一輪全綠（unit
-> `compaction-policy` / `summarize` + client `settings-registry-invariants` /
-> `chat-message-compaction` / `context-gauge-compaction`），雙 mode（共用 + A +
-> B）**完成**。05-雙 mode 清單全勾、§3.22/§3.23 狀態改「完成並確認」。
-> **下一步**：① Phase 1 5.8 手動驗收（見 §4 清單；A/B mode 行為可一併驗）；
-> ② Phase 3 可選後續（兩段式 summary / per-conversation 覆蓋 / 合併重摘要
-> 提示 / summary 獨立 model / endpoint，05-§1；token 校準已被 v3 取代）。
->
-> 此前恢復點：**第一輪 check + unit 驗證的錯誤已修（11 type errors + 3 test
-> failures）、待使用者重跑確認**（2026-10-17）——使用者跑 `npm run check` + unit
-> `compaction-policy` 回報 11 型別錯誤（3 檔）+ 3 支測試失敗；全部定位為**型別/
-> 測試硬編碼層面的 mechanical 錯誤、來源碼邏輯無誤**，已修：
-> ① `SettingsEntry` 補 `dependsOnValue?: string`（`settings.d.ts`；registry 4 處 +
-> `toSettingsSection` mapping 共 5 錯）；
-> ② `summarize.ts` import 修正：`CompactionDecision` / `CompactionMode` 改從
-> `./types`（定義所在）import（原誤寫 `./compaction-policy`）；`onComplete` 參數補
-> 顯式型別（同 `flows.svelte.ts` 慣例）；
-> ③ stores/chat `runCompactionSummary` 的 `summarizeWithRetry` 呼叫補 top-level
-> `nCtx`（`SummarizeWithRetryOptions` 必填、函式內 `nCtx > 0` gate 使用）；
-> ④ 測試期望值修正（實作 byte 語義正確、測試硬編碼算錯）：`estimateTokens`
-> 846→845（`TOOL_CALLS` 實際 45 bytes 非 46）、`estimateApiMessageTokens`
-> 484→480（tool_calls JSON 實際 80 bytes 非 84）、`estimateCompactionSavings`
-> 500→100（註解誤把 newCmp 當 400 bytes、`compaction()` helper 實為 800）+ 註解
-> 同步。**無來源碼邏輯改動**。下一步＝使用者重跑 `npm run check` + unit 3 支
-> （compaction-policy / summarize / context-builder）+ client 5 支（
-> settings-registry-invariants / compaction-decision-card + 回歸
-> chat-message-compaction / context-inspector / context-gauge-compaction）→ 全綠 →
-> 勾 05-雙 mode 清單測試項、§3.22/§3.23 狀態改「完成並確認」、README 停點更新。
-> 另剩：Phase 1 的 5.8 手動驗收 + Phase 3 可選後續。
->
-> 此前恢復點：**雙 mode 測試已寫（unit 重寫/更新 + client 新 suite + 1 項
-> 回歸修正）、待使用者編譯驗證**（2026-10-17）——依 05-雙 mode 清單 +
-> §3.23 下一步 1–3 完成全部測試（**無來源碼改動**）：
-> ① `tests/unit/compaction-policy.test.ts` **重寫**（byte 語義 + v3 差值公式 +
-> 8 個新 suite：`byteLength` / `toCompactionMode` / `computeEffectiveWindow` /
-> `shouldTriggerCompaction` / `planCompactionRecentWindow` /
-> `evaluateCompactionResult` / `resolveSummarySize` / `nextCompactionStep`；
-> 既有 11 支 `planCompaction` 逐支重調、`estimateCompactionSavings` fixture
-> 重算）；② `tests/unit/summarize.test.ts` 更新（既有 payload 測試加
-> `{ content, tokens }` 斷言；新 `SummaryResult` suite 3 支；新
-> `summarizeWithRetry` suite 8 支，含 mode A kept bytes 進判定
-> （postSize 10401 vs target 8000））；③
-> `tests/client/compaction-decision-card.svelte.test.ts` **新**（卡片 6 支：
-> A/B 標籤 / attempts 註記 / 三選項 resolve gate；store gate 層 3 支：
-> request → pending → resolve('use') / abort → 'skip' / 已 abort 立即 'skip'）；
-> ④ 回歸修正（規劃未列、實做必要）：`tests/client/context-gauge-compaction.svelte.test.ts`
-> 硬編碼 `~1,794 tokens saved`（chars/4 時代 estimate 值）→ `~1,658`（byte
-> 語義：payload 16+132+19+15 = 182；1840−182 = 1658）+ 註解。`context-builder.test.ts`
-> （期望值用同一 `estimateTokens` 計算、自適應）與 `settings-registry-invariants`
-> （generic）零改動、待跑確認。**下一步**＝使用者跑 `npm run check` + unit
-> 3 支（compaction-policy / summarize / context-builder）+ client 5 支
-> （settings-registry-invariants / compaction-decision-card + 回歸
-> chat-message-compaction / context-inspector / context-gauge-compaction）→
-> 全綠 → 勾 05-雙 mode 清單測試項、§3.22/§3.23 狀態改「完成並確認」、README
-> 停點更新。另剩：Phase 1 的 5.8 手動驗收 + Phase 3 可選後續。
->
-> 此前恢復點：**雙 mode 實做（共用 + A + B）來源碼完成、unit/client 測試未寫，待使用者編譯驗證**（2026-10-17）
-> ——依 05-雙 mode 清單完成全部來源碼改動：共用基礎（timings 解析 /
-> `summarizeMessages` 回傳 `{content, tokens}` / byte 計數 / 共用超標機制
-> `summarizeWithRetry`（retry + gate）/ settings 鏈（`contextCompactionMode`
-> + `dependsOnValue` 新機制 + 4 新 key）/ `ChatCompactionDecisionCard` + 兩處掛法 /
-> gauge mode-aware）→ A（`planCompactionRecentWindow` + 觸發/判定 + gauge）→
-> B（`computeCompactionBudget` 新公式 + 觸發/判定）。**決策記錄與變更明細見
-> §3.23**。下一步：① unit 重寫（`compaction-policy.test.ts` byte 計數 + 新
-> suite；`summarize.test.ts` 新回傳型別 + `summarizeWithRetry`）；② client 新
-> `compaction-decision-card` suite；③ 使用者跑 `npm run check` + unit
-> （compaction-policy / summarize / context-builder）+ client（
-> settings-registry-invariants / compaction-decision-card / 回歸 3 支）；
-> ④ 全綠後勾 05-雙 mode 清單、更新 README 停點。另剩：Phase 1 的 5.8 手動
-> 驗收 + Phase 3 可選後續。
->
-> 此前恢復點：**N6 完成並確認；下一步 = 雙 mode 實做**（2026-10-17）
-> ——N6（split 切允許空 kept，§3.21）使用者重跑 `npm run check` +
-> unit `compaction-policy` / `context-builder` + client 回歸 4 支（
-> `chat-message-compaction` / `context-inspector` / `context-gauge-compaction` /
-> `settings-registry-invariants`）全綠（第一輪 check 抓到 `context-builder.ts`
-> 語法錯 = `keptIndex` 三元漏 `?`、已修，見 §4 N6 第一輪/重跑）；05-N6
-> 清單全部勾選。下一步 = **雙 mode 實做**（規格見 §3.22；順序：共用基礎
-> （timings / {content,tokens} / byte 計數 / 重試+gate / settings 鏈 /
-> 卡片）→ A → B）→ 使用者 check + unit 驗證。另剩：Phase 1 的 5.8 手動
-> 驗收 + Phase 3 可選後續。
->
-> 此前恢復點：**雙 mode 壓縮規格定稿、未實做**（2026-10-17）——
-> 同時保留兩種作法、user 選 mode、**default = A（recent-window / pi
-> reference）**：A = 至少留最近 `keepRecentTokens` 原樣（下限：從最後往回
-> 加到 ≥ 停、尾端 tool 跨越留其前 ass）+ 觸發 `window − keep`（window =
-> min(n_ctx, `contextMaxContextOverride`）；B = v3 + N6（kept ≤
-> （threshold−keepTarget）%、成功判定 head+summary ≤ keepTarget%、允許空
-> kept）。計數 = API 有實際 token 數就用（trigger = prompt_n、summary =
-> completion tokens）、msg / API 無數用 byte、**不做派生比例**。A 超標
-> 沿用 B 的重試邏輯（同一 `contextSummaryMaxAttempts` + gate 卡片，只有
-> 成功判定式不同 → 該設定從 B 專用變**共用**）。02/03/04/05 已同步
-> （決策見 §3.22）。下一步 = 實做雙 mode（共用 → A → B）→ 使用者
-> check + unit 驗證（N6 已完成並確認，見上方最新恢復點）。
->
-> 此前恢復點：**v3 重設計已確認、未實做**（2026-10-16）——「自動壓縮
-> 從未觸發」根因已定位（舊 budget 公式把 keepBudget 壓死在 10% floor，
-> planCompaction → null、auto 路徑靜默，分析見 §3.20），修正設計（實際 token
-> 計數 + compact 成功判定 + 超標重試/user gate）經使用者 A–E 五點確認；
-> 文件 02/03/05 已同步 v3；v3 設計現為雙 mode 規格的**方法 B**（§3.22）。
->
-> 此前恢復點：**N1–N5 全部完成並確認**（2026-07-22）——context
-> enhance 的「下一輪增強」全數落地；剩：Phase 1 的 5.8 手動驗收（見 §4
-> 清單）+ Phase 3 可選後續（兩段式 summary / per-conversation 覆蓋 /
-> 合併重摘要提示 / summary 獨立 model，05-§1；token 校準已被 v3 取代）。
->
-> **N5 明細**（§3.19，✅ 已確認）：新設定 `contextSummaryMode`（SELECT：
-> `prefix-stable` / `transcript`、預設 prefix-stable）——summary 的 prompt
-> 模式開放給 user 選（使用者要求：該給選擇權 + 為後續 summary 選項（如
-> 獨立 model / endpoint）預留 config 空間）；`toSummaryMode()` 純函式
-> coerce（未知值回 default）；3 個呼叫點（compactConversation /
-> summarizeRegion / in-loop compactBetweenTurns）各加 `mode:
-> toSummaryMode(config.contextSummaryMode)`；unit `summarize` +2 支。
-> 使用者跑 `npm run check` + unit `summarize`（16/16）+ client
-> `settings-registry-invariants` 全綠。
->
-> 此前（皆已確認）：N4 prefix-stable summary 模式（§3.18：第一輪 13/14 的
-> test bug 已修、重跑全綠）；N3 Stop 鍵（§3.15）；N2 keep target 設定
-> （§3.14）；N1 summary 上限改 n_ctx × %（§3.13）；§2t 版面輪手動驗證通過
-> （PC 頂端區塊版面、長對話 Back to top 平滑回頂、mobile 第一視口 + 無水平
-> 溢出）+ §2s 第 3 輪 mobile 寬度修復（`w-full`）一併通過。
+> **此前里程碑（皆完成並確認）**：雙 mode 共用+A+B（2026-10-17，
+> §3.22/§3.23，完整指令全綠）→ N6 空 kept（2026-10-17，§3.21）→
+> N1–N5（2026-07-22，§3.13–§3.19）→ Phase 2 P2.1–P2.6 →
+> Phase 1 5.1–5.7 → Phase 0（逐項最終驗證狀態見 §4）。
+> 剩：Phase 1 5.8 手動驗收（§4）+ Phase 3 可選後續（05-§1）。
 
 ## 1. 進度總覽
 
@@ -185,6 +55,7 @@
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
+| v4 — 真實 token 計數（§3.24/§3.25） | 🚧 實做中：來源碼 9 檔 + unit `compaction-policy` 重寫完成（2026-10-17 靜態核實）；剩 2 unit + 4 client 測試（stale，逐檔明細見 §3.25），待使用者編譯驗證 |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
@@ -389,7 +260,7 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
 > - inspector 只對 active conv 操作（`convId = activeConversation?.id`），非 active conv 無入口（同 Phase 1）。
 > - `DialogConfirmation` 掛在 `Dialog.Root` 內（Content 的 sibling）；其 `onConfirm` 不自動關框，由 `handleExpandConfirmed` 設 `showExpandConfirm = false`。
 
-## 2k. P2.4 第一輪確認的修復（重跑待確認）
+## 2k. P2.4 第一輪確認的修復（✅ 已確認；重跑 10/10 全綠見 §4）
 
 第一輪跑 `npm run check`（4 錯）+ vitest（suite 無法 import、0 test）：
 根因全是 `@lucide/svelte`（本機 v1.46.0）**沒有 `Compress` icon**——check 抓
@@ -409,35 +280,14 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
 > 掛，屬首次 runtime 驗證（bits-ui Select portal / DialogConfirmation 互動），
 > 非本次修復引入。
 
-## 2l. P2.4 診斷記錄（**已結案**；根因與修復見 §2m，TEMP-DIAG 已全數移除）
+## 2l. P2.4 診斷記錄（✅ 結案；根因與修復見 §2m）
 
-> §4 有逐輪歷史；本節保留診斷過程供日後查考。結論：**不是 runtime
-> 反應性問題**——selector 撞了 P2.4 新增的 Select trigger；「pathLen 0 重跑」
-> 是 afterEach 紅鵝（見 §2m）。
-
-### 已確立的事實（診斷期第一~四輪；第五輪結案見 §2m）
-
-- `npm run check` ✅ 全綠（§2k 修復後）。
-- suite 可載入；10/10 全掛在 `openInspector()` 等 4 支 payload row（5s timeout）。
-- `[inspector-diag]`：**effect 跑兩次**、皆 `instanceId: 1`（無 double mount）：
-  1. `pathLen: 7` → `built {messages: 4, boundaryValid: true, droppedCount: 3}`；
-     DOM 確實渲染 4 行 + Advanced 區（`[diag]` 的 5 支 `aria-expanded` 按鈕
-     = 4 payload 行 + bits-ui Select trigger——trigger 帶 `aria-expanded`）。
-  2. `pathLen: 0` → `built {messages: 0, compaction: null}`；`result` 被覆蓋成
-     空 payload，但 **DOM 停在 4 則狀態**（當時視為「state-DOM desync」；結案後
-     確認是紅鵝——DOM dump 拍在 afterEach 之前，見 §2m）。
-- 無 console error → `buildLlmContext` 沒 reject（catch 會 `console.error`）。
-- builder / policy / converter 純函式、已靜態驗證（fixture 無附件走最簡路徑）。
-- **非 reassign、非 in-place mutation**：
-  - prototype setter patch（包 `activeMessages`）只抓到我們自己的
-    `watchArrayMutations` 寫入（`SET (len=7)` + stack），無其他 SET log；
-  - array 外層 logging proxy（set/deleteProperty）：無任何 `[diag] MUTATE`；
-  - 全 repo `activeMessages` 寫入點皆顯式方法（delete/load/refresh/slice/create）；
-    `conversationsStore` 無 `$effect`/`$derived`；`vitest-browser-svelte` 的
-    `cleanup` 只跑 `beforeEach`；`vitest-setup-client.ts` 只 mock fetch。
-- → （當時推論）值變化發生在 **state signal 層**（機制見下）；元兇待第五輪
-  `watchSignalValue` 指認。**第五輪結案：無元兇**——「值變化」是
-  `afterEach` 的合法重置打在還掛著的元件上（見 §2m）。
+第一輪 client 10/10 timeout 的五輪診斷（TEMP-DIAG 五層：setter patch /
+mutation proxy / signal.v watch / DOM dump / instanceId）結案：**非 runtime
+反應性問題**——selector 撞了 P2.4 新增的 bits-ui Select trigger（5 支
+`aria-expanded` 按鈕）；「pathLen 0 重跑」是 afterEach 紅鵝（見 §2m）。
+TEMP-DIAG 全數移除（兩檔搜 `TEMP-DIAG` 零結果）；唯一保留的測試改動是
+`payloadRowButtons()` 的 selector 修正（非診斷代碼）。
 
 ### Svelte 5 機制（已讀 compiler + runtime 源碼確認，不必重查）
 
@@ -455,112 +305,37 @@ client 4 支掛 1 支（dropped 區把 in-effect entry 自己也算進「Compact
   store 的 signal 理論上只會走 `set()`（= patched setter）或直接
   `source.v = value`。
 
-### TEMP-DIAG 清單（✅ 已全數移除；兩檔搜 `TEMP-DIAG` 應零結果）
+## 2m. P2.4 根因與修復（client 測試 10/10 timeout；✅ 已確認）
 
-| 檔案 | 內容（已移除） |
-| ---- | ---- |
-| `tests/client/context-inspector.svelte.test.ts` | ① `waitFor` timeout 的 `describeDom()`；② `patchActiveMessagesSetter()` / `unpatchActiveMessagesSetter()`；③ `watchArrayMutations()`；④ `watchSignalValue()`；⑤ `openInspector()` 開頭的 ②③④ 呼叫、`afterEach` 的 `unpatchActiveMessagesSetter()` |
-| `src/lib/components/app/dialogs/DialogContextInspector.svelte` | module-scope `instanceCounter` / `instanceId` / `lastPathRef`；effect 開頭 / `.then` / `.catch` 三筆 `[inspector-diag]` `console.log` |
+**根因（一行）**：`payloadRowButtons()` 用 `[role="dialog"] button[aria-expanded]`
+選 payload 列，但 P2.4 新增的 Advanced 區 bits-ui `Select.Trigger` 也是
+`button[aria-expanded]` → 數到 **5** 支、`openInspector()` 的
+`waitFor(length === 4)` 永不成立 → 10 支全掛在 `openInspector()`（DOM dump
+的 `[diag] payload row buttons: 5` 就是答案）。
 
-> 移除日期：根因結案同日（見 §2m）。全部診斷皆唯讀 / 打 log，移除後零行為差異；
-> 唯一保留的測試改動是 `payloadRowButtons()` 的 selector 修正（非診斷代碼）。
+**「pathLen 0 重跑」是紅鵝**：測試在 `waitFor` 就 throw、`unmount()` 沒跑到，
+`afterEach` 的 `activeMessages = []`（合法重置）打在還掛著的元件上 → effect
+重跑 pathLen 0。五層 TEMP-DIAG 全在追一個不存在的 bug。
 
-### 結案對照（第五輪輸出 → 結論）
+**修復（兩檔，零行為改動）**：selector 改 `[role="dialog"] li button[aria-expanded]`
+（payload 列都在 `<li>` 內、Select trigger 不在）+ 移除全部 TEMP-DIAG。
+bits-ui `DismissibleLayerState` responsible-layer 機制已確認：巢狀
+AlertDialog / Select 互動不會誤關外層 inspector dialog。重跑 10/10 +
+check 全綠（見 §4）。
 
-- 第五輪輸出（`SET (len=7)` 僅一筆 = 我們自己的 `watchArrayMutations` 寫入；
-  `own property is not a signal`；無 `SIGNAL.v SET`；effect 第二次 `pathLen: 0`）
-  當時對照決策樹會走向「signal 物件被換」——**全部錯誤導向**。
-- 真正解讀見 §2m：5 支 `aria-expanded` 按鈕（DOM dump 早就印出來了）才是 timeout
-  的直接原因；`pathLen 0` 是 `afterEach` 的合法重置打在還掛著的元件上。
+## 2n. P2.4 boundary-select 用例根因與修復（9/10 → 10/10；✅ 已確認）
 
-### 重跑指令（整支 suite、~40s）
+**根因（一行）**：用例要選的 `'help me fix the bug'` 是 **system head 之後
+第一則（idx 1）**，而 boundary 候选集在兩端都排除 `index <= headLength`（元件
+`boundaryOptions` + store `moveCompactionBoundary`；摘要涵蓋區 = 0 則、無意義）
+→ 該 option 從未渲染 → `waitFor` timeout。非 portal / 反應性問題。
 
-```bash
-npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts
-npm run check
-```
-
-把完整輸出貼回來。10/10 綠 + check 綠 → P2.4 確認、進 P2.5。
-
-## 2m. P2.4 根因與修復（client 測試 10/10 timeout）
-
-### 根因（一行）
-
-`payloadRowButtons()` 用 `[role="dialog"] button[aria-expanded]` 選 payload 列，
-但 P2.4 新增的 Advanced 區 bits-ui `Select.Trigger` 也是 dialog 內的
-`button[aria-expanded]` → 數到 **5** 支，`openInspector()` 的
-`waitFor(() => payloadRowButtons().length === 4)` 永遠不成立 → 5s timeout →
-10 支用例全掛在 `openInspector()`。DOM dump 的 `[diag] payload row buttons: 5`
-就是答案（第四輪已印出，當時被 pathLen 0 的煙霧彈帶走）。
-
-### 「pathLen 0 重跑」是紅鵝（afterEach 假象）
-
-- 測試在 `openInspector()` 的 `waitFor` 就 throw，**`unmount()` 沒跑到**，
-  元件仍掛在 DOM 上。
-- vitest 接著跑 `afterEach`：`conversationsStore.activeMessages = []`（合法重置）
-  → 還掛著的元件 effect 重跑 → `pathLen: 0` → `buildLlmContext([])` →
-  `built {messages: 0, compaction: null}`。
-- 這解釋了所有「異常」觀察：timeout DOM dump 在 afterEach **之前**拍 → 仍顯示
-  4 則狀態（不是 state-DOM desync）；`built {messages: 0}` log 出現在 FAIL 區塊前
-  （afterEach 的 console 仍歸屬該 test）；無 `SET` log（afterEach 先
-  `unpatchActiveMessagesSetter()` 才寫，走原始 setter）；`sameRef: false`
-  （`[]` 是新陣列）。
-- 五層 TEMP-DIAG（setter patch / mutation proxy / signal.v watch）全都在追一個
-  不存在的 bug：值變化是測試自己的 teardown，且發生在 patch 解除之後。
-
-### 修復（兩檔，零行為改動）
-
-| 檔案 | 改動 |
-| ---- | ---- |
-| `tests/client/context-inspector.svelte.test.ts` | ① `payloadRowButtons()` 改 `[role="dialog"] li button[aria-expanded]`（payload 列都在 `<li>` 內；Select trigger 不在——dropped 區 `ul` 無 button，不影響）；② 移除全部 TEMP-DIAG（`describeDom` / `patchActiveMessagesSetter` / `unpatchActiveMessagesSetter` / `watchArrayMutations` / `watchSignalValue` / `openInspector` 開頭三呼叫 / `afterEach` 的 unpatch）；`waitFor` 還原成 `throw new Error('Timed out waiting for element')` |
-| `src/lib/components/app/dialogs/DialogContextInspector.svelte` | 移除 TEMP-DIAG（`instanceCounter` / `instanceId` / `lastPathRef` + 3 筆 `[inspector-diag]` log）；保留「refresh 期間舊 result 不閃空白」設計註解（誤刪後已還原） |
-
-> 要點：元件零改動（selector 問題純在測試端）；診斷代碼全移除、兩檔搜
-> `TEMP-DIAG` 零結果。bits-ui 的 `DismissibleLayerState`「responsible layer」
-> 機制（topmost layer 才處理 outside interaction）已確認：巢狀 AlertDialog /
-> Select 互動不會誤關外層 inspector dialog（靜態查 `use-dismissable-layer.svelte.js`
-> `isResponsibleLayer` / `getTopMostDismissableLayer`）。
-
-### 風險與下一步
-
-- 6 支 P2.4 新用例是**首次 runtime 執行**（bits-ui Select portal、
-  DialogConfirmation、userEvent 互動）——selector 修好後若仍有掛，才是真問題。
-- 重跑：整支 suite（10 支）+ `npm run check`。全綠 → P2.4 確認、進 P2.5。
-
-## 2n. P2.4 boundary-select 用例根因與修復（9/10 → 10/10 已確認）
-
-重跑整支 suite 後 9/10 綠，唯一掛的是「moves the kept-from boundary through the
-grouped select」——`waitFor` 5s timeout 等 `[role="option"]` 含 `'help me fix the bug'`。
-
-### 根因（一行）
-
-該用例要選的 `'help me fix the bug'` 是 **system head 之後第一則（idx 1）**，而
-boundary 候选集在兩端都排除 `index <= headLength`：
-
-- 元件 `boundaryOptions`：`if (index <= headLength) return;`
-- store `moveCompactionBoundary`：`if (newIndex <= this.headLengthOf(path))` →
-  toast "Nothing to summarize"
-
-語義正確：boundary 是 `firstKeptMessageId`（kept 起點），若放在 head 後首則，
-摘要涵蓋區 `path.slice(head, boundary)` = 0 則 → 無意義。故**首則 user 永遠當
-不了 boundary**。該 option 從未渲染 → `waitFor` timeout。非 portal / 反應性問題
-（同 describe 的 Expand 用例走 portaled AlertDialog 已綠）。
-
-### 修復（單檔，零元件/store 改動）
-
-| 檔案 | 改動 |
-| ---- | ---- |
-| `tests/client/context-inspector.svelte.test.ts` | ① `buildCompactedFixture()` 回傳加 `assistant`（tool_calls 那則，idx 2）；② 該用例改選**最早合法**的 assistant `tool_calls` 邊界（"Within a turn (assistant)" 組），搜尋文字 `'help me fix the bug'` → `'read_file'`，期望 `moveCompactionBoundary('insp-conv', cmp.id, assistant.id)`；補註解說明「head 後首則不可為 boundary」 |
-
-> 要點：元件與 store 的候选集本就一致（都排除 `index <= headLength`），錯在測試
-> 選了一個不存在的 option。改選 assistant 邊界同時驗證了「Within a turn」分組。
-> 其餘 9 支（含 4 支 Phase 1）零改動。bits-ui 受控 Select 已確認：點 item →
-> `toggleItem` → 設 value box → box setter 觸發 `onValueChange(v)`（`select.svelte`
-> 49–53 行），故 spy 必收到 `assistant.id`。
-
-### 風險與下一步
-
-- 重跑：整支 suite（10 支）+ `npm run check`。全綠 → P2.4 確認、進 P2.5。
+**修復（單檔，零元件/store 改動）**：`buildCompactedFixture()` 回傳加
+`assistant`（tool_calls，idx 2）；用例改選「Within a turn (assistant)」邊界
+（搜尋 `'read_file'`）、期望 `moveCompactionBoundary('insp-conv', cmp.id,
+assistant.id)`。bits-ui 受控 Select：點 item → `onValueChange(v)`
+（`select.svelte` 49–53 行），spy 必收到 `assistant.id`。重跑 10/10 +
+check 全綠（見 §4）。
 
 ## 2o. Phase 2 已交付檔案（P2.5，已確認）
 
@@ -607,96 +382,39 @@ boundary 候选集在兩端都排除 `index <= headLength`：
 > - Storybook：P2.6 無新 story（gauge 列狀態由 client 測試覆蓋；inspector story
 >   三態仍留待後續，同 5.7 的偏差記錄）。
 
-## 2q. P2.6 第一輪編譯/測試確認的修復（重跑待確認）
+## 2q. P2.6 第一輪編譯/測試確認的修復（✅ 已確認；重跑見 §2r）
 
-第一輪 `npm run check`（9 錯）+ client suite（5/8 掛）：
+第一輪 `npm run check` 9 型別錯（全在 `context-gauge-compaction.svelte.test.ts`
+gauge 段）+ client 5/8 掛。全數測試端修復、元件/store 零改動：
 
-- **9 型別錯（全在 `context-gauge-compaction.svelte.test.ts` gauge 段）**：
-  測試用了 testing-library 風格 API——`screen.queryByText(...)` /
-  `screen.findByText(...)` / `row.parentElement` / `getByText((content) => ...)`。
-  但 `vitest-browser-svelte` 的 `render()` 回傳 `RenderResult`（extends
-  `vitest/browser` 的 `LocatorSelectors`），**只有** `getByRole` /
-  `getByText` / `getByLabelText` / `getByPlaceholder` / `getByTitle` /
-  `getByTestId`，且回 `Locator`、`getByText` 只收 `string | RegExp`
-  （不收函式回呼）——`queryByText` / `findByText` / `Locator.parentElement`
-  全都不存在。
-- **5 支 runtime 掛**：
-  - 3 支 gauge 列（`screen.queryByText is not a function` /
-    `screen.findByText is not a function`）——同上述 API 缺失。
-  - 2 支 form 入口（`Context "Tooltip.Provider" not found`）——
-    `ChatFormActions` 獨立渲染時，`ChatFormActionAddDropdown` /
-    `ChatFormActionInspectContext` 的 bits-ui `Tooltip.Root` 需要
-    `Tooltip.Provider` 祖先（app 裡由 `+layout.svelte` 提供、獨立渲染沒有）。
+- gauge 3 支用了 testing-library 風格 API（`queryByText` / `findByText` /
+  `Locator.parentElement`）——`vitest-browser-svelte` 的 `RenderResult` 只有
+  `getByRole` / `getByText`（只收 `string | RegExp`、不收函式）/ `getByLabelText`
+  / `getByPlaceholder` / `getByTitle` / `getByTestId`、回 `Locator` → 改
+  `document.querySelector` + `waitFor` / `bodyText()` helper（同
+  `context-inspector` 慣例）。
+- form 2 支 `Tooltip "Provider" not found`（`ChatFormActions` 獨立渲染缺
+  provider；app 裡由 `+layout.svelte` 提供）→ 新
+  `tests/client/components/ChatFormActionsWrapper.svelte`（`Tooltip.Provider`
+  包 `ChatFormActions`、`disabled` 透傳，照 `ChatFormTestWrapper` 先例）。
+- latent：`expect(Locator)` 不會解析 → `await expect.element(...)`。
 
-全數已修（測試端 + 1 個新 wrapper，元件/store 零改動）：
+（以上測試環境 API / wrapper 慣例已併入 §6。）
 
-| 檔案 | 問題 | 修復 |
-| ---- | ---- | ---- |
-| `tests/client/context-gauge-compaction.svelte.test.ts` | gauge 3 支用不存在的 `queryByText`/`findByText`/`Locator.parentElement` | 改走 `document.querySelector` + 新增 `waitFor` / `bodyText()` helper（同 `context-inspector` 慣例）：spinner 列找 `span` 的 `parentElement` 再 `querySelector('.animate-spin')`；compacted 列找「無子元素且含 `tokens saved`」的 `div`（`textContent.trim()` 對 `'Compacted: 3 messages · ~1,794 tokens saved'`）；「不存在」斷言改 `bodyText()` 不含該文字 |
-| （同檔）form 2 支 | `ChatFormActions` 獨立渲染缺 `Tooltip.Provider` → `ChatFormActionAddDropdown` 的 `Tooltip.Root` 炸 | 改渲染新 `ChatFormActionsWrapper`（`Tooltip.Provider` 包 `ChatFormActions`，同 `ChatFormTestWrapper` 先例）；import 改本地 wrapper（字母序置最前） |
-| （同檔）form 2 支 latent | `expect(eyeButton).toBeVisible()` / `.toBeDisabled()` 直接把 `Locator` 傳 `expect()`——`@vitest/browser` 只有 `expect.element()` 會解析 locator（`expect-element.js` 的 `expect.element = bn`），直接傳不會 resolve（原本被 render 炸掉蓋住、沒跑到） | 改 `await expect.element(eyeButton).toBeVisible()` / `.toBeDisabled()`（同該檔 gauge 段既有寫法） |
-| `tests/client/components/ChatFormActionsWrapper.svelte` | **新**：form 入口測試缺 provider 的 wrapper | `Tooltip.Provider` 包 `ChatFormActions`、`disabled` prop 透傳（照 `ChatFormTestWrapper` 格式） |
+## 2r. P2.6 第二輪剩 2 支 strict mode violation 的修復（✅ 重跑確認全綠 8/8）
 
-> 要點：
-> - 元件與 store **零改動**——全在測試端（API 用錯 + 缺 provider wrapper）。
-> - `estimateCompactionSavings` 的 1,794 已對 `estimateTokens`（`ceil(len/4)`）
->   逐則核過：payload = system 4 + cmp 33 + kept 5 + final 4 = 46、
->   saved = 1840 − 46 = 1794（cmp content = `SUMMARY_CONTENT_PREFIX`(56 字) +
->   74 字 = 130 字 → `ceil(130/4)` = 33）。
-> - `Tooltip.Provider` 是全 app 唯一的 bits-ui top-level provider
->   （`+layout.svelte` 只包它）；`ChatFormActions` 渲染樹內的
->   `DropdownMenu` / `Drawer` / `Collapsible` / `Checkbox` / `ModelsSelector`
->   皆不需其他 provider（已查 bits-ui 源：只有 `Tooltip` 有 `ProviderContext`）。
-> - 快捷鍵 3 支（原本就綠）零改動。
+form 入口 2 支 `getByRole('button', { name })` strict mode violation：同一
+accessible name 命中 **2 個 button**——外層 bits-ui `Tooltip.Trigger` 自渲染的
+`<button data-slot="tooltip-trigger">` + 內層 shadcn `Button`（`onclick` /
+`disabled` 皆在內層）。這是 **app 既有雙 button 慣例**（`ChatFormActionAddButton`
+/ `ChatFormActionRecord` 同款），非 P2.6 引入。
 
-### 重跑指令（~40s）
-
-```bash
-npm run check
-npx vitest --project=client --run tests/client/context-gauge-compaction.svelte.test.ts
-# 回歸
-npx vitest --project=client --run tests/client/context-panel-mobile.svelte.test.ts
-npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts
-npx vitest --project=unit --run tests/unit/compaction-policy.test.ts
-```
-
-## 2r. P2.6 第二輪重跑剩 2 支 strict mode violation 的修復（重跑已確認全綠、8/8）
-
-第二輪重跑 8 支掛 2 支（6 綠：gauge 列 3 + 快捷鍵 3）。兩支都是
-`getByRole('button', { name: … })` 的 strict mode violation——同一 accessible
-name 命中 **2 個 button**：
-
-1. 外層：bits-ui `Tooltip.Trigger` 自渲染的 `<button data-slot="tooltip-trigger">`
-   （accessible name 由內容計算，等於內層 sr-only 文字）
-2. 內層：真正的 shadcn `Button`（`<button data-slot="button">`，`onclick` 與
-   `disabled` 都在这）
-
-這是 **app 既有慣例**（`ChatFormActionAddButton` / `ChatFormActionRecord` 同樣是
-`Tooltip.Trigger` 包 `Button` 的雙 button 結構），非 P2.6 引入——之前沒測試用
-role 查這些按鈕所以沒浮出。
-
-### 修復（單檔，元件/store 零改動）
-
-| 檔案 | 問題 | 修復 |
-| ---- | ---- | ---- |
-| `tests/client/context-gauge-compaction.svelte.test.ts` | form 入口 2 支的 `getByRole('button', { name: /Inspect what the LLM sees/ })` / `{ name: /Unavailable while the model is responding/ }` 各命中 2 個嵌套 button | 各加 `.last()` 取內層 `Button`（document order 上 descendant 恆在 ancestor 之後，page 上只有一個 Eye 按鈕）；補註解說明雙 button 來源 |
-
-> 要點：
-> - `.last()`（= `nth(-1)`）是 `Locator` 公開 API；不選 `.locator('[data-slot="button"]')`
->   因 `Locator.locator()` 是 `protected`（`npm run check` 會炸，已查
->   `@vitest/browser` 的 `locators.d.ts`）。
-> - `toBeDisabled()` 斷的是內層——第二輪錯誤輸出已印出兩者 attribute 對照：
->   `disabled` 只在內層 `Button`，外層 trigger 不帶。
-> - `userEvent.click` 也打內層（`onclick` 在內層）。
-> - 不改元件：雙 button 是 Add/Mic 同款既有結構，只改一個會造成同列按鈕不一致；
->   若要根治 trigger 的 button 外殼屬獨立 a11y 工單，不在 P2.6 範圍。
-
-### 重跑（已確認全綠）
-
-上述 5 條指令由使用者全數跑過、**全綠**：`npm run check` + unit
-`compaction-policy` + client `context-gauge-compaction`（**8/8**，含上述修復的
-2 支 form 入口）+ 回歸 `context-panel-mobile` / `context-inspector`。
-**P2.6 確認、Phase 2 完成**（剩 Phase 1 的 5.8 手動驗收 + Phase 3 可選後續）。
+**修復（單檔，元件/store 零改動）**：兩支各加 `.last()` 取內層
+（document order 上 descendant 恆在 ancestor 之後；不選
+`.locator('[data-slot="button"]')` 因 `Locator.locator()` 是 protected）。
+重跑 5 條指令全綠：`npm run check` + unit `compaction-policy` + client
+`context-gauge-compaction`（**8/8**）+ 回歸 `context-panel-mobile` /
+`context-inspector`。**P2.6 確認、Phase 2 完成**（見 §4）。
 
 ## 2s. Context Inspector UI 修復：水平溢出 + header 重疊（第 1–3 輪皆已確認）
 
@@ -1499,7 +1217,7 @@ gate / settings 鏈 / 卡片）→ A（planner + 觸發/判定 + gauge）→ B�
 6. **下一步＝使用者跑**（指令見文件頭恢復點）：`npm run check` + unit 3 支 +
    client 5 支 → 全綠 → 項目 6（勾 05、狀態改「完成並確認」、README 更新）。
 
-## 3.24 v4 真實 token 計數（使用者定稿 2026-10-17，未實做）
+## 3.24 v4 真實 token 計數（使用者定稿 2026-10-17；✅ 已實做，見 §3.25）
 
 > 觸發:Context Inspector 的「Estimated send」/每則「~N tok」用
 > `estimateTokens`/`estimateApiMessageTokens` 的 **UTF-8 byte 數**當 token 顯示、
@@ -1536,7 +1254,7 @@ gate / settings 鏈 / 卡片）→ A（planner + 觸發/判定 + gauge）→ B�
 v1 的 char/4。設計同步:02-§3.4(v4)/§3.3/§6、03-§2/§4、04-§2/§3/§4、
 05-v4 區塊、README TL;DR。實做清單:05-v4 區塊。
 
-## 3.25 v4 真實 token 計數實做（2026-10-17；待使用者編譯驗證）
+## 3.25 v4 真實 token 計數實做（2026-10-17；來源碼 + policy unit 完成並靜態核實，剩 2 unit + 4 client 測試）
 
 > 規格:05-v4 區塊 / 02-§3.4(v4) / 04-§2/§3 / §3.24(決策)。以下為實做明細 +
 > 規格未明訂的決策(恢復點列了「待確認」,不同意可推回)。
@@ -1595,343 +1313,102 @@ v1 的 char/4。設計同步:02-§3.4(v4)/§3.3/§6、03-§2/§4、04-§2/§3/§
    `contextCompactionThreshold` help「last prompt」→「real context usage (the gauge)」。
 
 **測試**:
-- `tests/unit/compaction-policy.test.ts` 全數重寫:fixture
-  `assistantTimed(id, content, prompt, predicted, cache)`;新 suite
-  `deriveRealMessageTokens`(6)/ `tailStartOf`(3)/ `messageSize`(4);
-  `planCompaction`(11)/ `planCompactionRecentWindow`(10)/ `evaluateCompactionResult`
-  (6)/ `estimateCompactionSavings`(7) 改 token-scale 期望值;byte suite 改名
-  `messageBytes` / `apiMessageBytes`(斷言不變)。
-- 未完成(恢復點列了 1–6):`context-builder.test.ts`(mock 改
-  `convertDbMessageToApiChatMessageData` + sourceId 斷言)、`summarize.test.ts`(plan
-  literal + `keptTokens` / `realMessageTokens`)、client 4 支(inspector / cmp / gauge /
-  card 回歸)。
+- ✅ `tests/unit/compaction-policy.test.ts` 全數重寫（2026-10-17 本輪已核實）：
+  fixture `assistantTimed(id, content, prompt, predicted, cache)`；新 suite
+  `deriveRealMessageTokens`(6) / `tailStartOf`(3) / `messageSize`(4)；
+  `planCompaction`(11) / `planCompactionRecentWindow`(10) /
+  `evaluateCompactionResult`(6) / `estimateCompactionSavings`(7) 改 token-scale
+  期望值；byte suite 改名 `messageBytes` / `apiMessageBytes`（斷言不變）。
+- ❌ 未完成（4 檔 stale，2026-10-17 本輪逐行核實；**下一輪的全部工作**）：
+  1. `tests/unit/context-builder.test.ts`：L7 import `estimateTokens`
+     （已除名 → 整 suite 0 test）；L12–24 mock `normalizeMessagesForApi`
+     → 改 mock `ChatService.convertDbMessageToApiChatMessageData`（builder
+     不再走 `normalizeMessagesForApi`）；L91 刪 `result.estimatedTokens` 斷言
+     （欄位已移除）；所有 `result.messages` 的 `toEqual` 補 `sourceId`
+     （`message()` 依建立順序 m1..mN；summary row = `cmp.id`）。
+  2. `tests/unit/summarize.test.ts`：3 處 `CompactionPlan` literal 補
+     `keptTokens` + `realMessageTokens: new Map()`（`makePlan` L141 /
+     `makePlanWithHead` L158 / `makeBigKeptPlan` L370）；
+     `normalizeMessagesForApi` mock 保留（summarize.ts L220–221 仍在用）；
+     `makeBigKeptPlan` 的 mode A postSize 期望改依 `plan.keptTokens`
+     重算（v4 成功判定讀 `keptTokens`、非 kept 的 bytes）。
+  3. `tests/client/context-inspector.svelte.test.ts`：L186/L212
+     `Estimated send:` → `Real context:`；舊「row 加總 = header」不變式失效
+     （主欄 = real：system `-`、cmp 0、kept real、尾端 `est.`；header = gauge
+     `contextUsed`）→ 改逐行主/副欄斷言；建議 finalAssistant fixture 加
+     `timings: { prompt_n: 1500, predicted_n: 100 }` → contextUsed 1600、
+     n_ctx 32768 → ≈5%；expand 描述數字變。
+  4. `tests/client/context-gauge-compaction.svelte.test.ts`：L161
+     `~1,658 tokens saved`（byte 語義）→ v4 `estimateCompactionSavings` =
+     1840 − real payload（fixture 無 timings → 0）= `~1,840`；或 fixture 加
+     同 timings → `~240`。
+- 回歸（跑確認）：`tests/client/chat-message-compaction.svelte.test.ts`
+  （L159 `~1,840` N 側不變；M 側 = real ?? bytes/4 → fixture 無 timings →
+  cmp 132B/4 = `~33`；expand 描述數字變）、`compaction-decision-card` /
+  `settings-registry-invariants`。
 
 **Wire 安全**:`sendMessage` / `preEncode` 逐則 map 成
 `{content, role, tool_call_id, tool_calls, reasoning_content}` → `sourceId` 不會進
 request body(已確認 chat.service.ts:1142-1162 / 883-897)。
 
-## 4. 驗證狀態（目前停在這）
+## 4. 驗證狀態
 
-- Phase 0：使用者已跑 `npm run check` + 4 支 unit，**全綠**。
-- Phase 1 5.1/5.2/5.3：使用者已跑 3 條指令（`npm run check` + 4 支 unit +
-  `tests/client/settings-registry-invariants.svelte.test.ts`），**全綠**。
-- Phase 1 5.4/5.5：使用者已跑 `npm run check` + 4 支 unit，**全綠**。
-  （5.4/5.5 無新增 unit：`DatabaseService` 是 Dexie 層、`compactConversation`
-  是 store 協調邏輯，皆不在 unit project 範圍；依 05-§5 驗收標準 5，store 層
-  diff 已控制在 `compactConversation` + 兩個 private helper + `compacting` 欄位）
-- Phase 1 5.6：使用者已跑 `npm run check` +
-  `npx vitest --project=client --run tests/client/chat-message-compaction.svelte.test.ts`（4/4），
-  **全綠**。（第一輪 check 抓到 4 個型別錯：test fixture 的 `type` string literal 不能
-  指派給 `MessageType` enum——已改 enum 成員，story 檔一併改；陷阱見 §6。）
-  5.6 無新增 unit（純 UI 層；grouping 邏輯由 client 測試覆蓋）。
-- Phase 1 5.7 第一輪：使用者跑了 `npm run check` +
-  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（16/16 綠）+
-  `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`（3/4）。
-  check 抓到 2 型別錯 + 1 warning；client 掛的那支是 dropped 區把 in-effect entry
-  算進「Compacted out」（4 則 vs 3 則）。已全數修完（§2f）。
-- Phase 1 5.7 重跑：使用者跑了 `npm run check`（0 錯 0 警告）+
-  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
-  `npx vitest --project=unit --run tests/unit/context-builder.test.ts` +
-  `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`（4/4），
-  **全綠**。5.7 完成。
-- **Phase 1 目前只剩 5.8 手動驗收**（05-§1 Phase 1 ✅ 列；與 Phase 2 並行不阻塞）：
+> 逐輪過程記錄已精簡（里程碑結案後只留最終狀態 + 根因索引）；
+> v4 目前的停點見檔首恢復點 / §3.25。
+
+- **Phase 0 ✅**：`npm run check` + 4 支 unit 全綠。
+- **Phase 1 5.1–5.3 ✅**：check + 4 支 unit + client
+  `settings-registry-invariants` 全綠。
+- **Phase 1 5.4/5.5 ✅**：check + 4 支 unit 全綠（無新增 unit：Dexie 層 /
+  store 協調層不在 unit 範圍；diff 控制在 `compactConversation` + 2 private
+  helper + `compacting`）。
+- **Phase 1 5.6 ✅**：check + client `chat-message-compaction` 4/4 全綠
+  （第一輪 4 型別錯 = fixture string literal → 改 enum 成員，見 §6）。
+- **Phase 1 5.7 ✅**：check 0 錯 0 警告 + unit `compaction-policy` /
+  `context-builder` + client `context-inspector` 4/4 全綠（第一輪 3/4：
+  dropped 區把 in-effect entry 算進「Compacted out」→ 已修，§2f）。
+- **Phase 2 P2.1 ✅**：check + unit `compaction-policy` 18/18 全綠
+  （第一輪 2 型別錯：`CompactionSettings` import 來源，已修）。
+- **Phase 2 P2.2 ✅**：check 全綠（無新純邏輯、無新增 unit）。
+- **Phase 2 P2.3 ✅**：check 全綠（第一輪 1 型別錯：Dexie children 回調
+  implicit any → 顯式 `(childId: string)`，見 §6）。
+- **Phase 2 P2.4 ✅**：client 10/10 + check 全綠（兩層測試端根因：
+  §2m selector 撞 Select trigger、§2n boundary 候选集排除 head 後首則；
+  五輪診斷 + TEMP-DIAG 全數移除，見 §2l–§2n）。
+- **Phase 2 P2.5 ✅**：check + client `chat-message-compaction` 10/10 +
+  `context-inspector` 10/10 回歸全綠。
+- **Phase 2 P2.6 ✅**：check + unit `compaction-policy` + client
+  `context-gauge-compaction` 8/8 + 回歸 `context-panel-mobile` /
+  `context-inspector` 全綠（兩輪測試端修復：§2q / §2r）。
+- **§3.12 / N1 / N2 ✅**：check + unit `compaction-policy`（N2 後 30/30）+
+  client `settings-registry-invariants` 全綠。
+- **N3 ✅**：check + unit `summarize` 8/8 + client `context-inspector` /
+  `chat-message-compaction` 全綠。
+- **§2s / §2t Inspector UI 修復 + 版面 ✅**：check + client
+  `context-inspector` 14/14 全綠 + 手動驗證通過（PC 頂端區塊 / 長對話
+  Back to top / mobile 滿寬無水平溢出）。
+- **N4 ✅**：check + unit `summarize` 14/14 + unit `compaction-policy` 30/30
+  全綠（第一輪 13/14 的 test bug 已修，§3.18）。
+- **N5 ✅**：check + unit `summarize` 16/16 + client
+  `settings-registry-invariants` 全綠。
+- **N6 ✅**：check + unit `compaction-policy` / `context-builder` + client 回歸
+  4 支全綠（第一輪 5 錯 = `context-builder.ts` `keptIndex` 三元漏 `?`，已修）。
+- **雙 mode（共用 + A + B）✅**：check + unit `compaction-policy` /
+  `summarize` / `context-builder` + client `settings-registry-invariants` /
+  `compaction-decision-card` 9/9 / `context-inspector` 14/14 /
+  `chat-message-compaction` / `context-gauge-compaction` 全綠
+  （第一輪 2 支 client 失敗已修：卡片標記空白 + builder summary 段
+  char/4 遺漏，見 §3.23）。
+- **v4（目前停點）🚧**：來源碼 9 檔 + unit `compaction-policy` 重寫完成
+  （本輪靜態核實，見 §3.25）；剩 2 unit + 4 client 測試 stale → 更新後
+  使用者跑完整指令（見檔首恢復點）。
+- **Phase 1 5.8 手動驗收（未做；可與 v4 一併驗）**：
   1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
   2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。
   3. 無 cmp 對話行為與現行完全一致（context-builder.test.ts 的回归測試保證）。
-  > ✅ **5.8 項目 1–2 現在可驗**（P2.4 的 inspector「Compact now」§2j + P2.6 的表單
-  > Eye 按鈕 / 快捷鍵 / gauge 列皆已落地並確認）。項目 3 已由 unit 回歸覆蓋。
-- **Phase 2 P2.1 ✅ 完成**：變更見 §2g。
-  - 第一輪：使用者跑了 `npm run check` +
-    `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（18/18 綠）。
-    check 抓到 2 型別錯：`CompactionSettings` 在 `compaction-policy.ts` 定義
-    （structural pick 決策，§2g），但 barrel `index.ts` 與 test 檔都從
-    `./types` import → 已修（barrel 改 `export type { CompactionSettings } from
-    './compaction-policy'`；test 改自 `compaction-policy` import）。無行為改動。
-  - 重跑：使用者跑了 `npm run check`（0 錯 0 警告）+
-    `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（18/18 綠），
-    **全綠**。P2.1 完成。
-- **Phase 2 P2.2 ✅ 完成**：使用者跑了 `npm run check`，確認全綠
-  （無新增 unit——P2.2 無新純邏輯，見 §5b P2.2 註；store 層照慣例不 unit 測）。
-- **Phase 2 P2.3 第一輪**：使用者跑了 `npm run check`，1 個型別錯：
-  `database.service.ts:373` `expandCompactionMessage` 的
-  `parent.children.flatMap((childId) => …)` 參數 `childId` implicit any
-  （Dexie `.get()` 結果的 `children` 對回調無 contextual typing；本檔既有
-  慣例是顯式註解，見 §6）。已修：改 `(childId: string)`，無行為改動。
-  （無新增 unit——P2.3 無新純邏輯，DB 層是 Dexie、
-  store 協調層照慣例不 unit 測，同 5.4/5.5 先例）
-- **Phase 2 P2.3 重跑**：使用者跑了 `npm run check`，**全綠**。P2.3 完成
-  （變更見 §2i）。
-- **Phase 2 P2.4 第一輪**：使用者跑了 `npm run check`（4 個型別錯）+
-  `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
-  （suite import 失敗、0 test）。4 錯：`@lucide/svelte` v1.46.0 無 `Compress`
-  icon（vitest 的 module graph 因此整 suite 炸掉）+ test 檔 3 個型別錯
-  （`trigger` 未收斂 null、2 處 `Element` 無 `disabled`）。已全數修完（§2k）。
-- **Phase 2 P2.4 第二輪**：使用者跑了 `npm run check`（**全綠**）+ vitest
-  10/10 掛（全在 `openInspector()` 等 4 支 payload row，無 console error）。
-  加第一層 TEMP-DIAG（`waitFor` timeout 的 `[diag]` DOM 摘要 + 元件 effect 的
-  `[inspector-diag]` console trace）。
-- **Phase 2 P2.4 第三輪**：單支重跑。`[inspector-diag]` 顯示 **effect 跑兩次**：
-  pathLen 7 → built 4 messages（DOM 有 4 則 + 5 支 `aria-expanded` 按鈕 =
-  4 行 + Select trigger），**其後 `activeMessages` 被清成 `[]`** → 重跑
-  pathLen 0 → `result` 被 0 messages 覆蓋（DOM 停在 4 則）。加第二層
-  TEMP-DIAG（prototype setter patch + `instanceId` counter）。
-- **Phase 2 P2.4 第四輪**：單支重跑。`instanceId` 皆 1（無 double mount）；
-  setter patch 運作正常（抓到 `watchArrayMutations` 自己的寫入 `SET (len=7)`），
-  但 **無其他 SET**（非 reassign）；加第三層 logging proxy 也 **無
-  `[diag] MUTATE`**（非 in-place mutation）。查 Svelte runtime `batch.capture`：
-  `source.v = value` 直接寫 signal 的 `v`（繞過 setter）。加第四層 TEMP-DIAG
-  （signal `v` wrapper `watchSignalValue()` + `sameRef` probe）。
-- **Phase 2 P2.4 診斷中**（綜合狀態見 §2l）：待使用者跑
-  `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts -t "lists the compacted payload"`
-  （單支、~15s），依 §2l 決策樹對照輸出。全綠前**不移除** TEMP-DIAG；
-  全綠後依 §2l 清單移除。注意：P2.4 的 UI（inspector 的「Compact now」入口）
-  落地後，Phase 1 的 5.8 手動驗收項目 1–2 可一併做（有 cmp 的對話
-  payload = inspector = 抓包；手動 Compact now 可產生 cmp）。
-- **Phase 2 P2.4 第五輪 → 結案**：使用者貼回單支輸出——`SET (len=7)` 僅一筆
-  （自己的 `watchArrayMutations`）、`own property is not a signal`
-  （own property descriptor 為 `undefined`）、無 `SIGNAL.v SET`、無 `MUTATE`、
-  effect 第二次 `pathLen: 0`。**回頭看第四輪 DOM dump 早已印出答案**：
-  `[diag] payload row buttons: 5` = 4 支 payload 列 + P2.4 新增的 bits-ui
-  Select trigger（也是 `button[aria-expanded]`）→ `waitFor(length === 4)`
-  永遠不成立 → 5s timeout。`pathLen 0` 是 **afterEach 紅鵝**（測試掛在
-  `openInspector()`、`unmount()` 沒跑到，`afterEach` 的 `activeMessages = []`
-  在還掛著的元件上重跑 effect）。非 runtime 問題、非反應性 bug。已修：
-  selector 改 `[role="dialog"] li button[aria-expanded]`；五層 TEMP-DIAG 全數
-  移除（見 §2m）。待使用者重跑整支 suite（10 支）+ `npm run check` 確認。
-- **Phase 2 P2.4 第六輪（selector 修復後重跑）**：使用者跑了整支 suite——
-  9/10 綠，唯一掛「moves the kept-from boundary through the grouped select」
-  （`waitFor` 等 `[role="option"]` 含 `'help me fix the bug'`，5s timeout）。
-  根因（§2n）：該 option 是 system head 後第一則（idx 1），被 boundary 候选集
-  兩端（元件 `boundaryOptions` + store `moveCompactionBoundary` 的
-  `index <= headLength` guard）排除、從未渲染——非 portal / 反應性問題。已修：
-  fixture 回傳 `assistant`、用例改選 assistant `tool_calls` 邊界（idx 2，
-  "Within a turn" 組）、期望 `moveCompactionBoundary('insp-conv', cmp.id,
-  assistant.id)`。
-- **Phase 2 P2.4 ✅ 完成並確認**：使用者跑了整支 suite（**10/10 綠**）+
-  `npm run check`（**全綠**）。P2.4 兩層測試根因（§2m selector、§2n
-  boundary-select）皆結案。Phase 2 現剩 P2.5 / P2.6（§5b）。
-- **下一步（P2.5）**：cmp entry 動作（`ChatMessageCompaction.svelte` 展開區
-  動作列：[編輯]/[重新摘要]/[還原全部上下文]，皆走 P2.3 的 chatStore 方法、
-  進行中 `compacting` disabled；client 測試
-  `chat-message-compaction.svelte.test.ts` 擴編。規格見 §5b P2.5）。
-- **Phase 2 P2.5 ✅ 完成並確認**：使用者跑 3 條指令全綠——`npm run check` +
-  compaction client suite（**10/10**，4 既有 + 6 支 P2.5 新）+ inspector
-  client suite（**10/10** 回歸）。Phase 2 現剩 P2.6（§5b）。
-- **Phase 2 P2.6 已實做、待編譯確認**（變更見 §2p）：gauge 列
-  （compacting spinner / Compacted 節省列，`estimateCompactionSavings` 純函式
-  + 6 支 unit）+ `ChatFormActions` 第三入口（`ChatFormActionInspectContext`
-  Eye icon 按鈕）+ `Shift+Ctrl/Cmd+I` 快捷鍵（`KeyboardKey.I_LOWER/I_UPPER`）
-  + 新 client suite `context-gauge-compaction.svelte.test.ts`（8 支）。
-  待使用者跑：`npm run check` +
-  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`（24 支預期）+
-  `npx vitest --project=client --run tests/client/context-gauge-compaction.svelte.test.ts`（8 支）+
-  回歸 `context-panel-mobile`（2 支）+ `context-inspector`（10 支）。
-  全綠 → P2.6 確認、Phase 2 完成（剩 5.8 手動驗收 + Phase 3 可選後續）。
-- **Phase 2 P2.6 第一輪**（修復見 §2q）：`npm run check` 9 型別錯（gauge 3 支用了
-  `RenderResult` 不存在的 testing-library API）+ client 5/8 掛（gauge 3 支 API
-  缺失 + form 2 支獨立渲染缺 `Tooltip.Provider`）。全數測試端修復（新
-  `ChatFormActionsWrapper`、`document.querySelector` + `waitFor`/`bodyText()`
-  helper）。
-- **Phase 2 P2.6 第二輪**（修復見 §2r）：client 6/8 綠，2 支 form 入口 strict
-  mode violation——`getByRole('button', { name })` 同時命中 bits-ui
-  `Tooltip.Trigger` 外層 button 與內層 `Button`（Add/Mic 同款既有雙 button
-  結構）。2 支各加 `.last()` 取內層（`onclick`/`disabled` 都在內層）。
-- **Phase 2 P2.6 第二輪重跑 ✅ 確認**：使用者跑了 5 條指令全綠——
-  `npm run check` + unit `compaction-policy` + client
-  `context-gauge-compaction`（**8/8**）+ 回歸 `context-panel-mobile` /
-  `context-inspector`。**P2.6 完成、Phase 2 完成**（變更見 §2p；第一輪修復
-  §2q；第二輪修復 §2r）。
-- **§3.12 threshold 語義修正 ✅ 確認**：使用者跑 `npm run check` +
-  unit `compaction-policy`（26/26），全綠。
-- **N1 ✅ 完成並確認**（變更見 §3.13）：summary 上限改 n_ctx ×
-  `contextSummaryMaxTokensPercent`（預設 70，舊固定 key 移除）。使用者跑
-  `npm run check` + unit `compaction-policy`（**29/29**），全綠。
-- **N2 ✅ 完成並確認**（變更見 §3.14）：threshold 預設 80→70 +
-  新設定 `contextKeepTargetPercent`（預設 50）。使用者跑 3 條指令全綠：
-  `npm run check` +
-  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts`
-  （**30/30**：原 29 + 新 1）+
-  `npx vitest --project=client --run tests/client/settings-registry-invariants.svelte.test.ts`。
-- **N3 ✅ 完成並確認**（變更見 §3.15）：手動壓縮 Stop 鍵
-  （`chatStore.stopCompaction()` + inspector/cmp row [Stop] 按鈕 +
-  `summarizeMessages` abort 時丟真 `AbortError`）。使用者跑 4 條指令全綠：
-  `npm run check` + unit `summarize`（8/8：原 6 + 新 2）+ client
-  `context-inspector` + client `chat-message-compaction`。
-- **Context Inspector UI 修復第 1 輪（§2s）✅ PC 確認 / mobile NG**：使用者
-  跑 `npm run check` + client `context-inspector`（**10/10**）全綠；實測
-  PC 正常、mobile 超寬（dialog `max-w-full`、`ul` `max-w-2xl` 672px >
-  螢幕寬）→ 第 2 輪已改（`min-w-0`：grid item + 兩 `ul` + 兩組 `li`）。
-- **Context Inspector UI 修復第 2 輪（mobile 溢出）✅ 確認 / 新症狀**：使用者
-  跑 `npm run check` + client 全綠；實測 mobile 不再超出，**但 dialog 變很窄
-  （~50vw）難以閱讀** → 第 3 輪已改（`Dialog.Content` 加 `w-full`，md 以下；
-  根因：fixed 元素 shrink-to-fit 可用空間 = 視口 − 50% left offset = 50vw，
-  min-content 歸零後寬度塌到 50vw）。
-- **Context Inspector UI 修復第 3 輪（mobile 寬度）✅ 使用者已確認**（2026-07-22）：
-  重跑
-  `npm run check` +
-  `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
-  + mobile 手動（滿寬、可讀、無水平 scroll）+ PC 回歸（不變，清單見 §2s）
-  全部通過。
-- **Context Inspector 版面輪（§2t）第一輪**：使用者跑 client `context-inspector`
-  （**13/14**）——唯一掛「Back to top scrolls the dialog content back to the
-  top」（`expect(content.scrollTop).toBeGreaterThan(0)` 實得 0）。根因（§2t 驗證
-  狀態）：browser 測試環境獨立掛載元件、app Tailwind CSS 未載入 →
-  `Dialog.Content` 非 scroll container、`scrollTop` 不可設；非元件 bug。
-  已測試端修復（`style.overflowY = 'auto'` + 限高 80px；元件零改動）。
-- **Context Inspector 版面輪（§2t）第二輪 ✅ 自動驗證確認**：使用者跑
-  `npm run check` + client `context-inspector`（**14/14**）全綠。剩手動驗證
-  （PC 頂端區塊 / 跳頂 / mobile，清單見 §2t）。
-- **Context Inspector 版面輪（§2t）手動驗證 ✅ 通過**（使用者 2026-07-22）：
-  PC 頂端區塊版面、長對話 Back to top 平滑回頂、mobile 第一視口 + 無水平
-  溢出（含 §2s 第 3 輪 `w-full` 一併通過）。§2t / §2s 完成。
-- **N4 第一輪**：使用者跑 `npm run check`（全綠）+ unit `compaction-policy`
-  （**30/30**）+ unit `summarize`（**13/14**）。唯一失敗 = split-turn prefix
-  比對（test bug：兩支 `makePlanWithHead()` → 隨機 id，mock pass-through 把 id
-  送進 payload；見 §3.18 第一輪修復）。實做零改動、只修測試（共用同一 plan）。
-- **N4 ✅ 完成並確認**：使用者重跑 `npm run check` + unit `summarize`（**14/14**）
-  + unit `compaction-policy`（**30/30**）全綠。
-- **N5 ✅ 完成並確認**（變更見 §3.19）：使用者跑 `npm run check` + unit
-  `summarize`（**16/16**：原 14 + 新 2）+ client
-  `settings-registry-invariants`（全 key 迴綠、含新 `contextSummaryMode`）全綠。
-- **下一步**：① **雙 mode 實做**（清單見 05-雙 mode、設計見 §3.22；順序：
-共用基礎（timings / {content,tokens} / byte 計數 / 重試+gate / settings 鏈 /
-卡片）→ A → B）→ 使用者 check + unit 驗證；② Phase 1 的 5.8 手動驗收（見
-上方清單）；③ Phase 3 可選後續（規劃見 05-§1，含 summary 獨立 model /
-endpoint）。（N6 編譯/測試確認 ✅ 已完成並確認，見下方 N6 重跑）
-- **N6（split 切允許空 kept）已實做**（變更見 §3.21）：
-  policy 階段 2 允許 `cutIndex = path.length`（空 kept、`firstKeptMessageId`
-  缺）；builder 三態（缺 id = 空 kept `boundaryValid: true`／id 失效 =
-  fail-open I3／正常）；`contextKeepMinMessages` default 2→0、min 2→0；
-  store `boundaryIndexOf` → `keptWindowStartOf`（缺 id = entry index + 1）、
-  `summarizeRegion` 加 `entryId` 參數且 region 排除 cmp 節點本身、
-  `recompactConversationEntry` 的「Nothing to summarize」改算排除 entry 後的
-  實際 region；`ChatMessageCompaction` / `DialogContextInspector` 空 kept 態
-  （Kept from: none / 「No kept messages (all compacted)」/ dropped = 全部）；
-  `estimateCompactionSavings` 無 boundary = dropped 全部。unit：policy 改 1
-  支（舊「連 split 都放不下 → null」→ 空 kept plan）+ 新 4 支；builder 改 1
-  支（舊「缺 meta = fail-open」→ 空 kept）+ 新 2 支；I3 fail-open 用例保留。
-  client 零改動（fixture `firstKeptMessageId: ''` = 「有 id 但無效」= fail-open，
-  語義不變）。待使用者跑：`npm run check` +
-  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
-  `npx vitest --project=unit --run tests/unit/context-builder.test.ts` +
-  client 回歸 `chat-message-compaction` / `context-inspector` /
-  `context-gauge-compaction` / `settings-registry-invariants`。
-  全綠 → N6 完成並確認（勾 05-N6 清單、§3.21 狀態改「完成並確認」）。
-- **N6 第一輪**：使用者跑 `npm run check`（**5 錯**，全在
-  `context-builder.ts`）+ unit `context-builder`（suite transform 失敗、
-  0 test）。根因 = N6 實做時 `keptIndex` 三元運算式漏 `?`（`boundaryId ===
-  undefined` 後直接接 true 分支、esbuild 在 `:` 處 `Unexpected ":"`，整檔
-  解析失敗）；其餘 4 個 type 錯（105:32 / 105:73 / 124:26 / 149:25）皆為
-  `keptIndex` 被推斷成 `boolean` 的連鎖。**已修**：補上 `?`（純語法、無行為
-  改動；修正後已逐 case 手工追蹤 `context-builder.test.ts` 全部 15 支與
-  邏輯一致）。待使用者重跑上方 N6 條目的完整指令（check + 2 支 unit +
-  client 回歸 4 支）。
-- **N6 重跑 ✅ 完成並確認**（使用者 2026-10-17）：`npm run check` +
-  unit `compaction-policy` + unit `context-builder` + client 回歸
-  `chat-message-compaction` / `context-inspector` / `context-gauge-compaction` /
-  `settings-registry-invariants` **全綠**。N6 完成（05-N6 清單已勾、§3.21
-  狀態改「完成並確認」）。
-- **雙 mode 實做（共用 + A + B）來源碼完成、測試未寫、待使用者 check**（2026-10-17；
-  變更見 §3.23，18 檔已逐檔確認存在且一致）：
-  ① `tests/unit/compaction-policy.test.ts` **需重寫**：現 34 支皆 char/4 語義
-  （fixture T100 = 400 chars = 100 「tokens」）+ 舊 budget 公式（summaryReserve
-  × 1.5 / 10% floor，已移除）+ `estimateCompactionSavings` 硬編碼期望（char/4 下
-  算出）→ 需改 byte 語義 + 新公式（逐支調值清單見 §3.23 下一步 1）；新 suite
-  `byteLength` / `planCompactionRecentWindow` / `shouldTriggerCompaction` /
-  `evaluateCompactionResult` / `computeEffectiveWindow` / `toCompactionMode` /
-  `resolveSummarySize` / `nextCompactionStep` 未寫。**重寫前跑此 suite 會紅**
-  （舊公式 / 舊單位用例 vs 新實做）——預期，非回歸。
-  ② `tests/unit/summarize.test.ts` 需更新：現 16 支以
-  `mockResolvedValue('the summary')` string 回傳 mock（新實做 line 257 相容
-  `typeof response === 'string'`，既有用例預期維持綠），但對新回傳型別
-  `{ content, tokens }` / timings 抓取 / `summarizeWithRetry` **零覆蓋** →
-  照 §3.23 下一步 2 改 `{ content, tokens }` 斷言 + 新 `summarizeWithRetry`
-  suite。
-  ③ `tests/client/compaction-decision-card.svelte.test.ts` **新、未建立**（卡片
-  三選項 resolve gate + gate 層 request → pending → resolve / abort = skip）。
-  ④ `tests/unit/context-builder.test.ts`（14 支）期望值用同一 `estimateTokens`
-  函式計算 → byte 化預期自適應零改動（待跑確認）。
-  ⑤ `settings-registry-invariants` generic（iterates `SETTING_CONFIG_DEFAULT`）
-  → 4 新 key + `dependsOnValue` 預期零改動（待跑確認）。
-  待使用者跑：`npm run check` +
-  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
-  `npx vitest --project=unit --run tests/unit/summarize.test.ts` +
-  `npx vitest --project=unit --run tests/unit/context-builder.test.ts` +
-  `npx vitest --project=client --run tests/client/settings-registry-invariants.svelte.test.ts` +
-  `npx vitest --project=client --run tests/client/compaction-decision-card.svelte.test.ts` +
-  client 回歸 `chat-message-compaction` / `context-inspector` /
-  `context-gauge-compaction`。全綠 → 勾 05-雙 mode 清單測試項、§3.22/§3.23 狀態
-  改「完成並確認」、README 停點更新。
-- **雙 mode 測試已寫、待使用者編譯驗證**（2026-10-17；零來源碼改動、4 測試
-  檔：2 unit 重寫/更新 + 1 client 新 suite + 1 回歸修正）：
-  ① `tests/unit/compaction-policy.test.ts` 重寫（byte 語義 + v3 差值公式 +
-  8 新 suite + 既有 11 支重調 + savings fixture 重算）；②
-  `tests/unit/summarize.test.ts` + `SummaryResult` 3 支 + `summarizeWithRetry`
-  8 支 + 既有 payload 測試加 `{ content, tokens }` 斷言；③
-  `tests/client/compaction-decision-card.svelte.test.ts` 新（卡片 6 +
-  store gate 3）；④ `tests/client/context-gauge-compaction.svelte.test.ts`
-  `~1,794` → `~1,658`（byte 語義；細節見 §3.23 執行記錄 4）。
-  待使用者跑：`npm run check` +
-  `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts` +
-  `npx vitest --project=unit --run tests/unit/summarize.test.ts` +
-  `npx vitest --project=unit --run tests/unit/context-builder.test.ts` +
-  `npx vitest --project=client --run tests/client/settings-registry-invariants.svelte.test.ts` +
-  `npx vitest --project=client --run tests/client/compaction-decision-card.svelte.test.ts` +
-  client 回歸 `chat-message-compaction` / `context-inspector` /
-  `context-gauge-compaction`。全綠 → 勾 05-雙 mode 清單測試項、§3.22/§3.23 狀態
-  改「完成並確認」、README 停點更新。
-
-- **雙 mode 重新驗證（新 session，2026-10-17；零來源碼/測試改動）**：上一輪
-   超上下文限制、狀態文件未寫完，本輪靜態交叉核對確認**無遺漏/截斷**：
-   18 來源檔全部存在且完整（逐檔核對 §3.23 明細：`compaction-policy.ts` 555
-   行含全部 8 個新函式、`summarize.ts` 348 行含 `summarizeWithRetry`、
-   `dependsOnValue` 機制 4 處（types / registry / Fields / toSettingsSection）、
-   卡片兩處掛法、gauge mode-aware）；4 測試檔全部存在且與 §3.23 執行記錄
-   一致（`T100` = 400B / `T400` = 1600B、boundary 5600 恰切 u2、
-   `summarizeWithRetry` 8 支、`SummaryResult` 3 支、卡片 6 + gate 3 支、gauge
-   `~1,658` fixture、`settings-registry-invariants` generic 零改動）。
-   已同步陳舊文件：05-雙 mode 清單（標題 / 狀態 / 4 個測試項勾選）、README
-   停點。下一步不變＝使用者跑上方條目的完整指令（check + unit 3 支 +
-   client 5 支）。
- 
-- **雙 mode 第一輪測試：2 支 client 失敗的修復（2026-10-17；零測試改動、2
-   來源檔）**：使用者跑完整指令後「只剩」2 支 client 失敗（`npm run check` +
-   unit 3 支 + client `settings-registry-invariants` / `chat-message-compaction` /
-   `context-gauge-compaction` 皆綠）：`compaction-decision-card` 7/9、
-   `context-inspector` 13/14。根因皆為雙 mode 輪的 mechanical 遺漏：
-   1. **卡片文字空白**（`ChatCompactionDecisionCard.svelte`）：message snippet
-      多行標記讓 DOM textContent 保留源碼換行（實得 `~12,345 of\n\t\t~8,000`
-      → `toContain('~12,345 of ~8,000 allowed')` 掛）；且 `{#if}` 前後空白在
-      attempts = 1 時留下「allowed . Keep it?」句點前空格（使用者可見的 UI
-      錯字 → `toContain('allowed. Keep it?')` 掛）。已改單一 template literal
-      表達式：兩態皆精確渲染（`…allowed (after 3 attempts). Keep it?` /
-      `…allowed. Keep it?`）、mode B 標籤不變。JS 模擬 8 項斷言全過。
-   2. **inspector header 與 rows 不一致**（`context-builder.ts`）：compaction
-      路徑的 `estimatedTokens` 的 summary 段仍是 char/4 時代的
-      `Math.ceil(entry.content.length / 4)`（v3 byte 化漏改）→ header =
-      16 + ceil(132/4) + 34 = 83 vs rows 和 = 16 + 132 + 19 + 15 = 182
-      （fixture 逐項核對、與失敗輸出 83/182 完全吻合）。已改以
-      `estimateApiMessageTokens` 對最終 API `messages` 求和——與 inspector
-      rows 同一 estimator、同一 payload（WYSIWYG），「rows 和 = header」不變式
-      由結構保證。no-entry 路徑維持 `pathTokens`（`context-builder.test.ts`
-      第 91 行固定值、零改動）；`result.estimatedTokens` 其他消費點僅 inspector
-      三處（percent 列 / expand 描述 / header）。
-   待使用者重跑：`npm run check` +
-   `npx vitest --project=client --run tests/client/compaction-decision-card.svelte.test.ts`
-   + `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
-   （unit `context-builder` 可一併回歸）。全綠 → 勾 05-雙 mode 清單、
-   §3.22/§3.23 狀態改「完成並確認」、README 停點更新。
- 
-- **雙 mode 重跑 ✅ 完成並確認**（使用者 2026-10-17）：使用者重跑上一條的 4
-   條指令——`npm run check` + client `compaction-decision-card`（**9/9**）+
-   client `context-inspector`（**14/14**）+ unit `context-builder` 回歸——
-   **全綠**。第一輪 2 支 client 失敗結案（見上一條）。併上上一輪全綠（unit
-   `compaction-policy` / `summarize` + client `settings-registry-invariants` /
-   `chat-message-compaction` / `context-gauge-compaction`），雙 mode（共用 +
-   A + B）完成。05-雙 mode 清單全勾、§3.22/§3.23 狀態改「完成並確認」、
-   README 停點更新。**剩**：Phase 1 5.8 手動驗收 + Phase 3 可選後續（兩段式
-   summary / per-conversation 覆蓋 / 合併重摘要提示 / summary 獨立 model /
-   endpoint，05-§1；token 校準已被 v3 取代）。
+  > ✅ 5.8 項目 1–2 現可驗（P2.4 inspector「Compact now」+ P2.6 表單
+  > Eye 按鈕 / 快捷鍵 / gauge 列皆已落地）；A/B mode 行為 + v4 真實
+  > token 顯示可一併驗。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -2307,6 +1784,29 @@ static async createCompactionMessage(params: {
   的路徑邏輯（`filterByLeafNodeId`）對新 type 透明，**不要**改 `branching.ts`。
 - **不要 import/export 改動**：`conversationsStore` 路徑邏輯、`branching.ts`、
   import/export service、`convertDbMessageToApiChatMessageData`（builder 複用它）。
+- **client 測試環境 API（vitest-browser-svelte）**：`render()` 回傳的
+  `RenderResult` 只有 `getByRole` / `getByText`（只收 `string | RegExp`、
+  不收函式）/ `getByLabelText` / `getByPlaceholder` / `getByTitle` /
+  `getByTestId`、回 `Locator`——沒有 testing-library 的 `queryByText` /
+  `findByText` / `Locator.parentElement`；要 DOM 直查走
+  `document.querySelector` + `waitFor` / `bodyText()` helper（慣例見
+  `context-inspector.svelte.test.ts`）。`expect(Locator)` 不會解析——
+  要 `await expect.element(locator).toBeVisible()`。
+- **client 測試獨立渲染缺 provider**：含 bits-ui `Tooltip.Root` 的元件
+  （如 `ChatFormActions`）獨立渲染要包 `Tooltip.Provider`（app 裡
+  `+layout.svelte` 提供）→ 用 `ChatFormActionsWrapper.svelte` /
+  `ChatFormTestWrapper.svelte` 先例。
+- **bits-ui `Tooltip.Trigger` 包 `Button` 是雙 button 結構**（Add/Mic 同款
+  既有慣例）：`getByRole('button', { name })` 會 strict mode violation——
+  加 `.last()` 取內層（`onclick` / `disabled` 皆在內層；`Locator.locator()`
+  是 protected、不可用）。
+- **client 測試 selector 要夠窄**：dialog 內 bits-ui `Select.Trigger` 也帶
+  `aria-expanded`——payload 列用 `[role="dialog"] li button[aria-expanded]`
+  才不會數到 trigger（P2.4 五輪診斷的根因，§2m）。
+- **測試在 `waitFor` throw 時 `unmount()` 沒跑到**：`afterEach` 的 store
+  重置（如 `activeMessages = []`）會打在還掛著的元件上、effect 重跑——
+  看到的「pathLen 0 / state 變 0」通常是 teardown 紅鵝、非 runtime bug
+  （§2m）。
 - **編譯/測試由使用者執行**：每完成一個可獨立驗證的單位（Phase 1 建議
   5.1 / 5.2+5.3 / 5.4+5.5 / 5.6 / 5.7 各一段；Phase 2 每 P2.x 一段）就停下來
   請使用者跑 `npm run check` + 相關 `npm run test:unit -- --run <files>`，

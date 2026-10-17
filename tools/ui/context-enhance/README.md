@@ -15,31 +15,28 @@
 > default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status §3.18）；
 > **N5 ✅ 完成並確認**（新設定 `contextSummaryMode`：summary 的 prompt
 > 模式開放給 user 選，見 06-status §3.19））。
-> **目前停點**：**雙 mode（共用 + A + B）✅ 完成並確認**
-> （2026-10-17；完整指令全綠，第一輪 2 支 client 失敗已修：
-> 卡片標記空白 + builder summary 段 char/4 遺漏，見 06-status
-> §3.23/§4）——規格：同時保留兩種作法、user 選 mode、
-> **default = A（recent-window / pi reference）**：A = 至少留最近
-> `keepRecentTokens` 原樣 + 觸發 `window − keep`（window = min(n_ctx,
-> `contextMaxContextOverride`）；B = v3 + N6（kept ≤（threshold−keepTarget）%、
-> 成功判定 head+summary ≤ keepTarget%、允許空 kept）。**計數(v4,2026-10-17)=
-> 真實 per-message 優先**(`deriveRealMessageTokens`:assistant=predicted_n、
-> 段真實總和歸該段最後一則非-assistant)、**觸發 = 真實 `contextUsed`**
-> (gauge 同源)、無資料例外(system / 尚未送出尾端)才 `bytes/4` 估算;
-> 設定數字不變現為 token 尺度(見 02-§3.4)。超標 → 重試(`contextSummaryMaxAttempts`)→
-> user gate（使用/重壓/跳過）。設計見 06-status §3.22、實做明細（18 檔）見
-> §3.23、驗證修正明細見 06-status 恢復點；**剩**：Phase 1 5.8 手動驗收
-> （見 06-status §4 清單；A/B mode 行為可一併驗）+ Phase 3 可選後續
-> （兩段式 summary / per-conversation 覆蓋 / 合併重摘要提示 / summary
-> 獨立 model / endpoint，見 05-§1；token 校準已被 v3 取代）。
-> 此前：**N6 split 切允許空 kept ✅ 完成並確認**（2026-10-17：check + unit
-> `compaction-policy` / `context-builder` + client 回歸 4 支全綠，見 06-status
-> §3.21/§4；N6 = split 切下限 2→0、最後 ass+tool 放不下時切在最後一則之後
-> 全壓、`firstKeptMessageId` 缺 = 空 kept）；v3 重設計已確認（「自動壓縮從未
-> 觸發」根因見 06-status §3.20，現為雙 mode 規格的方法 B）；N1–N5 全部完成並
-> 確認（N5 = `contextSummaryMode` SELECT 設定 +
-> `toSummaryMode()` + 3 個呼叫點透傳，unit 16/16 + client registry 全綠）；剩 Phase 1 的 5.8 手動驗收 + Phase 3
-> 可選後續（含 summary 獨立 model / endpoint；token 校準已被 v3 取代）。
+> **目前停點**：**v4 真實 token 計數 🚧 實做中**（2026-10-17）——
+> 來源碼 9 檔 + unit `compaction-policy` 重寫完成（已靜態核實）；
+> 剩 2 unit + 4 client 測試（stale，明細見 06-status §3.25），
+> 待使用者編譯驗證。v4 = 計數/觸發/成功判定/Inspector 全用真實
+> token（`deriveRealMessageTokens`：assistant=predicted_n、段真實總和歸該段
+> 最後一則非-assistant）、觸發 = 真實 `contextUsed`（gauge 同源）、無資料
+> 例外（system / 尚未送出尾端）才 `bytes/4` 估算；設定數字不變、現為
+> token 尺度（見 02-§3.4）。此前：**雙 mode（共用 + A + B）✅ 完成並確認**
+> （2026-10-17；完整指令全綠，見 06-status §3.23/§4）——規格：同時保留
+> 兩種作法、user 選 mode、**default = A（recent-window / pi reference）**：
+> A = 至少留最近 `keepRecentTokens` 原樣 + 觸發 `window − keep`（window =
+> min(n_ctx, `contextMaxContextOverride`）；B = v3 + N6（kept ≤
+> （threshold−keepTarget）%、成功判定 head+summary ≤ keepTarget%、允許空
+> kept）。超標 → 重試（`contextSummaryMaxAttempts`）→ user gate（使用/重壓/跳過）。
+> 設計見 06-status §3.22/§3.24、實做明細見 §3.23/§3.25。此前皆完成並確認：
+> N6（split 切允許空 kept，2026-10-17）；N1–N5（2026-07-22：summary 上限
+> n_ctx × % / keep target 設定 / Stop 鍵 / prefix-stable default /
+> `contextSummaryMode` 設定）。
+> **剩**：Phase 1 5.8 手動驗收（見 06-status §4 清單；A/B mode 行為 +
+> v4 顯示可一併驗）+ Phase 3 可選後續（兩段式 summary / per-conversation
+> 覆蓋 / 合併重摘要提示 / summary 獨立 model / endpoint，見 05-§1；
+> token 校準已被 v3/v4 取代）。
 
 ## 目錄
 

@@ -195,41 +195,43 @@
 payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點可前移
 恢復 kept;無 cmp 對話行為不變。
 
-### v4 — 真實 token 計數（2026-10-17 使用者定稿，待實做）
+### v4 — 真實 token 計數（2026-10-17 使用者定稿；🚧 來源碼 + policy unit 完成，剩 2 unit + 4 client 測試）
 
 > 背景:Context Inspector 的「Estimated send」與每則「~N tok」用
 > `estimateTokens`/`estimateApiMessageTokens` 的 **UTF-8 byte 數**當 token 顯示、
 > 並除 n_ctx(token)→ 數字與 gauge(真實 `contextUsed`)永遠對不上(380,513 vs
 > 153,939,≈2.5 bytes/token)。使用者決策:切點/觸發/成功判定/Inspector **全用真實
 > token**,估算僅限無資料例外;設定數字不變(現為 token 尺度)。設計:02-§3.4(v4)、
-> 04-§2/§3/§4;決策記錄見 06-status §3.24。
+> 04-§2/§3/§4;決策記錄見 06-status §3.24;實做明細 + 剩餘工作見 06-status §3.25。
 
-- [ ] `compaction-policy.ts`:新增純函式 `deriveRealMessageTokens(path) →
+- [x] `compaction-policy.ts`:新增純函式 `deriveRealMessageTokens(path) →
       Map<dbId, number>`(assistant=`predicted_n`;每段非-assistant 真實總和歸該段
       最後一則非-assistant;system/尾端不在 map)
-- [ ] `compaction-policy.ts`:新增 `messageSize(m, real, isTail) = 真實 ??
+- [x] `compaction-policy.ts`:新增 `messageSize(m, real, isTail) = 真實 ??
       (尾端 ? bytes/4 : 0)`;`estimateTokens` 改名 `messageBytes`(只供 inspector
       副欄 + bytes/4),不再當主大小
-- [ ] `planCompaction` / `planCompactionRecentWindow` / `evaluateCompactionResult`:
+- [x] `planCompaction` / `planCompactionRecentWindow` / `evaluateCompactionResult`:
       所有 `estimateTokens` 加總改 `messageSize`(傳入 `realTokens` + 尾端判定);
       `minSummarizeTokens` / `keepRecentTokens` / keep budget 改 token 尺度
       (設定數字不變);mode B 原本 byte-vs-token 錯配順手修好
-- [ ] 觸發:`stores/chat/index.svelte.ts` / `stores/agentic/index.svelte.ts`
+- [x] 觸發:`stores/chat/index.svelte.ts` / `stores/agentic/index.svelte.ts`
       `lastPrompt` 改 `contextStatsStore.contextUsed`(真實 KV),刪 byte fallback;
       `shouldTriggerCompaction` 參數 doc 改真實 contextUsed
-- [ ] `context-builder.ts` + `types.ts`:`ContextBuildResult.messages` 帶來源
+- [x] `context-builder.ts` + `types.ts`:`ContextBuildResult.messages` 帶來源
       `sourceId`;移除 `estimatedTokens`(byte)字段
-- [ ] `DialogContextInspector.svelte`:標題/總和條綁 `contextUsed`/`contextTotal`
+- [x] `DialogContextInspector.svelte`:標題/總和條綁 `contextUsed`/`contextTotal`
       (＝gauge);每則**主欄**＝`messageSize` 真實值(system=`-`、尾端=`est.`)、
       **副欄**＝`bytes`/`bytes÷4 est.`;整條 byte-當-token 拿掉
-- [ ] `ChatMessageCompaction.svelte` / `ContextGaugePopup.svelte`:「N→M」/
-      「tokens saved」改真實 token
-- [ ] unit:`deriveRealMessageTokens`(assistant/段總和/首段/多非-assistant/尾端);
+- [x] `ChatMessageCompaction.svelte` / `ContextGaugePopup.svelte`:「N→M」/
+      「tokens saved」改真實 token(gauge 走 `estimateCompactionSavings` 純函式、零改動)
+- [x] unit:`deriveRealMessageTokens`(assistant/段總和/首段/多非-assistant/尾端);
       `messageSize`(真實/尾端 bytes/4/非尾端 0);切點 A/B + 成功判定吃真實 token;
-      觸發 `contextUsed`(=0 不觸發)
+      觸發 `contextUsed`(=0 不觸發)——`compaction-policy.test.ts` 全數重寫完成
 - [ ] client:Inspector 標題＝gauge、主欄真實/`-`/`est.`、副欄 bytes+bytes/4;
-      cmp「N→M」真實
-- [ ] 回歸:既有 `compaction-policy`/`context-builder` 測試改 token 尺度期望值
+      cmp「N→M」真實（4 client 測試 stale 待更新,逐檔明細見 06-status §3.25）
+- [ ] 回歸:`compaction-policy` ✅ 已重寫 / `context-builder` 待改 token 尺度
+      期望值 + `sourceId` 斷言（mock 改 `convertDbMessageToApiChatMessageData`）
+      / `summarize` 3 處 `CompactionPlan` literal 補 `keptTokens` / `realMessageTokens`
 
 ✅ 驗收:Inspector 標題/總和條＝gauge 真實值(同單位同量級);每則主欄真實、
 副欄 bytes+bytes/4;切點/觸發/成功判定全真實 token;無資料例外(system、尚未送出
