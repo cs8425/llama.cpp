@@ -24,6 +24,7 @@ import {
 	computeEffectiveWindow,
 	computeSummaryMaxTokens,
 	deriveRealMessageTokens,
+	evaluateCompactionResult,
 	estimateCompactionSavings,
 	messageBytes,
 	messageSize,
@@ -485,9 +486,9 @@ describe('planCompaction (mode B, real tokens)', () => {
 			message('u3', MessageRole.USER, 'q3'),
 			assistantTimed('a3', 'a3', 4400, 400),
 			message('u4', MessageRole.USER, 'q4'),
-			assistantTimed('a4', 'a4', 4800, 400),
+			assistantTimed('a4', 'a4', 5200, 400),
 			message('u5', MessageRole.USER, 'q5'),
-			assistantTimed('a5', 'a5', 5200, 400)
+			assistantTimed('a5', 'a5', 6000, 400)
 		];
 
 		const plan = planCompaction(path, budget(3200));
@@ -1143,9 +1144,9 @@ describe('estimateCompactionSavings (real tokens, v4)', () => {
 	}
 
 	it('subtracts the current payload (path minus dropped region) from the pre-compaction total', () => {
-		// real: u1 1500, a1 300; tail u2 = 400 bytes / 4 = 100; the entry and
-		// the system head count 0 → total 1900, dropped 1800, payload 100
-		// → 2000 − 100 = 1900
+		// real: u1 1500, a1 300; the entry (tail, no real value) = 800 bytes /
+		// 4 = 200, tail u2 = 400 bytes / 4 = 100; the system head counts 0
+		// → total 2100, dropped 1800, payload 300 → 2000 − 300 = 1700
 		const cmp = compaction('cmp', 'u2', 2000);
 		const path = [
 			message('sys', MessageRole.SYSTEM, 'system'),
@@ -1155,14 +1156,15 @@ describe('estimateCompactionSavings (real tokens, v4)', () => {
 			message('u2', MessageRole.USER, T100)
 		];
 
-		expect(estimateCompactionSavings(path, cmp)).toBe(1900);
+		expect(estimateCompactionSavings(path, cmp)).toBe(1700);
 	});
 
 	it('keeps an older compaction entry inside the dropped region out of the payload', () => {
 		// real: the first segment (1500) is owned by oldCmp (the last
-		// non-assistant before a1); a1 300; tail u2 100 → total 1900,
-		// dropped = oldCmp + a1 = 1800 (newCmp excluded — it is sent),
-		// payload 100 → 2000 − 100 = 1900
+		// non-assistant before a1); a1 300; the entry (tail, no real value) =
+		// 800 bytes / 4 = 200, tail u2 100 → total 2100, dropped = oldCmp + a1
+		// = 1800 (newCmp excluded from dropped — it is sent), payload 300
+		// → 2000 − 300 = 1700
 		const oldCmp = message('oldCmp', MessageRole.USER, 'z'.repeat(400), {
 			compactionMeta: { estimatedTokensBefore: 300, firstKeptMessageId: 'a1', summarizedCount: 1 },
 			type: MessageType.COMPACTION
@@ -1177,7 +1179,7 @@ describe('estimateCompactionSavings (real tokens, v4)', () => {
 			message('u2', MessageRole.USER, T100)
 		];
 
-		expect(estimateCompactionSavings(path, newCmp)).toBe(1900);
+		expect(estimateCompactionSavings(path, newCmp)).toBe(1700);
 	});
 
 	it('returns 0 when the boundary no longer exists on the path (fail-open full send)', () => {
