@@ -17,7 +17,6 @@ import type { CompactionDecisionRequest } from '$lib/stores/agentic/gates.svelte
 import { contextStatsStore } from '$lib/stores/chat/context-stats.svelte';
 import { chatStore } from '$lib/stores/chat/index.svelte';
 import { conversationsStore } from '$lib/stores/conversations/index.svelte';
-import { modelsStore } from '$lib/stores/models/index.svelte';
 import type { DatabaseConversation, DatabaseMessage } from '$lib/types';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -53,12 +52,17 @@ function buildFixture(): void {
 }
 
 function setActiveConversation(id: string): void {
-	conversationsStore.activeConversation = {
+	const conversation = {
 		currNode: '',
 		id,
 		lastModified: 0,
 		name: 'N7 conversation'
 	} as unknown as DatabaseConversation;
+
+	conversationsStore.activeConversation = conversation;
+	// compactConversation resolves the path through the conversation list
+	// (resolveConversationPath), so the entry must exist there as well
+	conversationsStore.conversations = [conversation];
 }
 
 // --- helpers ------------------------------------------------------------------
@@ -87,10 +91,17 @@ function pendingRow(): HTMLElement | null {
 	return document.querySelector<HTMLElement>('[aria-label="Pending user message"]');
 }
 
+function cmpRow(): HTMLElement | null {
+	return [...document.querySelectorAll<HTMLElement>('.chat-message')].find((row) =>
+		row.textContent?.includes('Context compacted')
+	) ?? null;
+}
+
 afterEach(() => {
 	vi.restoreAllMocks();
 	conversationsStore.activeMessages = [];
 	conversationsStore.activeConversation = null;
+	conversationsStore.conversations = [];
 	contextStatsStore.setCompacting(null);
 	chatStore.clearPendingMessage(CONV_ID);
 	chatStore.cleanupStreaming(CONV_ID);
@@ -160,9 +171,11 @@ describe('ChatMessageCompacting indicator row', () => {
 		const { unmount } = render(ChatMessagesPerfWrapper);
 		await tick();
 
-		// the real cmp row took over the tail — the indicator row must not double-render
+		// the real cmp row took over the tail (LazyChatMessage mounts it via
+		// IntersectionObserver, so poll for it) — the indicator row must not
+		// double-render
 		expect(indicatorRow()).toBeNull();
-		expect(document.body.textContent?.includes('Context compacted')).toBe(true);
+		await waitFor(cmpRow);
 
 		unmount();
 	});
@@ -346,7 +359,14 @@ describe('endCompactionState finalizer', () => {
 
 		conversationsStore.activeMessages = messages;
 		setActiveConversation(CONV_ID);
-		vi.spyOn(modelsStore.props, 'getModelContextSize').mockReturnValue(256000);
+		// The active conversation's n_ctx is read straight off the gauge's
+		// contextTotal (getContextSizeForConversation). Pin the leaf value
+		// directly: spying the upstream modelsStore.activeModelId getter does
+		// not invalidate contextStatsStore's already-evaluated deriveds — the
+		// module-singleton stores keep their derived cache across tests in
+		// this file, and the earlier "settles without a plan" test evaluated
+		// the chain to null.
+		vi.spyOn(contextStatsStore, 'contextTotal', 'get').mockReturnValue(256000);
 
 		// Crossing lands on a2 (assistant) → split-turn cut → the minKeptUserTurns
 		// check is skipped; defaults are fine for this fixture.
