@@ -1689,6 +1689,19 @@ endpoint）。（N6 編譯/測試確認 ✅ 已完成並確認，見下方 N6 �
   `context-gauge-compaction`。全綠 → 勾 05-雙 mode 清單測試項、§3.22/§3.23 狀態
   改「完成並確認」、README 停點更新。
 
+- **雙 mode 重新驗證（新 session，2026-10-17；零來源碼/測試改動）**：上一輪
+   超上下文限制、狀態文件未寫完，本輪靜態交叉核對確認**無遺漏/截斷**：
+   18 來源檔全部存在且完整（逐檔核對 §3.23 明細：`compaction-policy.ts` 555
+   行含全部 8 個新函式、`summarize.ts` 348 行含 `summarizeWithRetry`、
+   `dependsOnValue` 機制 4 處（types / registry / Fields / toSettingsSection）、
+   卡片兩處掛法、gauge mode-aware）；4 測試檔全部存在且與 §3.23 執行記錄
+   一致（`T100` = 400B / `T400` = 1600B、boundary 5600 恰切 u2、
+   `summarizeWithRetry` 8 支、`SummaryResult` 3 支、卡片 6 + gate 3 支、gauge
+   `~1,658` fixture、`settings-registry-invariants` generic 零改動）。
+   已同步陳舊文件：05-雙 mode 清單（標題 / 狀態 / 4 個測試項勾選）、README
+   停點。下一步不變＝使用者跑上方條目的完整指令（check + unit 3 支 +
+   client 5 支）。
+
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
 > 原則：store 層不感知 compaction（除了觸發+建節點的協調邏輯）；

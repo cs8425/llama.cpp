@@ -15,8 +15,8 @@
 > default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status §3.18）；
 > **N5 ✅ 完成並確認**（新設定 `contextSummaryMode`：summary 的 prompt
 > 模式開放給 user 選，見 06-status §3.19））。
-> **目前停點**：**雙 mode 來源碼完成（共用 + A + B）、測試未寫、待使用者
-> check 驗證**（2026-10-17）——規格：同時保留兩種作法、user 選 mode、
+> **目前停點**：**雙 mode 來源碼 + 測試完成（共用 + A + B）、待使用者
+> 編譯驗證**（2026-10-17）——規格：同時保留兩種作法、user 選 mode、
 > **default = A（recent-window / pi reference）**：A = 至少留最近
 > `keepRecentTokens` 原樣 + 觸發 `window − keep`（window = min(n_ctx,
 > `contextMaxContextOverride`）；B = v3 + N6（kept ≤（threshold−keepTarget）%、
@@ -24,9 +24,12 @@
 > token 數就用（trigger = prompt_n、summary = completion tokens）、msg / API
 > 無數用 byte、**不做派生比例**。超標 → 重試（`contextSummaryMaxAttempts`）→
 > user gate（使用/重壓/跳過）。設計見 06-status §3.22、實做明細（18 檔）見
-> §3.23；下一步 = 測試（unit `compaction-policy` 重寫 + `summarize` 新回傳型別 /
-> `summarizeWithRetry`、client 新 `compaction-decision-card` suite）→ 使用者
-> `npm run check` + unit + client → 勾 05-雙 mode 清單。
+> §3.23；測試已完成（零來源碼改動：unit `compaction-policy` 重寫 +
+> `summarize` 更新 + client 新 `compaction-decision-card` + 1 項回歸修正）；
+> 下一步 = 使用者 `npm run check` + unit 3 支（compaction-policy / summarize /
+> context-builder）+ client 5 支（settings-registry-invariants /
+> compaction-decision-card + 回歸 chat-message-compaction / context-inspector /
+> context-gauge-compaction）→ 全綠 → 勾 05-雙 mode 清單。
 > 此前：**N6 split 切允許空 kept ✅ 完成並確認**（2026-10-17：check + unit
 > `compaction-policy` / `context-builder` + client 回歸 4 支全綠，見 06-status
 > §3.21/§4；N6 = split 切下限 2→0、最後 ass+tool 放不下時切在最後一則之後

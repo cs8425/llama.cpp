@@ -56,7 +56,7 @@
 ✅ 驗收:長對話(或測試用低 threshold)自動壓縮發生一次且只發生一次;
 編輯 summary 後下一輪 payload 即變;Expand 後 context 完整還原。
 
-### 雙 mode — recent-window(A,預設)+ threshold-target(B = v3 + N6)(規格定稿 2026-10-17;來源碼完成 2026-10-17,測試未寫)
+### 雙 mode — recent-window(A,預設)+ threshold-target(B = v3 + N6)(規格定稿 2026-10-17;來源碼 + 測試完成 2026-10-17,待使用者編譯驗證)
 
 > 背景:自動壓縮從未觸發(262.14K/262.14K 案例)——根因是舊 budget 公式
 > (summary max 70% × 1.5 = 105% n_ctx 的 reserve)把 keepBudget 壓死在 10% floor,
@@ -68,11 +68,17 @@
 > 02-§3.3/§3.4/§6(雙 mode)、03-§2/§3/§4.2/§4.4、04-§3/§4。
 >
 > **狀態(2026-10-17)**:共用 / A / B 三塊**來源碼全部完成**(18 檔,明細見
-> 06-status §3.23);**測試未寫**——unit `compaction-policy` 重寫(byte 語義 +
-> 新公式 + 8 個新 suite)、unit `summarize` 更新(`{ content, tokens }` +
-> `summarizeWithRetry`)、client 新 `compaction-decision-card` suite。待使用者
-> `npm run check` + unit + client 全綠後,把下方測試項勾掉、§3.22/§3.23 狀態
-> 改「完成並確認」。
+> 06-status §3.23);**測試已全部寫完**(第二輪,零來源碼改動,見 06-status
+> §3.23 執行記錄):unit `compaction-policy` 重寫(byte 語義 + v3 差值公式 +
+> 8 個新 suite + 既有 11 支 `planCompaction` 重調 + savings fixture 重算)、
+> unit `summarize` 更新(`{ content, tokens }` 斷言 + `SummaryResult` 3 支 +
+> `summarizeWithRetry` 8 支)、client 新 `compaction-decision-card` suite
+> (卡片 6 + gate 3)、回歸修正 `context-gauge-compaction`(`~1,794` →
+> `~1,658`,byte 語義)。待使用者 `npm run check` + unit 3 支
+> (compaction-policy / summarize / context-builder)+ client 5 支
+> (settings-registry-invariants / compaction-decision-card + 回歸
+> chat-message-compaction / context-inspector / context-gauge-compaction)
+> 全綠後,§3.22/§3.23 狀態改「完成並確認」、README 停點更新。
 
 #### 共用(兩 mode)
 
@@ -106,9 +112,9 @@
       掛 mode;舊 threshold/keepTarget 的 dependsOn auto → mode)+
       settings-registry-invariants 同步更新
 - [x] gauge:分母 / 觸發標記跟 active mode 走(04-§3)
-- [ ] unit tests:byte 計數(CJK / ASCII / 附件);成功判定邊界(≤ / >);
+- [x] unit tests:byte 計數(CJK / ASCII / 附件);成功判定邊界(≤ / >);
       重試次數(1 / 3 / ≤ 0);summaryTokens null → byteLen
-- [ ] client tests:卡片三選項 resolve gate;abort = skip
+- [x] client tests:卡片三選項 resolve gate;abort = skip
 
 #### Mode A — recent-window(pi reference)
 
@@ -123,7 +129,7 @@
       `window − keep ≤ 0` → auto 永不觸發(手動不受影響)
 - [x] 成功判定式(A):`headBytes + (summaryTokens ?? byteLen) + keptBytes ≤
       window − keepRecentTokens`
-- [ ] unit tests:下限停止;交叉點 = tool → 保留其前 ass 整輪;交叉點 =
+- [x] unit tests:下限停止;交叉點 = tool → 保留其前 ass 整輪;交叉點 =
       user/assistant;未達 → null;A 不產生空 kept;I5(minKeptMessages /
       minKeptUserTurns);minSummarize
 
@@ -136,7 +142,7 @@
 - [x] 觸發式(B):`lastPrompt > n_ctx × threshold%`
 - [x] 成功判定式(B):`headBytes + (summaryTokens ?? byteLen) ≤
       keepTarget% × n_ctx`
-- [ ] unit tests:budget 簡化公式;既有 planCompaction 測試(上限 / 空 kept)
+- [x] unit tests:budget 簡化公式;既有 planCompaction 測試(上限 / 空 kept)
       維持
 
 ✅ 驗收:
