@@ -251,6 +251,27 @@ describe('summarizeMessages (prefix-stable payload, N4)', () => {
 		});
 	});
 
+	it('sends the old summary as a plain user turn when the region contains an old compaction entry (N8)', async () => {
+		vi.mocked(ChatService.sendMessage).mockResolvedValue('the rolled summary');
+		// The second compaction's plan runs on the effective path: the
+		// summarize region is [old summary (user role), new messages…] —
+		// never the raw history the old entry dropped.
+		const oldSummary = message(MessageRole.USER, 'OLD SUMMARY', { type: MessageType.COMPACTION });
+		const fresh = message(MessageRole.USER, 'new question');
+		const plan = { ...makePlanWithHead(), toSummarize: [oldSummary, fresh] };
+
+		await summarizeMessages(plan, null);
+
+		const sent = lastSentMessages();
+
+		expect(sent.map(({ content, role }) => ({ content, role }))).toEqual([
+			{ content: 'be terse', role: MessageRole.SYSTEM },
+			{ content: 'OLD SUMMARY', role: MessageRole.USER },
+			{ content: 'new question', role: MessageRole.USER },
+			{ content: DEFAULT_SUMMARY_PROMPT, role: MessageRole.USER }
+		]);
+	});
+
 	it('split-turn variant only swaps the trailing instruction (prefix identical)', async () => {
 		vi.mocked(ChatService.sendMessage).mockResolvedValue('the summary');
 		// One shared plan for both calls: the point of the test is that only the

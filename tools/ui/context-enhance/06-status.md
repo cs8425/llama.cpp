@@ -3,18 +3,21 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新；2026-10-18：N8 分析 + 規劃完成、**未實做**——第二次（及之後）
+> **恢復點（最新；N8 **已實做**（N8.1–N8.3 代碼完成、N8.4 待使用者編譯確認 + 手動驗收）——第二次（及之後）
 > 自動壓縮的 plan 是在 raw DB path 上算的 → `toSummarize` 含舊 cmp 已 drop
 > 的原始訊息 → prefix-stable summary 呼叫把整段原始歷史重送 → context
 > overflow、summary 無法產生（fail-open、不建 cmp）→ agentic loop 卡在超標
 > context。修正 = 新 `effectiveCompactionPath()`（context-builder.ts、與
-> `buildLlmContext` 共用窗口解析）+ 兩個 planning 呼叫點餵它；根因 / 邊界
-> 情境 / 測試計畫見 §3.27、執行清單見 05-N8）**：
+> `buildLlmContext` 共用窗口解析 `resolveCompactionWindow`）+ 兩個 planning
+> 呼叫點餵它（`planPath`）；根因 / 邊界情境 / 測試計畫見 §3.27、執行清單見
+> 05-N8 / §5d）**：
 >
 > **剩（依序）**：
-> 1. **N8 實做**（05-N8 清單；3 來源檔 + 3 unit 檔；手動驗收 = 使用者原始
->    場景：agentic loop 連壓兩次）。
-> 2. **手動驗收（未做、可一併驗）**：N7 5 項（05-§3 #8–#12）+ Phase 1 5.8
+> 1. **N8.4 編譯確認（使用者執行）**：`npm run check` + 3 支 unit 檔
+>    （`context-builder` / `compaction-policy` / `summarize`）+ 既有 5 支
+>    client compaction suite 零改動全綠。
+> 2. **N8.4 手動驗收**（= 使用者原始場景：agentic loop 連壓兩次）+
+>    **其他手動驗收（未做、可一併驗）**：N7 5 項（05-§3 #8–#12）+ Phase 1 5.8
 >    （§4 清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）。
 > 3. Phase 3 可選後續（05-§1）。
 >
@@ -34,7 +37,7 @@
 | Phase 3 — 可選後續 | ⬜ |
 | v4 — 真實 token 計數（§3.24/§3.25） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` 82/82 / `context-builder` / `summarize` + client `context-inspector` / `chat-message-compaction` / `context-gauge-compaction` / `compaction-decision-card` / `settings-registry-invariants` 全綠；第一輪 9 失敗已修、3 根因全在測試檔，見 §3.25 / 檔首恢復點；05-v4 清單已全勾） |
 | N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（§3.26/§2u） | ✅ **完成並確認**（2026-11-04：四輪跑測 8 支失敗全在測試檔已修、來源碼零改動；使用者重跑 `chat-message-compaction` 11/11 + check + 4 回歸檔全綠；queue 不 block + 指標列 + per-conv `compactingConvId` + sendMessage guard + finalizer 自動送 + client 11 支；手動驗收 #8–#12 未做） |
-| N8 — 第二次壓縮：plan 改在 effective path（bug 修正；§3.27） | 🚧 分析 + 規劃完成（2026-10-18）、**未實做**（執行清單 05-N8 / §5d） |
+| N8 — 第二次壓縮：plan 改在 effective path（bug 修正；§3.27） | 🚧 N8.1–N8.3 已實做（3 來源檔 + 3 unit 檔；N8.4 待使用者編譯確認 + 手動驗收；執行清單 05-N8 / §5d） |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
@@ -1589,8 +1592,11 @@ summary 呼叫 = [system, cmp_1 (user), 101..cut, instruction]   ← 放得下 c
 
 #### 狀態
 
-- ⬜ **未實做**（2026-10-18 分析 + 規劃完成；使用者已確認問題與方案）。
-- 實做依 05-N8 / §5d 清單；完成後更新檔首恢復點 / §1 / §4 並勾 05-N8。
+- 🚧 **N8.1–N8.3 已實做**（N8.1 `resolveCompactionWindow` + `CompactionWindow`
+  + `effectiveCompactionPath` export + barrel；N8.2 兩呼叫點餵 `planPath`、
+  下游零改動；N8.3 三 unit 檔新增 10 用例：context-builder 7 /
+  compaction-policy 2 / summarize 1）；N8.4 待使用者編譯確認 + 手動驗收。
+- N8.4 通過後更新檔首恢復點 / §1 / §4 並勾 05-N8。
 
 ## 4. 驗證狀態
 
@@ -1996,27 +2002,28 @@ static async createCompactionMessage(params: {
 > overflow。修正：新 `effectiveCompactionPath()` + 兩呼叫點餵它。
 
 ### N8.1 `effectiveCompactionPath`（`services/context/context-builder.ts`）
-- [ ] 抽 `buildLlmContext` 現行窗口解析為共用內部 helper（I1 head / I2 最後一筆
-      生效 / I3 fail-open）
-- [ ] 新 export 純函式 `effectiveCompactionPath(path)`：無 cmp → 原樣；boundary
+- [x] 抽 `buildLlmContext` 現行窗口解析為共用內部 helper（I1 head / I2 最後一筆
+      生效 / I3 fail-open）→ `resolveCompactionWindow` + `CompactionWindow`
+- [x] 新 export 純函式 `effectiveCompactionPath(path)`：無 cmp → 原樣；boundary
       失效 → raw（fail-open）；否則 → `[...head, entry, ...kept]`（entry 留陣列
-      當一般節點）
+      當一般節點）；barrel `index.ts` 同步 export
 
 ### N8.2 兩個 planning 呼叫點改餵 effective path
-- [ ] `stores/agentic/index.svelte.ts` `compactBetweenTurns`：
-      `planCompaction*(effectiveCompactionPath(path), …)`
-- [ ] `stores/chat/index.svelte.ts` `compactConversation`：同上（涵蓋 post-flow
+- [x] `stores/agentic/index.svelte.ts` `compactBetweenTurns`：
+      `planCompaction*(effectiveCompactionPath(path), …)`（`planPath` 變數）
+- [x] `stores/chat/index.svelte.ts` `compactConversation`：同上（涵蓋 post-flow
       auto + 手動 Compact now）
-- [ ] 確認下游零改動（`parentId` / `preCompactionPath` / `triggerPreEncode` /
+- [x] 確認下游零改動（`parentId` / `preCompactionPath` / `triggerPreEncode` /
       `sessionMessages` 重建 / cmp meta）
 
 ### N8.3 unit
-- [ ] `context-builder.test.ts`：`effectiveCompactionPath` suite（無 entry / 單
+- [x] `context-builder.test.ts`：`effectiveCompactionPath` suite（無 entry / 單
       cmp / 空 kept / I3 ×2 / entry 後追加訊息 / 舊 cmp 落 kept 區）
-- [ ] `compaction-policy.test.ts`：「第二次壓縮」向量（effective path → plan：
+- [x] `compaction-policy.test.ts`：「第二次壓縮」向量（effective path → plan：
       summarize 區排除已 drop 原始訊息 / `firstKeptMessageId` 來自 cmp 後區域 /
-      `summarizeTokens` ≈ effective 規模）
-- [ ] `summarize.test.ts`：prefix-stable payload「path 已含舊 cmp」向量（=
+      `summarizeTokens` ≈ effective 規模；mode A + B 各一組；新增 chat.service
+      mock + `effectiveCompactionPath` import）
+- [x] `summarize.test.ts`：prefix-stable payload「path 已含舊 cmp」向量（=
       `[system, 舊summary, 新訊息, instruction]`）
 
 ### N8.4 回歸 + 驗收

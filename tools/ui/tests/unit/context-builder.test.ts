@@ -6,7 +6,11 @@
 // normalizeMessagesForApi, v4).
 
 import { MessageRole, MessageType } from '$lib/enums';
-import { buildLlmContext, findLastCompactionEntry } from '$lib/services/context/context-builder';
+import {
+	buildLlmContext,
+	effectiveCompactionPath,
+	findLastCompactionEntry
+} from '$lib/services/context/context-builder';
 import type { CompactionMeta, DatabaseMessage } from '$lib/types/database';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -316,5 +320,92 @@ describe('buildLlmContext', () => {
 			role: MessageRole.ASSISTANT,
 			sourceId: a1.id
 		});
+	});
+});
+
+// effectiveCompactionPath (N8, 06-status §3.27): the planning input — the
+// path as the LLM sees it after the builder applies the in-effect entry. It
+// must mirror buildLlmContext's window resolution exactly (I1/I2/I3).
+describe('effectiveCompactionPath (N8: the planning input)', () => {
+	it('returns the path as-is when no compaction entry exists', () => {
+		const sys = message(MessageRole.SYSTEM, 'sys');
+		const u1 = message(MessageRole.USER, 'q1');
+		const a1 = message(MessageRole.ASSISTANT, 'a1');
+		const path = [sys, u1, a1];
+
+		expect(effectiveCompactionPath(path)).toBe(path);
+	});
+
+	it('collapses to [system, entry, kept…] for a single compaction entry', () => {
+		const sys = message(MessageRole.SYSTEM, 'sys');
+		const u1 = message(MessageRole.USER, 'q1');
+		const a1 = message(MessageRole.ASSISTANT, 'a1');
+		const u2 = message(MessageRole.USER, 'q2');
+		const a2 = message(MessageRole.ASSISTANT, 'a2');
+		const cmp = compaction('SUMMARY', u2.id);
+
+		const effective = effectiveCompactionPath([sys, u1, a1, u2, a2, cmp]);
+
+		// the dropped raw history (u1, a1) is gone; the entry rides as a node
+		expect(effective.map((m) => m.id)).toEqual([sys.id, cmp.id, u2.id, a2.id]);
+	});
+
+	it('collapses to [system, entry] for an empty-kept entry (all compacted)', () => {
+		const sys = message(MessageRole.SYSTEM, 'sys');
+		const u1 = message(MessageRole.USER, 'q1');
+		const a1 = message(MessageRole.ASSISTANT, 'a1');
+		const cmp = compaction('SUMMARY', undefined);
+
+		const effective = effectiveCompactionPath([sys, u1, a1, cmp]);
+
+		expect(effective.map((m) => m.id)).toEqual([sys.id, cmp.id]);
+	});
+
+	it('keeps messages appended after the entry', () => {
+		const sys = message(MessageRole.SYSTEM, 'sys');
+		const u1 = message(MessageRole.USER, 'q1');
+		const a1 = message(MessageRole.ASSISTANT, 'a1');
+		const cmp = compaction('SUMMARY', undefined);
+		const u2 = message(MessageRole.USER, 'q2');
+		const a2 = message(MessageRole.ASSISTANT, 'a2');
+
+		const effective = effectiveCompactionPath([sys, u1, a1, cmp, u2, a2]);
+
+		expect(effective.map((m) => m.id)).toEqual([sys.id, cmp.id, u2.id, a2.id]);
+	});
+
+	it('fails open (the raw path) when the boundary id no longer exists (I3)', () => {
+		const sys = message(MessageRole.SYSTEM, 'sys');
+		const u1 = message(MessageRole.USER, 'q1');
+		const a1 = message(MessageRole.ASSISTANT, 'a1');
+		const cmp = compaction('SUMMARY', 'deleted-message-id');
+		const path = [sys, u1, a1, cmp];
+
+		expect(effectiveCompactionPath(path)).toBe(path);
+	});
+
+	it('fails open (the raw path) when the boundary points at the system prompt (I3)', () => {
+		const sys = message(MessageRole.SYSTEM, 'sys');
+		const u1 = message(MessageRole.USER, 'q1');
+		const cmp = compaction('SUMMARY', sys.id);
+		const path = [sys, u1, cmp];
+
+		expect(effectiveCompactionPath(path)).toBe(path);
+	});
+
+	it('keeps an older compaction entry in the kept region as a plain node (I2)', () => {
+		const sys = message(MessageRole.SYSTEM, 'sys');
+		const u1 = message(MessageRole.USER, 'q1');
+		const a1 = message(MessageRole.ASSISTANT, 'a1');
+		const cmp1 = compaction('OLD SUMMARY', u1.id);
+		const u2 = message(MessageRole.USER, 'q2');
+		const a2 = message(MessageRole.ASSISTANT, 'a2');
+		// the newer entry's boundary points before cmp1, so cmp1 is kept
+		const cmp2 = compaction('NEW SUMMARY', a1.id);
+
+		const effective = effectiveCompactionPath([sys, u1, a1, cmp1, u2, a2, cmp2]);
+
+		// only the last entry is in effect; cmp1 stays as a plain user node
+		expect(effective.map((m) => m.id)).toEqual([sys.id, cmp2.id, a1.id, cmp1.id, u2.id, a2.id]);
 	});
 });

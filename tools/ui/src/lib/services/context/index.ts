@@ -10,7 +10,7 @@
  * material only.
  */
 
-export { buildLlmContext, findLastCompactionEntry } from './context-builder';
+export { buildLlmContext, effectiveCompactionPath, findLastCompactionEntry } from './context-builder';
 export {
 	apiMessageBytes,
 	computeCompactionBudget,

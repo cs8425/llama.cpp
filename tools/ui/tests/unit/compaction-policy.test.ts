@@ -37,11 +37,23 @@ import {
 	tailStartOf,
 	toCompactionMode
 } from '$lib/services/context/compaction-policy';
+import { effectiveCompactionPath } from '$lib/services/context/context-builder';
 import type { CompactionSettings, RecentWindowOptions } from '$lib/services/context/compaction-policy';
 import type { CompactionBudget, CompactionPlan } from '$lib/services/context/types';
 import type { ApiChatMessageData } from '$lib/types/api';
 import type { DatabaseMessage, DatabaseMessageExtra } from '$lib/types/database';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// context-builder (effectiveCompactionPath) imports ChatService only at call
+// time; mock the module so the unit project does not pull the Svelte stores.
+vi.mock('$lib/services/chat.service', () => ({
+	ChatService: {
+		convertDbMessageToApiChatMessageData: vi.fn(async (m: DatabaseMessage) => ({
+			content: m.content,
+			role: m.role
+		}))
+	}
+}));
 
 function message(
 	id: string,
@@ -1243,5 +1255,69 @@ describe('estimateCompactionSavings (real tokens, v4)', () => {
 		];
 
 		expect(estimateCompactionSavings(path, cmp)).toBe(0);
+	});
+});
+
+// Second compaction (N8, 06-status §3.27): the plan must run on the
+// EFFECTIVE path (effectiveCompactionPath → planner) so the summarize region
+// never re-includes the messages an older entry already dropped.
+describe('second compaction (plan on the effective path, N8)', () => {
+	function compactionEntry(
+		id: string,
+		content: string,
+		firstKeptMessageId: string | undefined
+	): DatabaseMessage {
+		return message(id, MessageRole.USER, content, {
+			compactionMeta: { firstKeptMessageId, summarizedCount: 2 },
+			type: MessageType.COMPACTION
+		});
+	}
+
+	// Raw path: the first compaction (cmp1) already summarized u0/a0 — the
+	// effective path is [sys, cmp1, u1..a2]. Real tokens on the effective
+	// path: cmp1 = first segment (a1.prompt 5000), a1 1000, u2 = 6200 − 5000
+	// − 1000 = 200, a2 400 → total 6600 (the raw path would total 13200).
+	function rawPath(): DatabaseMessage[] {
+		return [
+			message('sys', MessageRole.SYSTEM, 'system'),
+			message('u0', MessageRole.USER, 'x'.repeat(40000)),
+			assistantTimed('a0', 'a0', 10000, 1600),
+			compactionEntry('cmp1', 'OLD SUMMARY', 'u1'),
+			message('u1', MessageRole.USER, 'x'.repeat(4000)),
+			assistantTimed('a1', 'a1', 5000, 1000),
+			message('u2', MessageRole.USER, 'q2'),
+			assistantTimed('a2', 'a2', 6200, 400)
+		];
+	}
+
+	it('mode B: the summarize region is the effective prefix (old summary + new messages, no dropped raw history)', () => {
+		const plan = planCompaction(effectiveCompactionPath(rawPath()), budget(600, { minKeptUserTurns: 1 }));
+
+		expect(plan).not.toBeNull();
+		expect(plan?.isSplitTurn).toBe(false);
+		// toSummarize = [cmp1, a1] on the effective path — u0/a0 (already
+		// covered by the old summary) are NOT re-summarized
+		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['cmp1', 'a1']);
+		// the boundary comes from the post-cmp region
+		expect(plan?.firstKeptMessageId).toBe('u2');
+		expect(plan?.kept.map((m) => m.id)).toEqual(['u2', 'a2']);
+		// token accounting prices the effective scale (6600), not the raw one
+		expect(plan?.keptTokens).toBe(600);
+		expect(plan?.estimatedTokensBefore).toBe(6600);
+		expect(plan?.estimatedTokensAfter).toBe(600);
+		expect(plan?.systemHead?.id).toBe('sys');
+	});
+
+	it('mode A: the walk runs on the effective path (same region, effective scale)', () => {
+		const plan = planCompactionRecentWindow(effectiveCompactionPath(rawPath()), rw(600));
+
+		expect(plan).not.toBeNull();
+		expect(plan?.isSplitTurn).toBe(false);
+		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['cmp1', 'a1']);
+		expect(plan?.firstKeptMessageId).toBe('u2');
+		expect(plan?.kept.map((m) => m.id)).toEqual(['u2', 'a2']);
+		expect(plan?.keptTokens).toBe(600);
+		expect(plan?.estimatedTokensBefore).toBe(6600);
+		expect(plan?.estimatedTokensAfter).toBe(600);
 	});
 });

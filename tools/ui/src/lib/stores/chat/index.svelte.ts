@@ -25,6 +25,7 @@ import {
 	computeCompactionBudget,
 	computeSummaryMaxTokens,
 	deriveRealMessageTokens,
+	effectiveCompactionPath,
 	messageSize,
 	MIN_SUMMARIZE_TOKENS,
 	planCompaction,
@@ -614,15 +615,22 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 					return;
 			}
 
+			// N8: plan on the effective path (the builder's view after the
+			// in-effect compaction entry) — on the raw path the summarize
+			// region would re-include messages the old entry already dropped
+			// (06-status §3.27). The raw `path` stays the source for the
+			// entry's parentId and the pre-compaction snapshot below.
+			const planPath = effectiveCompactionPath(path);
+
 			const plan =
 				mode === 'recent-window'
-					? planCompactionRecentWindow(path, {
+					? planCompactionRecentWindow(planPath, {
 							keepRecentTokens: config.contextKeepRecentTokens,
 							minKeptMessages: config.contextKeepMinMessages,
 							minKeptUserTurns: config.contextKeepMinUserTurns,
 							minSummarizeTokens: MIN_SUMMARIZE_TOKENS
 						})
-					: planCompaction(path, computeCompactionBudget(nCtx, config));
+					: planCompaction(planPath, computeCompactionBudget(nCtx, config));
 
 			if (!plan) {
 				if (!auto) toast.info('No range to compact');
