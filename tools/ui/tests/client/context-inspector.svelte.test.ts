@@ -181,7 +181,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 	conversationsStore.activeMessages = [];
 	conversationsStore.activeConversation = null;
-	contextStatsStore.compacting = false;
+	contextStatsStore.setCompacting(null);
 });
 
 // --- tests -----------------------------------------------------------------
@@ -456,7 +456,8 @@ describe('DialogContextInspector (actions, Phase 2 P2.4)', () => {
 	it('shows a Stop button in place of the actions while compacting', async () => {
 		buildCompactedFixture();
 		setActiveConversation();
-		contextStatsStore.compacting = true;
+		// N7: the compacting state is per-conversation
+		contextStatsStore.setCompacting('insp-conv');
 
 		const { unmount } = await openInspector();
 
@@ -485,7 +486,7 @@ describe('DialogContextInspector (actions, Phase 2 P2.4)', () => {
 	it('Stop calls stopCompaction while a summary is in flight', async () => {
 		buildCompactedFixture();
 		setActiveConversation();
-		contextStatsStore.compacting = true;
+		contextStatsStore.setCompacting('insp-conv');
 		const stopSpy = vi.spyOn(chatStore, 'stopCompaction');
 
 		const { unmount } = await openInspector();

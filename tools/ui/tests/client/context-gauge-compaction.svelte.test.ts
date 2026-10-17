@@ -117,7 +117,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 	conversationsStore.activeMessages = [];
 	conversationsStore.activeConversation = null;
-	contextStatsStore.compacting = false;
+	contextStatsStore.setCompacting(null);
 	chatStore.showContextInspector = false;
 	gaugePopup.open = false;
 });
@@ -131,7 +131,10 @@ describe('gauge popup compaction row (Phase 2 P2.6)', () => {
 
 	it('shows "Compacting context…" with a spinner while a summary call runs', async () => {
 		buildCompactedFixture();
-		contextStatsStore.compacting = true;
+		// N7: the compacting state is per-conversation — the row shows only for
+		// the active conversation's own in-flight summary
+		setActiveConversation();
+		contextStatsStore.setCompacting('gauge-conv');
 
 		openGauge();
 
