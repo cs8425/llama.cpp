@@ -1275,8 +1275,9 @@ describe('second compaction (plan on the effective path, N8)', () => {
 
 	// Raw path: the first compaction (cmp1) already summarized u0/a0 — the
 	// effective path is [sys, cmp1, u1..a2]. Real tokens on the effective
-	// path: cmp1 = first segment (a1.prompt 5000), a1 1000, u2 = 6200 − 5000
-	// − 1000 = 200, a2 400 → total 6600 (the raw path would total 13200).
+	// path: u1 = first segment (a1.prompt 5000; cmp1 counts 0), a1 1000,
+	// u2 = 6200 − 5000 − 1000 = 200, a2 400 → total 6600 (the raw path would
+	// total 13200).
 	function rawPath(): DatabaseMessage[] {
 		return [
 			message('sys', MessageRole.SYSTEM, 'system'),
@@ -1295,9 +1296,10 @@ describe('second compaction (plan on the effective path, N8)', () => {
 
 		expect(plan).not.toBeNull();
 		expect(plan?.isSplitTurn).toBe(false);
-		// toSummarize = [cmp1, a1] on the effective path — u0/a0 (already
-		// covered by the old summary) are NOT re-summarized
-		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['cmp1', 'a1']);
+		// toSummarize = [cmp1, u1, a1] on the effective path — u0/a0 (already
+		// covered by the old summary) are NOT re-summarized; u1 IS (it is in
+		// the kept region of cmp1, so it is in the effective path)
+		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['cmp1', 'u1', 'a1']);
 		// the boundary comes from the post-cmp region
 		expect(plan?.firstKeptMessageId).toBe('u2');
 		expect(plan?.kept.map((m) => m.id)).toEqual(['u2', 'a2']);
@@ -1313,7 +1315,7 @@ describe('second compaction (plan on the effective path, N8)', () => {
 
 		expect(plan).not.toBeNull();
 		expect(plan?.isSplitTurn).toBe(false);
-		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['cmp1', 'a1']);
+		expect(plan?.toSummarize.map((m) => m.id)).toEqual(['cmp1', 'u1', 'a1']);
 		expect(plan?.firstKeptMessageId).toBe('u2');
 		expect(plan?.kept.map((m) => m.id)).toEqual(['u2', 'a2']);
 		expect(plan?.keptTokens).toBe(600);

@@ -3,7 +3,9 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新；N8 **已實做**（N8.1–N8.3 代碼完成、N8.4 待使用者編譯確認 + 手動驗收）——第二次（及之後）
+> **恢復點（最新；N8 **已實做**（N8.1–N8.3 代碼完成；N8.4 第一輪 unit 跑測 2
+> 失敗全在測試檔已修（N8 向量期望值 `toSummarize` 漏 `'u1'` 筆誤、來源碼零
+> 改動，見 §3.27 狀態）、待使用者重跑編譯確認 + 手動驗收）——第二次（及之後）
 > 自動壓縮的 plan 是在 raw DB path 上算的 → `toSummarize` 含舊 cmp 已 drop
 > 的原始訊息 → prefix-stable summary 呼叫把整段原始歷史重送 → context
 > overflow、summary 無法產生（fail-open、不建 cmp）→ agentic loop 卡在超標
@@ -1596,6 +1598,17 @@ summary 呼叫 = [system, cmp_1 (user), 101..cut, instruction]   ← 放得下 c
   + `effectiveCompactionPath` export + barrel；N8.2 兩呼叫點餵 `planPath`、
   下游零改動；N8.3 三 unit 檔新增 10 用例：context-builder 7 /
   compaction-policy 2 / summarize 1）；N8.4 待使用者編譯確認 + 手動驗收。
+- **N8.4 第一輪 unit 跑測（2026-10-18）：2 失敗全在測試檔已修、來源碼零
+  改動。** `compaction-policy.test.ts` N8「第二次壓縮」向量兩筆期望值
+  `toSummarize = ['cmp1', 'a1']` 筆誤：測試自己的 fixture（`cmp1.
+  firstKeptMessageId = 'u1'`）把 u1 放在 effective path 內、自己又斷言切點
+  在 u2（`firstKeptMessageId = 'u2'`、`kept = [u2, a2]`）→ plan 的連續分割
+  契約下 `toSummarize` 必然是 `[cmp1, u1, a1]`（u0/a0 才是不重摘要的已 drop
+  區）；原期望讓 u1 憑空消失、任何實作都不可達。其餘斷言（keptTokens
+  600 / before 6600 / after 600 / isSplitTurn false / systemHead）全部吻合
+  實作（已模擬驗證兩 mode 切點皆落 u2）。修正 = 兩筆期望陣列補 `'u1'`
+  + 兩筆註解（含「cmp1 = first segment」誤標——v4 規則第一段總和歸段內
+  最後非-assistant = u1、cmp1 計 0）。待使用者重跑確認。
 - N8.4 通過後更新檔首恢復點 / §1 / §4 並勾 05-N8。
 
 ## 4. 驗證狀態
