@@ -167,6 +167,14 @@ Split user-message span (one span exceeds budget):
 共用:合法切點(I4)、安全下限(I5、minSummarizeTokens)、計數規則(§3.4);
 差異:觸發公式(§6)、budget/停止規則、成功判定式(§6)。
 
+> **planning 輸入 = effective path(N8,2026-10-18)**:以下演算法的 `path`
+> 不是 raw DB path,而是 `buildLlmContext` 套用既有 cmp 後的 path(LLM 實際
+> 看到的:`[system, 舊summary, kept…]`;無 cmp = raw path)。第二次(及之後)
+> 壓縮時,舊 cmp 節點以一般 user 訊息身分在 summarize 區(rolling summary,
+> 見 §4「第二次壓縮」);舊 cmp 已 drop 的原始訊息**不**重送。實做:新
+> `effectiveCompactionPath()`(context-builder.ts,與 builder 共用窗口
+> 解析)+ 兩個 planning 呼叫點餵它(06-status §3.27 / 05-N8)。
+
 #### 3.3.1 Mode A — recent-window(pi reference;下限:「至少留最近 ~keepRecentTokens」)
 
 ```
@@ -278,7 +286,7 @@ mode B 切點原本「byte 對 token budget」的錯配順手修好。
 | agentic flow 進行中(context 逼近上限) | turn 之間(非 streaming 中)觸發:建 cmp(parent=最後一則)→ 重建 in-memory `sessionMessages` → 續跑;flow 中斷時 cmp 已落 DB,狀態一致 | §6 |
 | split 切後 flow 繼續追加 turns | 新訊息接在 cmp 之後;下次壓縮照「最後一筆 cmp 生效」(I2)涵蓋它 | I2 |
 | 該 span 的 user 訊息被 summarize 後,user 又編輯了它 | 編輯落在 summarize 區:不影響送出(不在 kept 區);summary 文字不自動更新,可手動「重新摘要」 | — |
-| 第二次壓縮(已有一筆 cmp) | 新 cmp 的 summarize 區包含舊 cmp 節點(它在路徑上、在斷點之前);舊 cmp 被 drop,新 summary 涵蓋它 | I2 |
+| 第二次壓縮(已有一筆 cmp) | plan 在 **effective path**(builder 觀點,N8/06-§3.27)上:新 cmp 的 summarize 區 = effective path 前綴(含舊 cmp 節點,rolling summary);舊 cmp 已 drop 的原始訊息不重送;舊 cmp 被 drop,新 summary 涵蓋它 | I2 |
 | 第二次壓縮的斷點落在**舊 cmp 之後**(kept 區含舊 cmp) | 舊 cmp 按一般 user 訊息送出(content=舊 summary) | I2 |
 | User 在 cmp **之前**的訊息 branch/regenerate | 新分支路徑不經過 cmp → 全量 context | 路徑定義 |
 | User 在 cmp **之後** branch | 路徑仍含 cmp → 分支也壓縮 | I6 |

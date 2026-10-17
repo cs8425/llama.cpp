@@ -15,7 +15,12 @@
 > default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status §3.18）；
 > **N5 ✅ 完成並確認**（新設定 `contextSummaryMode`：summary 的 prompt
 > 模式開放給 user 選，見 06-status §3.19））。
-> **目前停點**：**N7 壓縮進行中（queue + in-chat 指標列 + Stop）✅ 完成並確認**
+> **目前停點**：**N8 第二次壓縮：plan 改在 effective path（bug 修正）— 分析 +
+> 規劃完成、未實做**（2026-10-18；第二次（及之後）壓縮的 plan 在 raw DB path
+> 上算 → summary 呼叫重送舊 cmp 已 drop 的原始歷史 → context overflow、
+> summary 無法產生、agentic loop 卡死；修正 = 新 `effectiveCompactionPath()`
+> + 兩個 planning 呼叫點餵它；見 06-status §3.27 / 05-N8）。此前：**N7 壓縮
+> 進行中（queue + in-chat 指標列 + Stop）✅ 完成並確認**
 > （2026-11-04；四輪 client 跑測 8 支失敗全在測試檔已修、來源碼零改動，使用者
 > 重跑 `chat-message-compaction` 11/11 + `npm run check` + 4 回歸檔全綠、
 > 05-N7 清單已勾；明細見 06-status 檔首恢復點 / §2u / §3.26）。此前：**v4 真實 token 計數 ✅ 完成並確認**
@@ -37,7 +42,8 @@
 > N6（split 切允許空 kept，2026-10-17）；N1–N5（2026-07-22：summary 上限
 > n_ctx × % / keep target 設定 / Stop 鍵 / prefix-stable default /
 > `contextSummaryMode` 設定）。
-> **剩**：**手動驗收（未做、可一併驗）**：N7 5 項（05-§3 #8–#12）+ Phase 1 5.8
+> **剩**：**N8 實做（未做、最優先；05-N8 清單）** +
+> **手動驗收（未做、可一併驗）**：N7 5 項（05-§3 #8–#12）+ Phase 1 5.8
 > （見 06-status §4 清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）+ Phase 3
 > 可選後續（兩段式 summary / per-conversation
 > 覆蓋 / 合併重摘要提示 / summary 獨立 model / endpoint / gauge savings

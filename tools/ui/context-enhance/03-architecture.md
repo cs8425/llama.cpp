@@ -8,7 +8,7 @@
 ```
 src/lib/services/context/            ← 新增,純函式、無 store 依賴、可獨立單測
 ├── types.ts              # LlmContext、CompactionPlan、ContextBuildResult
-├── context-builder.ts    # buildLlmContext(path) —— 唯一 choke point
+├── context-builder.ts    # buildLlmContext(path) —— 唯一 choke point;effectiveCompactionPath(path)(N8:套用 cmp 後的 path = planning 輸入)
 ├── compaction-policy.ts  # planCompaction(B) / planCompactionRecentWindow(A) / deriveRealMessageTokens / messageSize(真實 token) / messageBytes
 ├── summarize.ts          # buildSummaryTranscript() / summarizeMessages()
 └── index.ts
@@ -76,6 +76,11 @@ export async function buildLlmContext(
   path: DatabaseMessage[],
   opts?: { excludeReasoning?: boolean }   // 沿用現有開關的語義
 ): Promise<ContextBuildResult>;
+
+// N8:套用既有 cmp 後的 path(= planning 輸入;與 buildLlmContext 共用窗口
+// 解析,結構上保證「planning 輸入 == builder 輸入」)。無 cmp / boundary
+// 失效(I3)→ 原 path;否則 → [system?, cmp, kept…]。
+export function effectiveCompactionPath(path: DatabaseMessage[]): DatabaseMessage[];
 
 // services/context/compaction-policy.ts
 export function deriveRealMessageTokens(path: DatabaseMessage[]): Map<string, number>;  // 真實 per-message(assistant=predicted_n、段總和,§02-3.4)
@@ -180,8 +185,9 @@ onFlowComplete(且 !isChatLoading && !agenticStore.isRunning)
       A: contextUsed > window − keepRecentTokens ?(window = min(n_ctx, override))
       B: contextUsed > n_ctx × threshold% ?
       → 未達? 結束
-  → plan = mode A: planCompactionRecentWindow(path, keep)
-           mode B: planCompaction(path, budget = (threshold − keepTarget)% × n_ctx)
+  → plan = mode A: planCompactionRecentWindow(effective path, keep)
+           mode B: planCompaction(effective path, budget = (threshold − keepTarget)% × n_ctx)
+     (effective path = buildLlmContext 套用既有 cmp 後的 path,N8/06-§3.27)
       → null? 結束(不壓)
   → summarizeMessages(plan)      (UI:「Compacting context…」)
       → 失敗? toast,結束(不壓)
@@ -223,7 +229,7 @@ onFlowComplete(且 !isChatLoading && !agenticStore.isRunning)
 ```
 executeAgenticLoop turn k 結束(tool results 已落 DB + activeMessages)
   → 觸發檢查(mode 特定):A: contextUsed > window − keep ? B: contextUsed > n_ctx × threshold% ?(contextUsed = 真實 KV,gauge 同源)
-      → plan(mode A: planCompactionRecentWindow / mode B: planCompaction,該 conv 的 DB 路徑)
+      → plan(mode A: planCompactionRecentWindow / mode B: planCompaction,該 conv 的 **effective path**(N8))
           → null / 失敗? 續跑
       → summarize(plan)  (UI:「Compacting context…」,signal = flow abort)
       → 成功判定/重試/gate(共用;判定式 mode 特定,§02-6)
