@@ -195,14 +195,21 @@
 payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點可前移
 恢復 kept;無 cmp 對話行為不變。
 
-### v4 — 真實 token 計數（2026-10-17 使用者定稿；🚧 來源碼 + 全部測試更新完成並靜態核實，待使用者編譯驗證）
+### v4 — 真實 token 計數（2026-10-17 使用者定稿；✅ 完成並確認 2026-10-17）
 
 > 背景:Context Inspector 的「Estimated send」與每則「~N tok」用
 > `estimateTokens`/`estimateApiMessageTokens` 的 **UTF-8 byte 數**當 token 顯示、
 > 並除 n_ctx(token)→ 數字與 gauge(真實 `contextUsed`)永遠對不上(380,513 vs
 > 153,939,≈2.5 bytes/token)。使用者決策:切點/觸發/成功判定/Inspector **全用真實
 > token**,估算僅限無資料例外;設定數字不變(現為 token 尺度)。設計:02-§3.4(v4)、
-> 04-§2/§3/§4;決策記錄見 06-status §3.24;實做明細 + 剩餘工作見 06-status §3.25。
+> 04-§2/§3/§4;決策記錄見 06-status §3.24;實做明細見 06-status §3.25。
+>
+> **狀態（2026-10-17）**:✅ **完成並確認**——使用者完整指令全綠（`npm run
+> check` + unit `compaction-policy` 82/82 / `context-builder` / `summarize` +
+> client `context-inspector` / `chat-message-compaction` /
+> `context-gauge-compaction` / `compaction-decision-card` /
+> `settings-registry-invariants`;第一輪 9 失敗已修、3 根因全在測試檔,見
+> 06-status 檔首恢復點 / §3.25）。下列清單全部勾選。
 
 - [x] `compaction-policy.ts`:新增純函式 `deriveRealMessageTokens(path) →
       Map<dbId, number>`(assistant=`predicted_n`;每段非-assistant 真實總和歸該段
@@ -228,9 +235,8 @@ payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點�
       `messageSize`(真實/尾端 bytes/4/非尾端 0);切點 A/B + 成功判定吃真實 token;
       觸發 `contextUsed`(=0 不觸發)——`compaction-policy.test.ts` 全數重寫完成
 - [x] client:Inspector 標題＝gauge、主欄真實/`-`/`est.`、副欄 bytes+bytes/4;
-      cmp「N→M」真實（2026-10-17 本輪 4 client 測試全數更新完成並靜態核實,
-      逐檔明細見 06-status §3.25；含修 `DialogContextInspector` `row.tokens`
-      模板殘留 bug；待使用者編譯驗證）
+      cmp「N→M」真實（4 client 測試全數更新,逐檔明細見 06-status §3.25；含修
+      `DialogContextInspector` `row.tokens` 模板殘留 bug；使用者編譯驗證全綠）
 - [x] 回歸:`compaction-policy` ✅ 已重寫 / `context-builder` 已改 token 尺度
       期望值 + `sourceId` 斷言（mock 改 `convertDbMessageToApiChatMessageData`）
       / `summarize` 3 處 `CompactionPlan` literal 補 `keptTokens` /
@@ -271,6 +277,9 @@ payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點�
 - [ ] per-conversation 覆蓋(「此對話停用自動壓縮」,
       放 `ConversationPreferences`)
 - [ ] 舊 cmp 落在 kept 區時的「合併重摘要」提示
+- [ ] gauge「tokens saved」顯示（`estimateCompactionSavings`）：in-effect entry
+      現按 bytes/4 計入 payload（v4 tail 語義,2026-10-17 使用者決策）——僅
+      提示用途、無實質影響；若差距太大,考慮移除該顯示
 
 ## 2. 檔案清單
 

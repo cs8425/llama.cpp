@@ -15,10 +15,9 @@
 > default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status §3.18）；
 > **N5 ✅ 完成並確認**（新設定 `contextSummaryMode`：summary 的 prompt
 > 模式開放給 user 選，見 06-status §3.19））。
-> **目前停點**：**v4 真實 token 計數 🚧 待編譯驗證**（2026-10-17）——
-> 來源碼 9 檔 + 2 unit + 4 client 測試全數更新完成（已靜態核實,
-> 明細見 06-status §3.25；含修 `DialogContextInspector` `row.tokens` 模板
-> 殘留 bug），待使用者 `npm run check` + 測試驗證。v4 = 計數/觸發/成功判定/
+> **目前停點**：**v4 真實 token 計數 ✅ 完成並確認**（2026-10-17；`npm run
+> check` + unit 3 支 + client 5 支全綠,見 06-status 檔首恢復點 / §3.25）。
+> v4 = 計數/觸發/成功判定/
 > Inspector 全用真實
 > token（`deriveRealMessageTokens`：assistant=predicted_n、段真實總和歸該段
 > 最後一則非-assistant）、觸發 = 真實 `contextUsed`（gauge 同源）、無資料
@@ -36,7 +35,8 @@
 > `contextSummaryMode` 設定）。
 > **剩**：Phase 1 5.8 手動驗收（見 06-status §4 清單；A/B mode 行為 +
 > v4 顯示可一併驗）+ Phase 3 可選後續（兩段式 summary / per-conversation
-> 覆蓋 / 合併重摘要提示 / summary 獨立 model / endpoint，見 05-§1；
+> 覆蓋 / 合併重摘要提示 / summary 獨立 model / endpoint / gauge savings
+> 顯示，見 05-§1；
 > token 校準已被 v3/v4 取代）。
 
 ## 目錄

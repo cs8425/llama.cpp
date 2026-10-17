@@ -3,50 +3,34 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新；2026-10-17 本輪：v4 第一輪 `compaction-policy.test.ts` 9 支失敗
-> 全數修完——3 個根因全在測試檔、來源碼零改動；sandbox 逐式模擬驗證通過，
-> 待使用者編譯）**：
+> **恢復點（最新；2026-10-17：v4 真實 token 計數 ✅ 完成並確認——`npm run check` +
+> unit 3 支 + client 5 支全綠；無待辦實做）**：
 >
-> 本輪（第一輪 `npm run check` 10 錯 + `vitest unit compaction-policy` 9 失敗）：
-> - 🐛 **根因 1（6 失敗 + check 10 錯）**：`tests/unit/compaction-policy.test.ts`
->   漏 import `evaluateCompactionResult`（來源碼有 export）→ 補上（字母序
->   `deriveRealMessageTokens` / `estimateCompactionSavings` 之間）。
-> - 🐛 **根因 2（1 失敗：planCompaction keptTokens 2400≠3200）**：fixture 的
->   `prompt_n` 與段公式 `seg = prompt[i+1] − prompt[i] − predicted[i]` 算術不一致——
->   a4/a5 的 prompt 各少 400/800（每輪 prompt 應 = 前輪 prompt + 前輪
->   predicted + 本輪 user 400）→ 導出 u4/u5 = 0、suffix(u2) = 2400。來源碼正確，
->   改 fixture：a4 4800→5200、a5 5200→6000（u2..a5 各 400、總和 6400、
->   suffix(u2) = 3200 exact fit，符合測試原意）。
-> - 🐛 **根因 3（2 失敗：estimateCompactionSavings 1700≠1900 ×2）**：測試註解
->   假設「entry 計 0」，但 02-§3.4(v4) `messageSize(m) = 真實 ?? (尾端 ?
->   bytes/4 : 0)`——entry 在尾端（最後一則 assistant 之後）且無真實值 →
->   800B/4 = 200 計入 payload（docstring「priced with the same v4 sizes」；
->   gauge client 測試 fixture 同源）。來源碼正確，改期望 1900→1700 + 註解
->   重算（total 2100、dropped 1800、payload 300）。
-> - **實做決策待確認**（不同意可推回）：`estimateCompactionSavings` 的
->   in-effect entry 按 bytes/4 計入 payload（= v4 tail 語義）；若改回 0，
->   「tokens saved」會多算 summary 的大小（summary 可達 n_ctx 的 70%）。
-> - 驗證：sandbox 以來源碼逐式重現（`deriveRealMessageTokens` /
->   `planCompaction` / `estimateCompactionSavings` / `evaluateCompactionResult`）
->   ——修正後 4 組用例期望值全部吻合。
+> v4 本輪結案：
+> - ✅ 使用者完整指令全綠：`npm run check`（0 錯 0 警告）+ unit
+>   `compaction-policy` 82/82 / `context-builder` / `summarize` + client
+>   `context-inspector` / `chat-message-compaction` / `context-gauge-compaction` /
+>   `compaction-decision-card` / `settings-registry-invariants`。
+> - 第一輪 `compaction-policy.test.ts` 9 支失敗已於前輪全數修完（3 根因全在
+>   測試檔、來源碼零改動；明細見 §3.25「測試」第一輪修復）。
+> - ✅ **使用者決策（已確認）**：`estimateCompactionSavings` 的 in-effect entry
+>   **暫時**按 bytes/4 計入 payload（= v4 tail 語義）——用途只有提示 user 省了
+>   多少 token、無實質影響；若差距太大，後續可考慮移除該顯示（已列 05-Phase 3
+>   可選）。
+> - ✅ §3.25「實做決策待確認」全數隨 v4 結案確認（無推回）：非 active 對話
+>   in-loop trigger = 該 turn 真實 prompt_n；負段總和 clamp 0；成功判定不加
+>   system head（A: postSize = summary + kept）；toast after =
+>   plan.estimatedTokensAfter + resolveSummarySize(summary.tokens, cmp.content)；
+>   `estimateApiMessageTokens` 一併改名 `apiMessageBytes`。
 >
-> **下一步（依序）**：
-> 1. 使用者跑：`npm run check` +
->    `npx vitest --project=unit --run tests/unit/compaction-policy.test.ts tests/unit/context-builder.test.ts tests/unit/summarize.test.ts`
->    + `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts tests/client/chat-message-compaction.svelte.test.ts tests/client/context-gauge-compaction.svelte.test.ts tests/client/compaction-decision-card.svelte.test.ts tests/client/settings-registry-invariants.svelte.test.ts`。
-> 2. 全綠 → 勾 05-v4 區塊清單、§3.25 狀態改「完成並確認」、README 停點更新。
->
-> **此前實做決策待確認**（§3.25；不同意可推回）：非 active 對話 in-loop trigger =
-> 該 turn 真實 prompt_n（不用 active 對話的 gauge 數）；負段總和 clamp 0；
-> 成功判定不加 system head（A: postSize = summary + kept）；toast after =
-> plan.estimatedTokensAfter + resolveSummarySize(summary.tokens, cmp.content)；
-> `estimateApiMessageTokens` 一併改名 `apiMessageBytes`。
+> **剩（依序）**：
+> 1. Phase 1 5.8 手動驗收（§4 清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）。
+> 2. Phase 3 可選後續（05-§1）。
 >
 > **此前里程碑（皆完成並確認）**：雙 mode 共用+A+B（2026-10-17，
 > §3.22/§3.23，完整指令全綠）→ N6 空 kept（2026-10-17，§3.21）→
 > N1–N5（2026-07-22，§3.13–§3.19）→ Phase 2 P2.1–P2.6 →
 > Phase 1 5.1–5.7 → Phase 0（逐項最終驗證狀態見 §4）。
-> 剩：Phase 1 5.8 手動驗收（§4）+ Phase 3 可選後續（05-§1）。
 
 ## 1. 進度總覽
 
@@ -56,7 +40,7 @@
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
-| v4 — 真實 token 計數（§3.24/§3.25） | 🚧 待編譯驗證：來源碼 9 檔 + 2 unit + 4 client 測試全數更新；第一輪 9 支 unit 失敗已修（3 根因全在 `compaction-policy.test.ts`：漏 import / fixture `prompt_n` 算術錯 / savings 期望值違 v4 tail 語義；來源碼零改動，見檔首恢復點），待使用者編譯驗證 |
+| v4 — 真實 token 計數（§3.24/§3.25） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` 82/82 / `context-builder` / `summarize` + client `context-inspector` / `chat-message-compaction` / `context-gauge-compaction` / `compaction-decision-card` / `settings-registry-invariants` 全綠；第一輪 9 失敗已修、3 根因全在測試檔，見 §3.25 / 檔首恢復點；05-v4 清單已全勾） |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
@@ -1253,10 +1237,10 @@ gate / settings 鏈 / 卡片）→ A（planner + 觸發/判定 + gauge）→ B�
 v1 的 char/4。設計同步:02-§3.4(v4)/§3.3/§6、03-§2/§4、04-§2/§3/§4、
 05-v4 區塊、README TL;DR。實做清單:05-v4 區塊。
 
-## 3.25 v4 真實 token 計數實做（2026-10-17；來源碼 + 全部測試更新完成並靜態核實，待使用者編譯驗證）
+## 3.25 v4 真實 token 計數實做（2026-10-17；✅ 完成並確認）
 
 > 規格:05-v4 區塊 / 02-§3.4(v4) / 04-§2/§3 / §3.24(決策)。以下為實做明細 +
-> 規格未明訂的決策(恢復點列了「待確認」,不同意可推回)。
+> 規格未明訂的決策(2026-10-17 v4 結案全數確認,見檔首恢復點)。
 
 **來源碼改動(9 檔)**:
 1. `src/lib/services/context/compaction-policy.ts`(重寫):
@@ -1313,7 +1297,7 @@ v1 的 char/4。設計同步:02-§3.4(v4)/§3.3/§6、03-§2/§4、04-§2/§3/§
 9. `settings.constants.ts`:`contextKeepRecentTokens` label (bytes)→(tokens) + help;
    `contextCompactionThreshold` help「last prompt」→「real context usage (the gauge)」。
 
-**測試**（2026-10-17 本輪全數更新完成、靜態核實；待使用者編譯驗證）:
+**測試**（全數更新完成；2026-10-17 使用者完整指令全綠）:
 - ✅ `tests/unit/compaction-policy.test.ts` 全數重寫（2026-10-17 本輪已核實）：
   fixture `assistantTimed(id, content, prompt, predicted, cache)`；新 suite
   `deriveRealMessageTokens`(6) / `tailStartOf`(3) / `messageSize`(4)；
@@ -1346,6 +1330,14 @@ v1 的 char/4。設計同步:02-§3.4(v4)/§3.3/§6、03-§2/§4、04-§2/§3/§
   timings → cmp 132B/4 = `~33`；expand 描述斷言為通用文案）/
   `compaction-decision-card`（props 自含 postSize/target）/
   `settings-registry-invariants`（純 load/sync/reset 不變式）。
+ - 🐛 **第一輪修復（2026-10-17；`compaction-policy.test.ts` 9 失敗、3 根因全在
+   測試檔、來源碼零改動）**:① 漏 import `evaluateCompactionResult`（6 失敗 +
+   check 10 錯）→ 補上；② planCompaction fixture `prompt_n` 與段公式
+   `seg = prompt[i+1] − prompt[i] − predicted[i]` 算術不一致（每輪 prompt =
+   前輪 prompt + 前輪 predicted + 本輪 user 400）→ a4 4800→5200、a5
+   5200→6000；③ `estimateCompactionSavings` 期望 1900→1700 ×2 + 註解重算
+   （entry 在尾端無真實值 → bytes/4 = 200 計入 payload，02-§3.4(v4)；
+   使用者確認「暫時 bytes/4、僅提示用途、差距太大可移除」，見檔首恢復點）。
 
 **Wire 安全**:`sendMessage` / `preEncode` 逐則 map 成
 `{content, role, tool_call_id, tool_calls, reasoning_content}` → `sourceId` 不會進
@@ -1353,8 +1345,7 @@ request body(已確認 chat.service.ts:1142-1162 / 883-897)。
 
 ## 4. 驗證狀態
 
-> 逐輪過程記錄已精簡（里程碑結案後只留最終狀態 + 根因索引）；
-> v4 目前的停點見檔首恢復點 / §3.25。
+> 逐輪過程記錄已精簡（里程碑結案後只留最終狀態 + 根因索引）。
 
 - **Phase 0 ✅**：`npm run check` + 4 支 unit 全綠。
 - **Phase 1 5.1–5.3 ✅**：check + 4 支 unit + client
@@ -1399,9 +1390,12 @@ request body(已確認 chat.service.ts:1142-1162 / 883-897)。
   `chat-message-compaction` / `context-gauge-compaction` 全綠
   （第一輪 2 支 client 失敗已修：卡片標記空白 + builder summary 段
   char/4 遺漏，見 §3.23）。
-- **v4（目前停點）🚧**：來源碼 9 檔 + 2 unit + 4 client 測試全數更新
-  （本輪靜態核實，見 §3.25；含修 `DialogContextInspector` `row.tokens`
-  模板殘留 bug）→ 使用者跑完整指令（見檔首恢復點）。
+- **v4 ✅**：check 0 錯 0 警告 + unit `compaction-policy` 82/82 /
+  `context-builder` / `summarize` + client `context-inspector` /
+  `chat-message-compaction` / `context-gauge-compaction` /
+  `compaction-decision-card` / `settings-registry-invariants` 全綠
+  （第一輪 9 失敗已修、3 根因全在測試檔，見 §3.25；entry=bytes/4
+  使用者確認）。
 - **Phase 1 5.8 手動驗收（未做；可與 v4 一併驗）**：
   1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
   2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。
