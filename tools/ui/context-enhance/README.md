@@ -22,9 +22,11 @@
 > **default = A（recent-window / pi reference）**：A = 至少留最近
 > `keepRecentTokens` 原樣 + 觸發 `window − keep`（window = min(n_ctx,
 > `contextMaxContextOverride`）；B = v3 + N6（kept ≤（threshold−keepTarget）%、
-> 成功判定 head+summary ≤ keepTarget%、允許空 kept）。計數 = API 有實際
-> token 數就用（trigger = prompt_n、summary = completion tokens）、msg / API
-> 無數用 byte、**不做派生比例**。超標 → 重試（`contextSummaryMaxAttempts`）→
+> 成功判定 head+summary ≤ keepTarget%、允許空 kept）。**計數(v4,2026-10-17)=
+> 真實 per-message 優先**(`deriveRealMessageTokens`:assistant=predicted_n、
+> 段真實總和歸該段最後一則非-assistant)、**觸發 = 真實 `contextUsed`**
+> (gauge 同源)、無資料例外(system / 尚未送出尾端)才 `bytes/4` 估算;
+> 設定數字不變現為 token 尺度(見 02-§3.4)。超標 → 重試(`contextSummaryMaxAttempts`)→
 > user gate（使用/重壓/跳過）。設計見 06-status §3.22、實做明細（18 檔）見
 > §3.23、驗證修正明細見 06-status 恢復點；**剩**：Phase 1 5.8 手動驗收
 > （見 06-status §4 清單；A/B mode 行為可一併驗）+ Phase 3 可選後續
@@ -76,7 +78,7 @@
    發生在迴圈內,只在 flow 結束後檢查來不及;觸發點皆非 streaming 中)。
    **雙 mode(2026-10-17 定稿,預設 A)**:A = recent-window(pi reference):
    觸發 `window − keepRecentTokens`(window = min(n_ctx, maxContextOverride))、
-   切點 = 從最後往回加 byte 數到 ≥ keep(尾端 tool 跨越留其前 ass)、成功判定
+   切點 = 從最後往回加真實 token 數(02-§3.4;無資料例外 bytes/4)到 ≥ keep(尾端 tool 跨越留其前 ass)、成功判定
    `head + summary + kept ≤ window − keep`;B = threshold-target(v3 + N6):
    觸發 `threshold% × n_ctx`、kept ≤ (threshold−keepTarget)%、成功判定
    `head + summary ≤ keepTarget%`、允許空 kept。超標(兩 mode 共用)→ 重試

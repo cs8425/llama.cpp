@@ -9,7 +9,7 @@
 src/lib/services/context/            ← 新增,純函式、無 store 依賴、可獨立單測
 ├── types.ts              # LlmContext、CompactionPlan、ContextBuildResult
 ├── context-builder.ts    # buildLlmContext(path) —— 唯一 choke point
-├── compaction-policy.ts  # planCompaction(B) / planCompactionRecentWindow(A) / estimateTokens(byte 數)
+├── compaction-policy.ts  # planCompaction(B) / planCompactionRecentWindow(A) / deriveRealMessageTokens / messageSize(真實 token) / messageBytes
 ├── summarize.ts          # buildSummaryTranscript() / summarizeMessages()
 └── index.ts
 
@@ -76,7 +76,9 @@ export async function buildLlmContext(
 ): Promise<ContextBuildResult>;
 
 // services/context/compaction-policy.ts
-export function estimateTokens(msg: DatabaseMessage): number;  // byte 數(文字)+ flat(附件,§02-3.4)
+export function deriveRealMessageTokens(path: DatabaseMessage[]): Map<string, number>;  // 真實 per-message(assistant=predicted_n、段總和,§02-3.4)
+export function messageSize(m: DatabaseMessage, real: Map<string, number>, isTail: boolean): number;  // 真實 ?? (尾端 ? bytes/4 : 0)
+export function messageBytes(m: DatabaseMessage): number;  // byte 存取(只供 inspector 副欄 + bytes/4,§02-3.4)
 export function planCompaction(
   path: DatabaseMessage[],
   budget: { keepBudgetTokens: number;
@@ -86,7 +88,7 @@ export function planCompaction(
 ): CompactionPlan | null;               // mode B:上限(kept ≤ budget,§02-3.3.2)
 export function planCompactionRecentWindow(
   path: DatabaseMessage[],
-  opts: { keepRecentTokens: number;     // 下限目標(byte 加算,§02-3.3.1)
+  opts: { keepRecentTokens: number;     // 下限目標(真實 token 加算,§02-3.3.1)
           minKeptUserTurns: number;     // 切點落 user 訊息時:kept user 數下限
           minKeptMessages: number;      // kept 訊息數下限(預設 0)
           minSummarizeTokens: number }
@@ -217,7 +219,7 @@ onFlowComplete(且 !isChatLoading && !agenticStore.isRunning)
 
 ```
 executeAgenticLoop turn k 結束(tool results 已落 DB + activeMessages)
-  → 觸發檢查(mode 特定):A: prompt_n > window − keep ? B: prompt_n > n_ctx × threshold% ?
+  → 觸發檢查(mode 特定):A: contextUsed > window − keep ? B: contextUsed > n_ctx × threshold% ?(contextUsed = 真實 KV,gauge 同源)
       → plan(mode A: planCompactionRecentWindow / mode B: planCompaction,該 conv 的 DB 路徑)
           → null / 失敗? 續跑
       → summarize(plan)  (UI:「Compacting context…」,signal = flow abort)

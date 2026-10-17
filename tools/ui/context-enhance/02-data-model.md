@@ -175,7 +175,7 @@ window = min(model n_ctx, contextMaxContextOverride)   # override = 0 → n_ctx
 
 valid(j) = path[j].role ∈ {user, assistant}
 
-1. 從最後一則往回加算 per-message count(byte 數,§3.4),
+1. 從最後一則往回加算 per-message count(token 數,§3.4 真實值;無資料例外 bytes/4),
    加到 ≥ keep 停(交叉點 i)
 2. 切在交叉點**以右最近**的 valid 切點;
    沒有(尾端 tool result 自己就跨過)→ **最右 valid 切點**
@@ -189,7 +189,7 @@ valid(j) = path[j].role ∈ {user, assistant}
 
 - **A 不會產生空 kept**:kept 恆 ≥1 則、以 user/assistant 開頭
   (交叉點本身或所在 turn)。
-- A 的 budget 是**下限**(target):kept ≥ keep(byte 數,通常略超);
+- A 的 budget 是**下限**(target):kept ≥ keep(token 數,通常略超);
   上限由成功判定式(§6)保證(壓完總量 ≤ window − keep → 不重觸發)。
 - 典型獲益場景:巨幅 tool result——往回加算在交叉點停、切點落在該 tool
   result **之後**的 assistant(或尾端 tool 自己跨過時保留整個 turn),
@@ -214,7 +214,7 @@ valid(j) = path[j].role ∈ {user, assistant}
    → 找到:split span 壓縮(isSplitTurn = true;j = path.length 時 firstKeptMessageId 缺)
 3. 都沒有 → null(不壓)(空 kept 允許後階段 2 恆有解;實務上只剩空路徑/負 budget 等異常)
 4. 對 1/2 的結果再檢查:
-   - summarize 區(1..j)count < minSummarizeTokens(2k,byte 數)→ null
+   - summarize 區(1..j)count < minSummarizeTokens(2k,token 數)→ null
    - I5:邊界切 → kept 區 user 訊息數 ≥ N(預設 4);split 切 → kept 區訊息數 ≥ M(`contextKeepMinMessages`,預設 0)
 ```
 
@@ -236,35 +236,38 @@ valid(j) = path[j].role ∈ {user, assistant}
   連最後一組 `ass + tool` 都放不下時,切點落在最後一則之後(空 kept),
   該 tool result 整段進 summary。
 
-### 3.4 token 計數(v3:API 實際值優先,否則 UTF-8 byte 數)
+### 3.4 token 計數(v4:真實 per-message 優先,無資料例外才 bytes/4 估算)
 
-計數規則(所有決策點同源;v3,2026-10-16 使用者確認 E):
+> **v4(2026-10-17 使用者定稿)取代 v3 的「無 API 值 → UTF-8 byte 數」規則。**
+> 切點 / 成功判定 / 觸發 / inspector 顯示**全部改用真實 token**;只有
+> 「沒有真實資料」的少數例外才用 `bytes/4` 估算。設定數字
+> (`contextKeepRecentTokens`、`MIN_SUMMARIZE_TOKENS`)**不變**,現含義由 byte 改 token。
 
-1. **API 有實際 token 數時用實際值**:
-   - 觸發判定:最後一則 assistant 的 `timings.prompt_n`(該輪全量 prompt 實際大小)
-   - compact 成功判定:summary 呼叫回應 `timings` 的 completion tokens(§6)
-2. **沒有 API 實際值時,直接用 UTF-8 byte 數**(不做 char/4 估算):
-   ```
-   count(msg) = byteLen(content)
-              + Σ attachments:  image = 1000(固定)
-                               text/pdf = byteLen(content)
-                               audio/video = 3000(固定)
-              + byteLen(toolCalls JSON)
-              + byteLen(reasoningContent)
-```
+**真實 per-message token(`deriveRealMessageTokens(path) → Map<dbId, number>`)**:
+server 只回「每 request／assistant turn 層級」的 token 數(存於 assistant
+`timings`:`prompt_n` / `cache_n` / `predicted_n`),故 per-message 真實值由相鄰
+`prompt_n` 推得(純真實、非估算):
 
-3. **不做派生比例**(2026-10-17 使用者確認):per-message 沒有 API 實際值
-   (API 只回 whole-prompt / response 層級的 token 數)→ 一律 byte 數;
-   **不**用 `prompt_n / totalBytes` 反推每則成本。後果(接受、記錄):
-   mode A 的 `keepRecentTokens` 對照的是 byte 加算——CJK 下實際保留的
-   token 數 ≈ 設定值 / 3–8(該設定實際是 byte budget);觸發公式
-   `window − keepRecentTokens` 混 token 尺度(window)與 byte 尺度(keep)
-   (CJK 下觸發點實際偏高,即較晚才壓)。
+- assistant `i` → `predicted_n[i]`(該 turn 輸出)
+- 每段非 assistant 訊息(ass_i 與 ass_{i+1} 之間,或 ass_0 之前)→
+  **段真實總和歸到「該段最後一則非 assistant」**(=觸發下一輪的那則;
+  「首則 user 用總和」即此規則的前段特例):
+  `segTotal = (prompt_n[i+1]+cache_n[i+1]) − (prompt_n[i]+cache_n[i]) − predicted_n[i]`
+  (首段 = `prompt_n[0]+cache_n[0]`)
+- system → 無獨立真實值(已併進首段總和)→ 顯示 `-`、walk 記 0
+- 最後一則 assistant 之後的**尾端**(新 user 等,尚未被 token 化)→ 無真實值
 
-> v1 的 char/4(`len/4`)作廢:對 CJK 低估 ~1.5–4×,且與舊 budget 公式疊加
-> 讓行為不可預測(06-status §3.20)。原 Phase 3 規劃的「token 估計校準:
-> 用 `timings.prompt_n` 反推每則成本」不再需要——雙 mode 在需要精確的決策點
-> (觸發、成功判定)直接用 API 實際值,切點 / per-message 用 byte 數。
+**統一大小 `messageSize(m) = 真實值 ?? (尾端 ? bytes/4 : 0)`**:
+- 切點 walk、成功判定、`minSummarizeTokens`、keep budget 全用 `messageSize`(真實 token)
+- `bytes/4` 估算**僅**用於無真實值的例外(尚未送出的尾端);system 無獨立值→0(併入首段)
+- byte 數(`messageBytes`)**只**供 inspector 副欄顯示與 `bytes/4` 估算,不再當主大小
+
+**觸發** = 真實 `contextStatsStore.contextUsed`(= `prompt_n + cache_n + predicted_n`,
+即 gauge 的真實 KV 用量),不再是 `prompt_n ?? byte 加算`。
+
+**後果(已確認)**:`contextKeepRecentTokens`(預設 20000)與
+`MIN_SUMMARIZE_TOKENS`(預設 2000)現為 **token 尺度**(原本 byte);
+mode B 切點原本「byte 對 token budget」的錯配順手修好。
 
 ## 4. 邊界情境行為表
 
@@ -346,11 +349,10 @@ valid(j) = path[j].role ∈ {user, assistant}
 
 ```
 onFlowComplete / onComplete(且無 stream 在跑)/ agentic turn 之間:
-  lastPrompt = 最後一則 assistant 的 timings.prompt_n
-              ?? count(path)               # 沒 timings 時用 byte 數
+  contextUsed = contextStatsStore.contextUsed   # 真實 KV = prompt_n+cache_n+predicted_n(gauge 同源)
   if autoCompactionEnabled
      && n_ctx 已知
-     && lastPrompt > n_ctx × threshold%            # threshold = 純觸發點(「超過」)
+     && contextUsed > n_ctx × threshold%            # threshold = 純觸發點(「超過」);mode A 改 window − keep
      && planCompaction(path, budget) 有有效斷點:   # budget = (threshold − keepTarget)% × n_ctx(§3.3)
         → 執行壓縮:
             1. summarize(max_tokens = summaryMax% × n_ctx,不變)
@@ -372,10 +374,10 @@ onFlowComplete / onComplete(且無 stream 在跑)/ agentic turn 之間:
                         [這次不壓 (skip)]       → 不建 cmp,維持全量 context
 ```
 
-- **觸發**:`threshold` = 純觸發點(「超過這個 % 才檢查」),用 API 實際 `prompt_n`。
+- **觸發**:`threshold` = 純觸發點(「超過這個 % 才檢查」),用真實 `contextUsed`(gauge 同源)。
 - **成功判定**:「壓到多小」用**事後實際數字**判定——`system head + summary ≤
   keepTarget% × n_ctx`。summary 的 token 數是 API 回應的實際值(需要非 streaming
-  路徑解析 `timings`,見 03-§3);head 無獨立 API 數,用 byte 數(靜態小文字,
+  路徑解析 `timings`,見 03-§3);head 無獨立真實值,用 bytes/4 估算(靜態小文字,
   誤差可忽略)。**kept 區不進成功判定**——它已由切點(§3.3)約束在
   (threshold − keepTarget)% 內;總量 = (head + summary) + kept ≤ threshold%
   × n_ctx,不會立刻再觸發。

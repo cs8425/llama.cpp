@@ -62,9 +62,9 @@
 > (summary max 70% × 1.5 = 105% n_ctx 的 reserve)把 keepBudget 壓死在 10% floor,
 > planCompaction 回 null、auto 路徑完全靜默(分析見 06-status §3.20)。使用者另引入
 > pi reference 的切點(下限:至少留最近 keepRecentTokens 原樣),決定**同時保留
-> 兩種作法、user 選 mode、預設 = A**;A 超標沿用 B 的重試邏輯;計數 = API 有
-> 實際 token 數就用(trigger = prompt_n、summary = completion tokens)、msg / API
-> 無 token 數用 byte、**不做派生比例**。決策見 06-status §3.22;設計:
+> 兩種作法、user 選 mode、預設 = A**;A 超標沿用 B 的重試邏輯;**計數(v4)
+> = 真實 per-message 優先 + 觸發 = 真實 `contextUsed` + 無資料例外 bytes/4**
+> (取代 v3 的「無 API 值用 byte」;見 02-§3.4)。決策見 06-status §3.22/§3.24;設計:
 > 02-§3.3/§3.4/§6(雙 mode)、03-§2/§3/§4.2/§4.4、04-§3/§4。
 >
 > **狀態(2026-10-17)**:✅ **完成並確認**——共用 / A / B 三塊來源碼(18 檔,
@@ -142,7 +142,7 @@
 
 ✅ 驗收:
 - Mode A(預設):長對話(262K 級)自動壓縮真的會發生,最近 ~keepRecent
-  (byte 數)原樣保留(巨幅 tool result → 保留整個 turn),壓完總量低於觸發點;
+  (token 數)原樣保留(巨幅 tool result → 保留整個 turn),壓完總量低於觸發點;
   超標場景(小 window / 大 keep)走重試 → gate 三選項;無 cmp 對話行為不變。
 - Mode B:同 v3 原驗收(長對話自動壓縮發生;小 keepTarget 超標走重試 →
   gate;無 cmp 不變)。
@@ -195,6 +195,46 @@
 payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點可前移
 恢復 kept;無 cmp 對話行為不變。
 
+### v4 — 真實 token 計數（2026-10-17 使用者定稿，待實做）
+
+> 背景:Context Inspector 的「Estimated send」與每則「~N tok」用
+> `estimateTokens`/`estimateApiMessageTokens` 的 **UTF-8 byte 數**當 token 顯示、
+> 並除 n_ctx(token)→ 數字與 gauge(真實 `contextUsed`)永遠對不上(380,513 vs
+> 153,939,≈2.5 bytes/token)。使用者決策:切點/觸發/成功判定/Inspector **全用真實
+> token**,估算僅限無資料例外;設定數字不變(現為 token 尺度)。設計:02-§3.4(v4)、
+> 04-§2/§3/§4;決策記錄見 06-status §3.24。
+
+- [ ] `compaction-policy.ts`:新增純函式 `deriveRealMessageTokens(path) →
+      Map<dbId, number>`(assistant=`predicted_n`;每段非-assistant 真實總和歸該段
+      最後一則非-assistant;system/尾端不在 map)
+- [ ] `compaction-policy.ts`:新增 `messageSize(m, real, isTail) = 真實 ??
+      (尾端 ? bytes/4 : 0)`;`estimateTokens` 改名 `messageBytes`(只供 inspector
+      副欄 + bytes/4),不再當主大小
+- [ ] `planCompaction` / `planCompactionRecentWindow` / `evaluateCompactionResult`:
+      所有 `estimateTokens` 加總改 `messageSize`(傳入 `realTokens` + 尾端判定);
+      `minSummarizeTokens` / `keepRecentTokens` / keep budget 改 token 尺度
+      (設定數字不變);mode B 原本 byte-vs-token 錯配順手修好
+- [ ] 觸發:`stores/chat/index.svelte.ts` / `stores/agentic/index.svelte.ts`
+      `lastPrompt` 改 `contextStatsStore.contextUsed`(真實 KV),刪 byte fallback;
+      `shouldTriggerCompaction` 參數 doc 改真實 contextUsed
+- [ ] `context-builder.ts` + `types.ts`:`ContextBuildResult.messages` 帶來源
+      `sourceId`;移除 `estimatedTokens`(byte)字段
+- [ ] `DialogContextInspector.svelte`:標題/總和條綁 `contextUsed`/`contextTotal`
+      (＝gauge);每則**主欄**＝`messageSize` 真實值(system=`-`、尾端=`est.`)、
+      **副欄**＝`bytes`/`bytes÷4 est.`;整條 byte-當-token 拿掉
+- [ ] `ChatMessageCompaction.svelte` / `ContextGaugePopup.svelte`:「N→M」/
+      「tokens saved」改真實 token
+- [ ] unit:`deriveRealMessageTokens`(assistant/段總和/首段/多非-assistant/尾端);
+      `messageSize`(真實/尾端 bytes/4/非尾端 0);切點 A/B + 成功判定吃真實 token;
+      觸發 `contextUsed`(=0 不觸發)
+- [ ] client:Inspector 標題＝gauge、主欄真實/`-`/`est.`、副欄 bytes+bytes/4;
+      cmp「N→M」真實
+- [ ] 回歸:既有 `compaction-policy`/`context-builder` 測試改 token 尺度期望值
+
+✅ 驗收:Inspector 標題/總和條＝gauge 真實值(同單位同量級);每則主欄真實、
+副欄 bytes+bytes/4;切點/觸發/成功判定全真實 token;無資料例外(system、尚未送出
+尾端)才 bytes/4;設定數字不變(現 token 尺度)。
+
 ### Phase 3 —(可選,後續)
 
 > **下一輪(規劃已定;N1–N5 ✅ 全部完成並確認,明細見 06-status §3.13–§3.19,依序 N1→N5)**:
@@ -220,9 +260,9 @@ payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點�
 >    3 個呼叫點經 `toSummaryMode()` 透傳(完成並確認,見 06-status §3.19)。
 
 - [ ] 兩段式 summary(兩次 LLM 呼叫再合併)取代單呼叫雙段 prompt
-- [x] ~~token 估計校準:用 `timings.prompt_n` 反推每則成本~~ → 被 v3 取代
-      (2026-10-16):需要精確的兩個決策點(觸發、成功判定)直接用 API 實際值,
-      切點用 byte 數,不再需要逐則成本校準
+- [x] ~~token 估計校準:用 `timings.prompt_n` 反推每則成本~~ → v3 一度以 byte 數取代;
+      **v4 改回真實 per-message**(`deriveRealMessageTokens`,相鄰 `prompt_n` 推得),
+      估算僅限無資料例外(system/尚未送出尾端),見 02-§3.4 / 上方 v4 區塊
 - [ ] per-conversation 覆蓋(「此對話停用自動壓縮」,
       放 `ConversationPreferences`)
 - [ ] 舊 cmp 落在 kept 區時的「合併重摘要」提示
@@ -235,7 +275,7 @@ payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點�
 | ---- | ---- |
 | `src/lib/services/context/types.ts` | `CompactionPlan` / `ContextBuildResult` |
 | `src/lib/services/context/context-builder.ts` | `buildLlmContext`(唯一 choke point) |
-| `src/lib/services/context/compaction-policy.ts` | `planCompaction` / `estimateTokens` |
+| `src/lib/services/context/compaction-policy.ts` | `planCompaction` / `deriveRealMessageTokens` / `messageSize` / `messageBytes` |
 | `src/lib/services/context/summarize.ts` | transcript 組裝 + summary 呼叫 |
 | `src/lib/services/context/index.ts` | barrel |
 | `src/lib/components/app/chat/ChatMessages/ChatMessage/ChatMessageCompaction/ChatMessageCompaction.svelte` | cmp 渲染 |

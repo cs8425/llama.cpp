@@ -3,7 +3,17 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**雙 mode（共用 + A + B）✅ 完成並確認**（2026-10-17）——
+> **恢復點（最新）**：**v4 真實 token 計數——規格定稿、待實做**（2026-10-17）——
+> 根因:Inspector 的「Estimated send」/每則「~N tok」用 **byte 數當 token**
+> (`estimateTokens`/`estimateApiMessageTokens`)÷ n_ctx(token)→ 與 gauge 真實
+> `contextUsed` 永遠對不上(380,513 vs 153,939,≈2.5 bytes/token)。v4 決策:**切點/
+> 觸發/成功判定/Inspector 全用真實 token**(`deriveRealMessageTokens`:assistant=
+> predicted_n、段真實總和歸該段最後非-assistant)、**觸發 = 真實 `contextUsed`**
+> (gauge 同源)、無資料例外(system/尚未送出尾端)才 `bytes/4`;Inspector 主欄真實 +
+> 副欄 bytes/bytes÷4;設定數字不變(現 token 尺度)。**下一步 = 依 05-v4 區塊實做**
+> （§3.24 決策、02-§3.4(v4)/04-§2/§3/§4 設計）。
+>
+> **此前恢復點**：**雙 mode（共用 + A + B）✅ 完成並確認**（2026-10-17）——
 > 使用者重跑上一恢復點的 4 條指令：`npm run check` + client
 > `compaction-decision-card`（9/9）+ client `context-inspector`（14/14）+ unit
 > `context-builder` 回歸，**全綠**（第一輪的 2 支 client 失敗——卡片標記空白 +
@@ -1450,6 +1460,43 @@ gate / settings 鏈 / 卡片）→ A（planner + 觸發/判定 + gauge）→ B�
    零改動（兩者皆待使用者跑確認）。
 6. **下一步＝使用者跑**（指令見文件頭恢復點）：`npm run check` + unit 3 支 +
    client 5 支 → 全綠 → 項目 6（勾 05、狀態改「完成並確認」、README 更新）。
+
+## 3.24 v4 真實 token 計數（使用者定稿 2026-10-17，未實做）
+
+> 觸發:Context Inspector 的「Estimated send」/每則「~N tok」用
+> `estimateTokens`/`estimateApiMessageTokens` 的 **UTF-8 byte 數**當 token 顯示、
+> 並除 n_ctx(token)→ 數字與 gauge(真實 `contextUsed`)永遠對不上(380,513 vs
+> 153,939,≈2.5 bytes/token)。
+
+**決策(使用者 2026-10-17)**:
+1. **觸發裁切 = 真實 `contextUsed`**(`contextStatsStore.contextUsed` =
+   prompt_n+cache_n+predicted_n,gauge 同源),不再是 `prompt_n ?? byte 加算`。
+2. **Inspector 每則用真實 token**(原 UI 的 `timings` 資料),不用 byte 估算:
+   - 主欄 = 真實值:assistant=`predicted_n`、每段非-assistant 真實總和歸該段
+     最後一則非-assistant(「首則 user 用總和」)、system=`-`(無獨立值)、
+     尚未送出尾端=`est.`
+   - 副欄 = `bytes` + `bytes÷4 est.`(參考)
+   - 總和條 = 真實 `contextUsed`(＝gauge)
+3. **切點選擇也用精確數字**(`deriveRealMessageTokens` + `messageSize`),
+   估算僅限無資料例外(system、尚未送出尾端)。
+4. **設定數字不變**:`contextKeepRecentTokens`(20000)/`MIN_SUMMARIZE_TOKENS`(2000)
+   現含義由 byte 改 **token**;mode B 原本 byte-vs-token 錯配順手修好。
+
+**核心函式(純)**:
+- `deriveRealMessageTokens(path) → Map<dbId, number>`:assistant=`predicted_n[i]`;
+  段總和 `=(prompt_n[i+1]+cache_n[i+1])−(prompt_n[i]+cache_n[i])−predicted_n[i]`
+  歸該段最後一則非-assistant;首段=`prompt_n[0]+cache_n[0]`;system/尾端不在 map。
+- `messageSize(m, real, isTail) = 真實 ?? (尾端 ? bytes/4 : 0)`。
+- `estimateTokens` 改名 `messageBytes`(只供 inspector 副欄 + bytes/4)。
+
+**影響面**:`compaction-policy.ts`(planner/成功判定/trigger 全改 `messageSize`)、
+`context-builder.ts`+`types.ts`(messages 帶 `sourceId`、移除 `estimatedTokens` byte)、
+`stores/chat`+`stores/agentic`(trigger 用 `contextUsed`)、`DialogContextInspector`/
+`ChatMessageCompaction`/`ContextGaugePopup`(顯示真實 + 副欄)。
+
+**取代**:v3 的「無 API 值 → UTF-8 byte 數」(02-§3.4 舊版)與「不做派生比例」;
+v1 的 char/4。設計同步:02-§3.4(v4)/§3.3/§6、03-§2/§4、04-§2/§3/§4、
+05-v4 區塊、README TL;DR。實做清單:05-v4 區塊。
 
 ## 4. 驗證狀態（目前停在這）
 
