@@ -20,11 +20,7 @@
 
 <ChatMessageActionCard icon={Scale}>
 	{#snippet message()}
-		Context compaction exceeded the {targetLabel}: ~{formatNumber(request.postSize)} of
-		~{formatNumber(request.target)} allowed
-		{#if request.attempts > 1}
-			(after {request.attempts} attempts)
-		{/if}. Keep it?
+		{`Context compaction exceeded the ${targetLabel}: ~${formatNumber(request.postSize)} of ~${formatNumber(request.target)} allowed${request.attempts > 1 ? ` (after ${request.attempts} attempts)` : ''}. Keep it?`}
 	{/snippet}
 
 	{#snippet actions()}

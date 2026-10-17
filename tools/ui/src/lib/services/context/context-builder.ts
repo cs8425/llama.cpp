@@ -27,7 +27,7 @@ import { MessageRole, MessageType } from '$lib/enums';
 import { ChatService } from '$lib/services/chat.service';
 import type { ApiChatMessageData } from '$lib/types/api';
 import type { DatabaseMessage } from '$lib/types/database';
-import { estimateTokens } from './compaction-policy';
+import { estimateApiMessageTokens, estimateTokens } from './compaction-policy';
 import type { ContextBuildOptions, ContextBuildResult } from './types';
 
 function isCompactionEntry(message: DatabaseMessage): boolean {
@@ -137,10 +137,13 @@ export async function buildLlmContext(
 		...(await convert(kept))
 	];
 
-	const estimatedTokens =
-		head.reduce((sum, message) => sum + estimateTokens(message), 0) +
-		Math.ceil(entry.content.length / 4) +
-		kept.reduce((sum, message) => sum + estimateTokens(message), 0);
+	// Price the exact outgoing payload (API form) with the same estimator the
+	// inspector's payload rows use, so the header and the rows can never
+	// disagree (WYSIWYG; v3 byte semantics).
+	const estimatedTokens = messages.reduce(
+		(sum, message) => sum + estimateApiMessageTokens(message),
+		0
+	);
 
 	return {
 		compaction: {

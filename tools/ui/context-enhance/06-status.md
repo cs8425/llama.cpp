@@ -1723,6 +1723,34 @@ endpoint）。（N6 編譯/測試確認 ✅ 已完成並確認，見下方 N6 �
    已同步陳舊文件：05-雙 mode 清單（標題 / 狀態 / 4 個測試項勾選）、README
    停點。下一步不變＝使用者跑上方條目的完整指令（check + unit 3 支 +
    client 5 支）。
+ 
+- **雙 mode 第一輪測試：2 支 client 失敗的修復（2026-10-17；零測試改動、2
+   來源檔）**：使用者跑完整指令後「只剩」2 支 client 失敗（`npm run check` +
+   unit 3 支 + client `settings-registry-invariants` / `chat-message-compaction` /
+   `context-gauge-compaction` 皆綠）：`compaction-decision-card` 7/9、
+   `context-inspector` 13/14。根因皆為雙 mode 輪的 mechanical 遺漏：
+   1. **卡片文字空白**（`ChatCompactionDecisionCard.svelte`）：message snippet
+      多行標記讓 DOM textContent 保留源碼換行（實得 `~12,345 of\n\t\t~8,000`
+      → `toContain('~12,345 of ~8,000 allowed')` 掛）；且 `{#if}` 前後空白在
+      attempts = 1 時留下「allowed . Keep it?」句點前空格（使用者可見的 UI
+      錯字 → `toContain('allowed. Keep it?')` 掛）。已改單一 template literal
+      表達式：兩態皆精確渲染（`…allowed (after 3 attempts). Keep it?` /
+      `…allowed. Keep it?`）、mode B 標籤不變。JS 模擬 8 項斷言全過。
+   2. **inspector header 與 rows 不一致**（`context-builder.ts`）：compaction
+      路徑的 `estimatedTokens` 的 summary 段仍是 char/4 時代的
+      `Math.ceil(entry.content.length / 4)`（v3 byte 化漏改）→ header =
+      16 + ceil(132/4) + 34 = 83 vs rows 和 = 16 + 132 + 19 + 15 = 182
+      （fixture 逐項核對、與失敗輸出 83/182 完全吻合）。已改以
+      `estimateApiMessageTokens` 對最終 API `messages` 求和——與 inspector
+      rows 同一 estimator、同一 payload（WYSIWYG），「rows 和 = header」不變式
+      由結構保證。no-entry 路徑維持 `pathTokens`（`context-builder.test.ts`
+      第 91 行固定值、零改動）；`result.estimatedTokens` 其他消費點僅 inspector
+      三處（percent 列 / expand 描述 / header）。
+   待使用者重跑：`npm run check` +
+   `npx vitest --project=client --run tests/client/compaction-decision-card.svelte.test.ts`
+   + `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
+   （unit `context-builder` 可一併回歸）。全綠 → 勾 05-雙 mode 清單、
+   §3.22/§3.23 狀態改「完成並確認」、README 停點更新。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
