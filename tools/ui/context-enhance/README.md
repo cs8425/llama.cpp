@@ -33,8 +33,11 @@
 > N6（split 切允許空 kept，2026-10-17）；N1–N5（2026-07-22：summary 上限
 > n_ctx × % / keep target 設定 / Stop 鍵 / prefix-stable default /
 > `contextSummaryMode` 設定）。
-> **剩**：Phase 1 5.8 手動驗收（見 06-status §4 清單；A/B mode 行為 +
-> v4 顯示可一併驗）+ Phase 3 可選後續（兩段式 summary / per-conversation
+> **剩**：**N7 壓縮進行中（queue + in-chat 指標列 + Stop）設計定稿、待實做**
+> （2026-11-04；post-flow 自動壓縮 fire-and-forget 與新送出的競態修復——
+> 見 06-status §3.26 / 04-§4.2 / 05-N7）+ Phase 1 5.8 手動驗收
+> （見 06-status §4 清單；A/B mode 行為 + v4 顯示可一併驗）+ Phase 3
+> 可選後續（兩段式 summary / per-conversation
 > 覆蓋 / 合併重摘要提示 / summary 獨立 model / endpoint / gauge savings
 > 顯示，見 05-§1；
 > token 校準已被 v3/v4 取代）。

@@ -3,8 +3,9 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新；2026-10-17：v4 真實 token 計數 ✅ 完成並確認——`npm run check` +
-> unit 3 支 + client 5 支全綠；無待辦實做）**：
+> **恢復點（最新；2026-11-04：N7 壓縮進行中（queue + 指標列 + Stop）設計定稿、
+> 待實做——設計見 04-§4.2 / 05-N7 / 本檔 §3.26；此前 v4 真實 token 計數
+> ✅ 完成並確認（2026-10-17，`npm run check` + unit 3 支 + client 5 支全綠））**：
 >
 > v4 本輪結案：
 > - ✅ 使用者完整指令全綠：`npm run check`（0 錯 0 警告）+ unit
@@ -24,8 +25,10 @@
 >   `estimateApiMessageTokens` 一併改名 `apiMessageBytes`。
 >
 > **剩（依序）**：
-> 1. Phase 1 5.8 手動驗收（§4 清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）。
-> 2. Phase 3 可選後續（05-§1）。
+> 1. **N7 壓縮進行中實做**（設計定稿 2026-11-04，見 §3.26 / 04-§4.2 /
+>    05-N7；queue 不 block + in-chat 指標列（Stop）+ per-conv scope）。
+> 2. Phase 1 5.8 手動驗收（§4 清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）。
+> 3. Phase 3 可選後續（05-§1）。
 >
 > **此前里程碑（皆完成並確認）**：雙 mode 共用+A+B（2026-10-17，
 > §3.22/§3.23，完整指令全綠）→ N6 空 kept（2026-10-17，§3.21）→
@@ -41,6 +44,7 @@
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
 | v4 — 真實 token 計數（§3.24/§3.25） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` 82/82 / `context-builder` / `summarize` + client `context-inspector` / `chat-message-compaction` / `context-gauge-compaction` / `compaction-decision-card` / `settings-registry-invariants` 全綠；第一輪 9 失敗已修、3 根因全在測試檔，見 §3.25 / 檔首恢復點；05-v4 清單已全勾） |
+| N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（§3.26） | 📐 設計定稿（2026-11-04）、**待實做**（05-N7 清單；queue 不 block + 指標列 + per-conv `compactingConvId` + sendMessage guard + finalizer 自動送） |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
@@ -1342,6 +1346,66 @@ v1 的 char/4。設計同步:02-§3.4(v4)/§3.3/§6、03-§2/§4、04-§2/§3/§
 **Wire 安全**:`sendMessage` / `preEncode` 逐則 map 成
 `{content, role, tool_call_id, tool_calls, reasoning_content}` → `sourceId` 不會進
 request body(已確認 chat.service.ts:1142-1162 / 883-897)。
+
+## 3.26 N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（分析 + 決策 2026-11-04；設計定稿、待實做）
+
+> 觸發：使用者要求「自動壓縮同時 user 輸入的部份，UI 要有明確提示（類似
+> Summarized message 列）+ 可中止 + 阻止輸入」。檢視現有 code 後改採
+> **queue**（與既有 streaming-pending / steering 一致；硬阻止有逃生問題），
+> 使用者 2026-11-04 確認。設計：04-§4.2；實做清單：05-N7。
+
+### 問題（已對 code 驗證，2026-11-04）
+
+1. **fire-and-forget**：`streamChatCompletion` 兩個 post-flow 觸發點
+   （`chat/index.svelte.ts:1862` agentic / `:1926` 非 agentic）=
+   `void this.compactConversation(convId, { auto: true })`；completion
+   handler 立刻返回、UI 解鎖。
+2. **guard 一次性**：`compactConversation` 的 I7 檢查（`:565-567`，
+   `isChatLoading` / `isRunning` / `compacting`）只在開頭；summary 進行中不重查、
+   不中斷。`sendMessage`（`:1309`）**完全不查 `compacting`**；form 也未 disable
+   （`ChatScreen.svelte:357` disabled = propsError || editing）。
+3. **競態結果**（active conversation；`resolveConversationPath` `:1102` 回傳
+   **live** `activeMessages`，cmp parent 在 summary await **後**才求值 `:661`）：
+   - 新 turn 的 stream 在 summary 完成**後**結束 → `updateCurrentNode(新 assistant)`
+     覆蓋 `updateCurrentNode(cmp)` → **cmp 懸空**（DB 裡是子節點、不在
+     active path）→ Summary **靜默丟失**（任何 path 重 derive 都排除它；
+     in-memory 陣列尾含 cmp 與 DB currNode 分岔）；下次檢查再觸發第二次壓縮。
+   - 新 turn 先結束 → cmp 掛新 assistant 之後 → 一致（不丟）。
+   - 兩 case 共同：新訊息以**未壓縮完整 context** 送出 → context 已近
+     window（觸發原因）→ **overflow 風險**。
+4. **手動路徑同窗**：Compact now / Re-summarize / 斷點後移（皆設 `compacting`、
+   數秒級 summary 呼叫）有完全相同的 race。
+5. **in-loop 不受影響**：loop 被 `await compactBetweenTurns` block；輸入 →
+   steering（`isRunning` true）。
+6. 進行中狀態僅 gauge popup 可見；post-flow 在聊天區無 Stop 入口
+   （N3 Stop 在 inspector / cmp row）。
+
+### 決策（使用者 2026-11-04 確認）
+
+- **D1 queue，不 block**：輸入 → `pendingMessages`（既有 single-slot；後送覆蓋
+  前送，與 streaming 期間同語義）→ 壓縮結束（成功 / gate skip / 失敗 / abort，
+  皆 fail-open）由 finalizer 自動送。不 disable 輸入框。
+- **D2 in-chat 指標列**：訊息列尾端獨立 row（與超標卡片同錨點、位於其上方）：
+  spinner + 「Compacting context…」+ [Stop]；per-conv（新增 `compactingConvId`）；
+  尾端已是 cmp 時讓位給真 cmp row；post-flow gate 顯示超標卡片時讓位
+  （in-loop 卡片在 agentic 訊息內、不讓位）。
+- **D3 Stop 分派**：in-loop（`isRunning`）→ `stopGeneration()`（flow signal →
+  summary 中斷 fail-open → flow 結束）；post-flow / 手動 → `stopCompaction()`
+  （既有）。pending row 的 Send-immediately = `abortCurrentFlow` 補
+  `stopCompaction()` → finalizer 自動送。
+- **D4 store 層是主修**：guard 在 `sendMessage`（steering / streaming-pending
+  之後第三層）；`compacting = true` 前移至 guard 通過後立刻（收 async 窗口）；
+  四條路徑（chatStore 3 + agentic 1）皆帶 convId 設定/清除
+  （`setCompacting` helper）。
+- **D5 範圍**：四條 compaction 路徑全部覆蓋（auto + 手動 3 條）；in-loop 的
+  輸入仍走 steering（不變）。
+
+### 狀態
+
+- 📐 設計定稿（本節 + 04-§4.2 + 05-N7 清單）；**未實做**。
+- 實做順序建議：context-stats flag → chatStore guard + finalizer →
+  agentic flag → `abortCurrentFlow` → 指標列元件 + `ChatMessages` 插入 →
+  client 測試 → 手動驗收（05-§3 新增 5 項，#8–#12）。
 
 ## 4. 驗證狀態
 

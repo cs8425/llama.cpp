@@ -246,6 +246,56 @@ payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點�
 副欄 bytes+bytes/4;切點/觸發/成功判定全真實 token;無資料例外(system、尚未送出
 尾端)才 bytes/4;設定數字不變(現 token 尺度)。
 
+### N7 — 壓縮進行中:輸入 queue + in-chat 指標列(Stop)(設計定稿 2026-11-04;未實做)
+
+> 背景(分析已對 code 驗證,2026-11-04,見 06-status §3.26):post-flow 自動
+> 壓縮兩個觸發點是 fire-and-forget;I7 guard 只在 `compactConversation` 開頭
+> 檢查一次、`sendMessage` 不查 `compacting` → user 在 summary 期間立刻送下一句:
+> (a) cmp 懸空(新 turn 的 `updateCurrentNode` 覆蓋 cmp 的)→ Summary 靜默丟失;
+> (b) 該句以**未壓縮**全量 context 送出 → overflow 風險。手動 Compact /
+> Re-summarize / 斷點後移同窗。in-loop 不受影響(loop block、輸入走
+> steering)。進行中狀態也只在 gauge popup 可見、post-flow 聊天區無 Stop 入口。
+>
+> **使用者決策(2026-11-04)**:queue 不 block(輸入 → pending、壓縮完成後
+> 自動送)+ in-chat 明確指標列(含 Stop)+ pending row 顯示於指標列下方
+> (既有 `ChatMessageUserPending`)。設計:04-§4.2。
+
+- [ ] `context-stats.svelte.ts`:新增 `compactingConvId: string | null`;
+      `setCompacting(convId | null)` helper(`compacting` + `compactingConvId`
+      原子設定/清除)
+- [ ] `stores/chat/index.svelte.ts` `sendMessage`:新 guard 層(在 steering /
+      streaming-pending 之後):`compacting && compactingConvId === convId` →
+      `injectPendingMessage` + return
+- [ ] `stores/chat/index.svelte.ts` `compactConversation`:
+      `setCompacting(convId)` 前移至 guard 檢查通過後立刻(path 解析 / plan
+      之前);`finally` → 共用 finalizer `endCompactionState(convId)`
+      (`setCompacting(null)` + consume pending → 自動送)
+- [ ] `stores/chat/index.svelte.ts` `moveCompactionBoundary`(後移) /
+      `recompactConversationEntry`:同上(帶 convId 設定 + finalizer)
+- [ ] `stores/agentic/index.svelte.ts` `compactBetweenTurns`:
+      `setCompacting(convId)`(無 finalizer 自動送 —— 該處輸入已在 guard 第 1
+      層走 steering、由下一 loop iteration 消費)
+- [ ] `stores/chat/index.svelte.ts` `abortCurrentFlow`:補 `this.stopCompaction()`
+      (pending row 的 Send-immediately 於壓縮期間 = 中斷 summary → finalizer
+      自動送;無手動壓縮時 no-op)
+- [ ] `ChatMessages/ChatMessageCompacting.svelte`(新):指標列(spinner +
+      「Compacting context…」+ [Stop]);Stop 分派:`isRunning(convId)` ?
+      `stopGeneration()` : `stopCompaction()`;顯示條件 = 04-§4.2(per conv /
+      尾端非 cmp / 超標卡片顯示中不顯)
+- [ ] `ChatMessages.svelte`:訊息列尾端、超標卡片**上方**插入指標列 block
+      (DOM 序:訊息列 → N7 指標列 → 超標卡片 → pending/steering row);export
+      與 `ChatCompactionDecisionCard` 同 barrel
+- [ ] client 測試:指標列顯示/隱藏(同 conv / 他 conv / 尾端 cmp / 超標卡片
+      顯示中);Stop 分派(running / 非 running);`sendMessage` 於 compacting
+      (同 conv → pending、無 API 呼叫;他 conv → 正常);finalizer 自動送
+      (成功 / abort 兩路徑);DOM 序(指標列在 pending row 上方)
+- [ ] 手動驗收:見 §3 新增 5 項
+
+✅ 驗收:自動壓縮窗口內送下一句 → 訊息出現為 pending row、壓縮完成後自動送、
+payload = `[system, summary, kept…] + 新 turn`;Stop → 不建 cmp、queue 訊息
+照常送出(全量 context);他 conversation 輸入不受影響;in-loop 行為不變
+(steering)。
+
 ### Phase 3 —(可選,後續)
 
 > **下一輪(規劃已定;N1–N5 ✅ 全部完成並確認,明細見 06-status §3.13–§3.19,依序 N1→N5)**:
@@ -294,6 +344,7 @@ payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點�
 | `src/lib/services/context/index.ts` | barrel |
 | `src/lib/components/app/chat/ChatMessages/ChatMessage/ChatMessageCompaction/ChatMessageCompaction.svelte` | cmp 渲染 |
 | `src/lib/components/app/dialogs/DialogContextInspector.svelte` | inspector(可再拆 2~3 個子元件:訊息列、已裁切區、進階區) |
+| `src/lib/components/app/chat/ChatMessages/ChatMessageCompacting.svelte` | (N7)壓縮進行中指標列(spinner + Stop) |
 | `tests/unit/context-builder.test.ts` | |
 | `tests/unit/compaction-policy.test.ts` | |
 | `tests/stories/ChatMessageCompaction.stories.svelte` | |
@@ -306,13 +357,13 @@ payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點�
 | `src/lib/types/database.d.ts` | `CompactionMeta` + `DatabaseMessage.compactionMeta?` |
 | `src/lib/services/database.service.ts` | `createCompactionMessage()`;(必要時)`reparentDirectChildren` 開放給 expand 流程 |
 | `src/lib/services/chat.service.ts` | `sendMessage` / `preEncode` 改走 builder(簽名不變) |
-| `src/lib/stores/agentic/index.svelte.ts` | flow 開始前改走 builder |
-| `src/lib/stores/chat/index.svelte.ts` | `compactConversation()`、自動觸發掛 `onFlowComplete`、inspector 快照 |
-| `src/lib/stores/chat/context-stats.svelte.ts` | (Phase 2)compacted 指標 |
+| `src/lib/stores/agentic/index.svelte.ts` | flow 開始前改走 builder;(N7)`compactBetweenTurns` 改 `setCompacting(convId)` |
+| `src/lib/stores/chat/index.svelte.ts` | `compactConversation()`、自動觸發掛 `onFlowComplete`、inspector 快照;(N7)`sendMessage` guard + `endCompactionState` finalizer + `compacting` 前移 + `abortCurrentFlow` 補 `stopCompaction()` |
+| `src/lib/stores/chat/context-stats.svelte.ts` | (Phase 2)compacted 指標;(N7)`compactingConvId` + `setCompacting` helper |
 | `src/lib/constants/settings-keys.constants.ts` | 6 個新 key |
 | `src/lib/constants/settings.constants.ts` | `SETTINGS_REGISTRY` 條目 |
 | `src/lib/components/app/chat/ChatMessages/ChatMessage/ChatMessage.svelte` | 分派新 branch |
-| `src/lib/components/app/chat/ChatMessages/ChatMessages.svelte` | grouping 確認(大概率零改動)+ 測試 |
+| `src/lib/components/app/chat/ChatMessages/ChatMessages.svelte` | grouping 確認(大概率零改動)+ 測試;(N7)尾端插入指標列 block |
 | `src/lib/components/app/chat/ChatForm/ChatFormContextGauge/ContextGaugePopup.svelte` | inspector 入口 + compacted 列 |
 | `src/lib/hooks/use-keyboard-shortcuts.svelte.ts` | 快捷鍵(Phase 2) |
 | `src/lib/components/app/chat/index.ts` / `dialogs/index.ts` | export |
@@ -352,6 +403,11 @@ payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點�
 - `contextShowCompactionEntries=false` 不渲染
 - inspector:mock `buildLlmContext` 輸出 → 斷言列出的訊息、token 條、
   Copy JSON;summary 編輯後呼叫 `updateMessage`
+- (N7)指標列顯示/隱藏(同 conv / 他 conv / 尾端 cmp / 超標卡片顯示中);
+  Stop 分派(running → `stopGeneration`、非 running → `stopCompaction`);
+  `sendMessage` 於 compacting(同 conv → `injectPendingMessage`、無 API
+  呼叫;他 conv → 正常送出);finalizer 自動送(成功 / abort 兩路徑);
+  DOM 序(指標列在 pending row 上方)
 
 ### Storybook
 
@@ -369,6 +425,15 @@ payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點�
 5. Expand → 下一輪 request 回到全量。
 6. 在 cmp 之前的訊息 regenerate → 新分支無 cmp、全量 context。
 7. 關閉 server 時 summary 呼叫失敗 → 不產生 cmp、toast(flow 內失敗則續跑)。
+8. (N7)低 threshold 觸發自動壓縮 → 聊天區出現指標列(含 Stop);
+   壓縮期間送下一句 → pending row 出現於指標列下方 → 壓縮完成 →
+   自動送、payload 含 summary + 新 turn(inspector 可驗)。
+9. (N7)指標列 Stop → 不建 cmp、queue 訊息照常送出(全量 context)。
+10. (N7)pending row 的 Send-immediately(壓縮期間)→ summary 中斷、訊息送出。
+11. (N7)conv A 背景壓縮中 → conv B 的輸入/送出完全不受影響;
+    切回 A 時指標列/ pending row 仍在(若壓縮未完成)。
+12. (N7)in-loop 壓縮期間輸入 → 仍走 steering(行為不變);指標列 Stop =
+    停 flow。
 
 ## 4. 風險與緩解
 
@@ -377,7 +442,7 @@ payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點�
 | KV cache 前綴改變 → compaction 後首次全量 re-prompt | 該輪變慢(一次性) | compaction 完成立即 preEncode(新 context);自動壓縮只發生在 flow 間 |
 | 個別 chat template 對 user 開頭/連續 user 訊息敏感 | 極少數模型報錯 | summary 用 user role 是業界常規做法;出錯時 fail 在送出前可偵測(inspector 可先驗證);需要時可在 builder 加「summary 併入 system」的 fallback 開關(預設關) |
 | token 估計不準(char/4) | 斷點位置偏差 | 估計只決定「切哪」,不決定「送不送得下」;真正超標會 server 報錯,inspector 有真實 `prompt_n` 校準可看;Phase 3 升級 |
-| 自動壓縮與 stream 競態 | 送出中改路徑 | I7:觸發點只在 flow 完成後 + turn 之間(皆非 streaming 中)+ `isChatLoading` / `isRunning` 雙重檢查 |
+| 自動壓縮與 send 競態(N7) | 壓縮進行中(fire-and-forget)user 送新訊息 → cmp 懸空 / Summary 靜默丟失 + 未壓縮 context 送出 overflow | N7(設計 2026-11-04,06-§3.26):`sendMessage` guard(同 conv `compacting` → pending queue,任何結束皆自動送)+ per-conv `compactingConvId` + `compacting=true` 前移 + 四路徑 finalizer;UI 指標列(Stop)為第二層。I7 維持(觸發點 + 雙重檢查) |
 | mid-flow 再壓縮延遲(summary 呼叫在迴圈內) | agentic 該 turn 間隔變長 | 只在超 threshold 時發生;summary 可中斷(signal 綁 flow abort);fail-open 續跑;可用獨立開關(`contextAutoCompactionInLoop`)關閉 |
 | flow 在 cmp 建立後中斷 | 狀態不一致? | cmp 已落 DB + currNode 已移,中斷只是「少幾則訊息」,路徑仍合法;重載後重建即用 |
 | 斷點後移造成靜默資料遺失 | 品質 | 02-§4 規定:後移必須重新 summary,UI 強制流程 |
