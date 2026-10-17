@@ -3,49 +3,23 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新；2026-11-04：N7 第二輪 client 跑測 11/12——剩 1 支失敗根因
-> 也在測試檔（Svelte 5 `$derived` cache 過期：`contextStatsStore.activeModelId`
-> 已被同檔較早測試求值成 null，spy 上游 `modelsStore.activeModelId` getter
-> 不會 invalidate 它 → `contextTotal` 回 stale null → `nCtx` null → 提前
-> return），已修（改直接 mock 葉值 `contextStatsStore.contextTotal`）、
-> 來源碼零改動，待使用者重跑確認；明細見 §2u「第一/二輪跑測修復」/ §3.26；
-> 此前 v4 真實 token 計數 ✅ 完成並確認（2026-10-17，`npm run check` +
-> unit 3 支 + client 5 支全綠））**：
+> **恢復點（最新；2026-11-04：N7 client 跑測第一輪 10/12、第二輪 11/12——3 支
+> 失敗根因全在測試檔（LazyChatMessage 異步 mount 未等 / conversation 未入
+> list / Svelte 5 `$derived` cache 過期 → `contextTotal` stale null），全數
+> 已修、來源碼零改動，待使用者重跑確認；明細見 §2u「第一/二輪跑測修復」/
+> §3.26）**：
 >
-> N7 本輪已實做（設計 04-§4.2 / 05-N7 / §3.26；queue 不 block + in-chat 指標列
-> （Stop）+ per-conv scope）：
-> - `context-stats.svelte.ts`：`compactingConvId` + 原子 `setCompacting(convId | null)`；
->   全 codebase 的 `compacting` 寫入皆改走它（四條路徑）。
-> - `chatStore.compactConversation`：`setCompacting(convId)` 前移至 I7 guard 通過後
->   立刻（收掉 guard→path/plan/summary 的 async 競態窗口）；全函式 try/finally →
->   新共用 finalizer `endCompactionState(convId)`（`setCompacting(null)` +
->   consume pending → 自動送；conversation 已切走時 pending 留在 queue 不送、
->   不回傳到別的 conv）。
-> - `chatStore.moveCompactionBoundary`（後移）/ `recompactConversationEntry`：
->   同樣 `setCompacting(convId)` + finalizer（前移方向不改、無 summary 呼叫）。
-> - `agenticStore.compactBetweenTurns`：`setCompacting(conversationId)`；finally
->   只清狀態、**不** consume pending（in-loop 輸入走 steering、由下一 loop
->   iteration 消費，既有行為）。
-> - `chatStore.sendMessage`：新第三層 guard（steering / streaming-pending 之後）：
->   `compacting && compactingConvId === activeConv.id` → `injectPendingMessage`
->   + return（single-slot、後送覆蓋前送，與 streaming 同語義）；他 conv 不受影響。
-> - `chatStore.abortCurrentFlow`：補 `stopCompaction()`（pending row 的
->   Send-immediately 於壓縮期間 = 中斷 summary → finalizer 自動送；無手動壓縮
->   時 no-op）。
-> - 新 `ChatMessageCompacting.svelte`（spinner + 「Compacting context…」+ [Stop]，
->   `role="status"`）：顯示條件 = per-conv（`compactingConvId === activeConv.id`）
->   + 尾端非 cmp + 超標卡片未顯示（後者由 `ChatMessages.svelte` 的 else 分支處理，
->   DOM 序：訊息列 → 指標列 → 超標卡片 → pending/steering row）；Stop 分派：
->   `isRunning(convId)` ? `stopGeneration()` : `stopCompaction()`。barrel export
->   同 `ChatCompactionDecisionCard`。
-> - 既有三個 `compacting` 消費者改 per-conv（設計「conv A 背景壓縮不在 conv B
->   顯示/阻擋」的必然推論）：gauge popup 行 / cmp row 的 Stop 與 actionsBlocked /
->   inspector 的 actionsBlocked。
-> - 新 client suite `tests/client/chat-message-compacting.svelte.test.ts`（11 支）：
->   指標列顯示/隱藏（同 conv / 他 conv / idle / 尾端 cmp / 超標卡片顯示中）、
->   Stop 分派（running / 非 running）、`sendMessage` guard（同 conv → pending 無
->   API 呼叫；他 conv → 正常送）、finalizer 自動送（early exit / abort 兩路徑）、
->   DOM 序（指標列在 pending row 上方）。
+> N7 已實做（設計 04-§4.2 / 05-N7 / §3.26；實做明細見 §2u）：`compactingConvId` +
+> 原子 `setCompacting`（全 codebase `compacting` 寫入皆改走它、四條路徑）；
+> `compactConversation` 於 I7 guard 通過後立刻 claim state + 全函式
+> try/finally → 共用 finalizer `endCompactionState`（清狀態 + consume pending →
+> 自動送；conv 已切走時 pending 留 queue 不送）；`moveCompactionBoundary`（後移）/
+> `recompactConversationEntry` 同款；`compactBetweenTurns` 只清狀態（in-loop
+> 輸入走 steering）；`sendMessage` 新第三層 guard（同 conv compacting →
+> pending、他 conv 不受影響）；`abortCurrentFlow` 補 `stopCompaction()`；新
+> `ChatMessageCompacting.svelte` 指標列（per-conv + 尾端非 cmp + 超標卡片顯示中
+> 讓位；Stop 分派 `isRunning ? stopGeneration : stopCompaction`）；既有三個
+> `compacting` 消費者改 per-conv；新 client suite 11 支。
 >
 > **待使用者執行**：`npx vitest --project=client --run
 > tests/client/chat-message-compacting.svelte.test.ts`（+ `npm run check`；
@@ -53,63 +27,25 @@
 > `context-inspector` / `compaction-decision-card`）；綠後勾 05-N7 清單 +
 > 手動驗收（05-§3 #8–#12）。
 >
-> **N7 第一輪跑測（2026-11-04）：10/12，2 支失敗全在測試檔、來源碼零改動**：
-> 1. `yields to the cmp row when the tail is a compaction entry`：cmp row 由
->    `LazyChatMessage` 經 IntersectionObserver **異步** mount，單一 `tick()`
->    不足 → 改 `waitFor(cmpRow)` 輪詢（與 `chat-message-compaction` suite
->    同款 helper）。
-> 2. `auto-sends the queued message when the summary call is aborted`（
->    `runCompactionSummary` 0 次呼叫）雙根因：(a) `resolveConversationPath`
->    先查 `conversationsStore.conversations` list——測試只設
->    `activeConversation` → path null → 提前 return；`setActiveConversation`
->    改連 list 一起寫（afterEach 清）；(b) active conv 的 n_ctx 走
->    `contextStatsStore.contextTotal` → `modelsStore.activeModelId`（test env
->    null）→ 只 mock `getModelContextSize` 不夠；補 mock `activeModelId`
->    getter（`context-inspector` suite 同款 pattern）。
->    fixture 經 `planCompactionRecentWindow` 實算驗證：crossing 落 a2 →
->    split-turn cut、summarize 10000 ≥ 2000、kept 7 → plan 成立。
->
-> **N7 第二輪跑測（2026-11-04）：11/12，剩 1 支失敗也在測試檔、來源碼零改動**：
-> `auto-sends ... aborted`（仍 `runCompactionSummary` 0 次）：第一輪 (b) 的
-> 假設「derived 首次求值在 `compactConversation` 內（spy 已就位）」錯誤——
-> Svelte 5 `$derived` lazy + cached：`contextStatsStore.activeModelId`（
-> `contextTotal` 上游）已被同檔 finalizer 第一支（"settles without a plan"）
-> 求值成 null，module-singleton store 的 derived cache 跨測試不清除；
-> `vi.spyOn(modelsStore, 'activeModelId', 'get')` 只換 getter、不 invalidate
-> 追蹤依賴 → `contextTotal` 回 stale null → `nCtx` null → 提前 return
-> （finalizer 照常跑，故其餘斷言全過）。`context-inspector` suite 同款
-> pattern 綠是因為它首次求值在 spy 之後。修法：直接 pin 被測路徑讀的葉值
-> `vi.spyOn(contextStatsStore, 'contextTotal', 'get').mockReturnValue(256000)`；
-> 上游兩 mock + `modelsStore` import 移除（明細見 §2u「第二輪跑測修復」）。
->
-> v4 本輪結案：
-> - ✅ 使用者完整指令全綠：`npm run check`（0 錯 0 警告）+ unit
->   `compaction-policy` 82/82 / `context-builder` / `summarize` + client
->   `context-inspector` / `chat-message-compaction` / `context-gauge-compaction` /
->   `compaction-decision-card` / `settings-registry-invariants`。
-> - 第一輪 `compaction-policy.test.ts` 9 支失敗已於前輪全數修完（3 根因全在
->   測試檔、來源碼零改動；明細見 §3.25「測試」第一輪修復）。
-> - ✅ **使用者決策（已確認）**：`estimateCompactionSavings` 的 in-effect entry
->   **暫時**按 bytes/4 計入 payload（= v4 tail 語義）——用途只有提示 user 省了
->   多少 token、無實質影響；若差距太大，後續可考慮移除該顯示（已列 05-Phase 3
->   可選）。
-> - ✅ §3.25「實做決策待確認」全數隨 v4 結案確認（無推回）：非 active 對話
->   in-loop trigger = 該 turn 真實 prompt_n；負段總和 clamp 0；成功判定不加
->   system head（A: postSize = summary + kept）；toast after =
->   plan.estimatedTokensAfter + resolveSummarySize(summary.tokens, cmp.content)；
->   `estimateApiMessageTokens` 一併改名 `apiMessageBytes`。
+> 跑測史（明細見 §2u）：第一輪 10/12（cmp row `LazyChatMessage` 異步 mount
+> 未等 → `waitFor` 輪詢；conversation 未入 list → `setActiveConversation` 連
+> list 一起寫；n_ctx 鏈未 mock 全）；第二輪 11/12（剩 1 支 = Svelte 5
+> `$derived` cache 過期：`contextStatsStore.activeModelId`（`contextTotal`
+> 上游）已被同檔較早測試求值成 null，spy 上游 `modelsStore.activeModelId`
+> getter 不會 invalidate 它 → 改直接 mock 葉值 `contextStatsStore.contextTotal`；
+> 教訓見 §6）。
 >
 > **剩（依序）**：
-> 1. **N7 第一輪 2 支 + 第二輪 1 支測試失敗已修（全在測試檔、來源碼零改動）、
->    待使用者重跑確認**（明細見檔首 / §2u「第一/二輪跑測修復」/ §3.26）→
->    綠後勾 05-N7 清單 + 手動驗收（05-§3 #8–#12）。
+> 1. **N7 跑測修復（第一輪 2 支 + 第二輪 1 支、全在測試檔、來源碼零改動）、
+>    待使用者重跑確認**（明細見 §2u / §3.26）→ 綠後勾 05-N7 清單 + 手動驗收
+>    （05-§3 #8–#12）。
 > 2. Phase 1 5.8 手動驗收（§4 清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）。
 > 3. Phase 3 可選後續（05-§1）。
 >
-> **此前里程碑（皆完成並確認）**：雙 mode 共用+A+B（2026-10-17，
-> §3.22/§3.23，完整指令全綠）→ N6 空 kept（2026-10-17，§3.21）→
-> N1–N5（2026-07-22，§3.13–§3.19）→ Phase 2 P2.1–P2.6 →
-> Phase 1 5.1–5.7 → Phase 0（逐項最終驗證狀態見 §4）。
+> **此前里程碑（皆完成並確認）**：v4 真實 token 計數（2026-10-17，
+> §3.24/§3.25）→ 雙 mode 共用+A+B（2026-10-17，§3.22/§3.23）→
+> N6 空 kept（2026-10-17，§3.21）→ N1–N5（2026-07-22，§3.13–§3.19）→
+> Phase 2 P2.1–P2.6 → Phase 1 5.1–5.7 → Phase 0（逐項最終驗證狀態見 §4）。
 
 ## 1. 進度總覽
 
@@ -1513,7 +1449,7 @@ v1 的 char/4。設計同步:02-§3.4(v4)/§3.3/§6、03-§2/§4、04-§2/§3/§
 `{content, role, tool_call_id, tool_calls, reasoning_content}` → `sourceId` 不會進
 request body(已確認 chat.service.ts:1142-1162 / 883-897)。
 
-## 3.26 N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（分析 + 決策 2026-11-04；設計定稿、待實做）
+## 3.26 N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（分析 + 決策 2026-11-04；✅ 已實做 2026-11-04，跑測修復兩輪、待重跑確認）
 
 > 觸發：使用者要求「自動壓縮同時 user 輸入的部份，UI 要有明確提示（類似
 > Summarized message 列）+ 可中止 + 阻止輸入」。檢視現有 code 後改採
@@ -1636,6 +1572,11 @@ request body(已確認 chat.service.ts:1142-1162 / 883-897)。
   `compaction-decision-card` / `settings-registry-invariants` 全綠
   （第一輪 9 失敗已修、3 根因全在測試檔，見 §3.25；entry=bytes/4
   使用者確認）。
+- **N7 🚧（已實做、待重跑確認）**：client `chat-message-compacting`
+  第一輪 10/12 / 第二輪 11/12——3 支失敗根因全在測試檔（LazyChatMessage
+  異步 mount 未等 / conversation 未入 list / Svelte 5 `$derived` cache 過期
+  → `contextTotal` stale null），已修、來源碼零改動（明細見 §2u「第一/二輪
+  跑測修復」；derived-cache 教訓見 §6）；待使用者重跑（指令見檔首）。
 - **Phase 1 5.8 手動驗收（未做；可與 v4 一併驗）**：
   1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
   2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。
@@ -2037,6 +1978,15 @@ static async createCompactionMessage(params: {
 - **client 測試 selector 要夠窄**：dialog 內 bits-ui `Select.Trigger` 也帶
   `aria-expanded`——payload 列用 `[role="dialog"] li button[aria-expanded]`
   才不會數到 trigger（P2.4 五輪診斷的根因，§2m）。
+- **mock module-singleton store 的 `$derived` 鏈：spy 上游 plain getter
+  不會讓下游 derived 重新求值**：Svelte 5 `$derived` lazy + cached，
+  module-singleton store 的 derived cache 跨測試不清除——同檔第一支測試已
+  求值過的鏈（如 `contextStatsStore.contextTotal` → null），後續測試
+  `vi.spyOn(上游, 'get')` 只換 getter、不 invalidate 被追蹤的依賴 →
+  下游一直讀 stale 值（N7 第二輪：`contextTotal` stale null →
+  `compactConversation` 提前 return、`runCompactionSummary` 0 次，§2u）。
+  修法：直接 pin 被測路徑讀的葉值（`vi.spyOn(store, 'leaf', 'get')
+  .mockReturnValue(…)`），或改寫 `$state` 來源讓依賴正常 invalidate。
 - **測試在 `waitFor` throw 時 `unmount()` 沒跑到**：`afterEach` 的 store
   重置（如 `activeMessages = []`）會打在還掛著的元件上、effect 重跑——
   看到的「pathLen 0 / state 變 0」通常是 teardown 紅鵝、非 runtime bug

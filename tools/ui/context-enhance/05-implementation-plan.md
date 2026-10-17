@@ -246,7 +246,7 @@ payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點�
 副欄 bytes+bytes/4;切點/觸發/成功判定全真實 token;無資料例外(system、尚未送出
 尾端)才 bytes/4;設定數字不變(現 token 尺度)。
 
-### N7 — 壓縮進行中:輸入 queue + in-chat 指標列(Stop)(設計定稿 2026-11-04;✅ 已實做 2026-11-04、待使用者編譯/測試確認)
+### N7 — 壓縮進行中:輸入 queue + in-chat 指標列(Stop)(設計定稿 2026-11-04;✅ 已實做 2026-11-04、client 跑測第一輪 10/12 / 第二輪 11/12,3 失敗全在測試檔已修、待使用者重跑確認)
 
 > 背景(分析已對 code 驗證,2026-11-04,見 06-status §3.26):post-flow 自動
 > 壓縮兩個觸發點是 fire-and-forget;I7 guard 只在 `compactConversation` 開頭
