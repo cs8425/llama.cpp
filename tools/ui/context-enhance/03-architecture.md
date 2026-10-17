@@ -47,19 +47,21 @@ export interface CompactionPlan {
   kept: DatabaseMessage[];          // path[cutIndex .. end]
   estimatedTokensBefore: number;
   estimatedTokensAfter: number;
+  keptTokens: number;                        // kept 區真實 token(v4:成功判定用)
+  realMessageTokens: Map<string, number>;    // plan 時逐則真實 map(v4)
 }
 
 export interface ContextBuildResult {
-  /** 實際送出的 payload(已轉換,含 attachments → content parts) */
-  messages: ApiChatMessageData[];
+  /** 實際送出的 payload(已轉換,含 attachments → content parts);每行帶
+   *  sourceId(來源 DB id;summary row = cmp entry id)供 inspector 映射回
+   *  逐則真實 token(v4,§02-3.4);送出時該欄位被剝除、不上 wire */
+  messages: (ApiChatMessageData & { sourceId?: string })[];
   /** 供 UI/inspector 使用:哪一筆 cmp 生效、drop 了幾則、斷點是否失效
    *  (firstKeptMessageId 缺 = 空 kept,是合法狀態,不是失效) */
   compaction:
     | { entryId: string; firstKeptMessageId?: string; droppedCount: number;
         boundaryValid: boolean }
     | null;
-  /** 估計 token(與 estimateTokens 同源) */
-  estimatedTokens: number;
 }
 ```
 
@@ -174,18 +176,18 @@ user 按送出
 
 ```
 onFlowComplete(且 !isChatLoading && !agenticStore.isRunning)
-  → 觸發檢查(mode 特定,§02-6):
-      A: lastPrompt > window − keepRecentTokens ?(window = min(n_ctx, override))
-      B: lastPrompt > n_ctx × threshold% ?
+  → 觸發檢查(mode 特定,§02-6;觸發值 = 真實 contextUsed,gauge 同源,v4):
+      A: contextUsed > window − keepRecentTokens ?(window = min(n_ctx, override))
+      B: contextUsed > n_ctx × threshold% ?
       → 未達? 結束
   → plan = mode A: planCompactionRecentWindow(path, keep)
            mode B: planCompaction(path, budget = (threshold − keepTarget)% × n_ctx)
       → null? 結束(不壓)
   → summarizeMessages(plan)      (UI:「Compacting context…」)
       → 失敗? toast,結束(不壓)
-  → 成功判定(mode 特定,§02-6):
-      A: headBytes + summaryTokens + keptBytes ≤ window − keepRecentTokens ?
-      B: headBytes + summaryTokens ≤ keepTarget% × n_ctx ?
+  → 成功判定(mode 特定,§02-6;v4:system head 不計):
+      A: summaryTokens + plan.keptTokens ≤ window − keepRecentTokens ?
+      B: summaryTokens ≤ keepTarget% × n_ctx ?
       → 否 → 重發同一 request(contextSummaryMaxAttempts,預設 3 次總計;≤0 = 無限)
             → 仍超 → gate 問 user:[使用這次壓完 / 重壓 / 這次不壓]
               (use it → 繼續;retry → 嘗試次數重新計算後重跑;skip → 結束不壓)
@@ -206,7 +208,8 @@ onFlowComplete(且 !isChatLoading && !agenticStore.isRunning)
 ```
 開 DialogContextInspector
   → buildLlmContext(activeMessages)   ← 與送出同源,保證 WYSIWYG
-  顯示:視覺化訊息列 + 每則 token 估計 + 總和 vs n_ctx 條 + 原始 JSON
+  顯示:視覺化訊息列 + 每則主欄真實 token(system `-`/尾端 `est.`)+ 副欄
+  bytes + 總和條 = 真實 contextUsed(＝gauge)+ 原始 JSON
   編輯:
     - summary 文字 → updateMessage(cmpId, { content })
     - 斷點下拉(只有「user 訊息」選項)

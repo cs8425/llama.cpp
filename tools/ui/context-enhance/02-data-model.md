@@ -200,7 +200,7 @@ valid(j) = path[j].role ∈ {user, assistant}
 ```
 budget = keepBudgetTokens = (contextCompactionThreshold% − contextKeepTargetPercent%) × n_ctx
         # v3(2026-10-16,使用者確認 A 第二輪):budget = threshold 與 keep target 的差值:
-        # 裁切後總量 = (head + summary) + kept ≤ keepTarget%(成功判定)+ budget(切點)
+        # 裁切後總量 = summary + kept ≤ keepTarget%(成功判定,v4:head 不計)+ budget(切點)
         # = threshold% × n_ctx → 不會立刻再觸發(避免連續壓縮)。
         # 移除舊的「- summaryReserve(× 1.5)、下限 n_ctx × 0.1」公式(過度設計,§3.20);
         # threshold ≤ keepTarget(設定異常)→ budget = 0 → 永不壓縮。
@@ -222,8 +222,8 @@ valid(j) = path[j].role ∈ {user, assistant}
   split 切是預算逼出來的退路。
 - **threshold 與 keep target 的分工(v3 最終版)**:`threshold` = 觸發點(ctx
   超過這個 % 才檢查,見 §6)且是**壓縮後總量的上限**;`keepTarget%` 約束
-  **壓縮代表的大小**(head + summary,成功判定,§6);budget = 兩者差值
-  (kept 區上限,上方公式)。三者關係:head + summary ≤ keepTarget%、
+  **壓縮代表的大小**(summary,成功判定,§6;v4:system head 不計);budget = 兩者差值
+  (kept 區上限,上方公式)。三者關係:summary ≤ keepTarget%、
   kept ≤ (threshold − keepTarget)%、**總量 ≤ threshold% → 不立刻再觸發**。
   v3 移除 summaryReserve(summary max × 1.5)與 10% floor;舊公式
   `n_ctx × (1 − threshold%)`(§3.12 已修)與 reserve/floor 公式
@@ -289,7 +289,7 @@ mode B 切點原本「byte 對 token budget」的錯配順手修好。
 | 移動斷點(kept 變長/變短) | 變長(斷點前移):只更新 `firstKeptMessageId`(舊 summary 多涵蓋一點,無害)。變短(斷點後移):新 drop 的訊息未被 summary 涵蓋 → UI 必須提示「重新產生 summary」並執行,否則資料靜默遺失 | — |
 | 對話 import(含 cmp) | JSONL 原樣進 DB;`type` 欄位被舊版解析器忽略時,按 role=user 顯示 | §1.2 |
 | 新對話第一則訊息 | 不可能觸發(可 summarize 區不足 minSummarizeTokens) | policy |
-| compact 結果超標（head + summary > keepTarget% × n_ctx） | 重發同一 request（`contextSummaryMaxAttempts`，預設 3 次總計；1 = 一次；≤0 = 無限）→ 仍超 → gate 問 user：[使用這次壓完 / 重壓 / 這次不壓]；use it = 建 cmp（接受超標 summary）；retry = 嘗試次數重新計算後重跑；skip = 不建 cmp、維持全量 context | §6（v3） |
+| compact 結果超標（summary > keepTarget% × n_ctx;v4:head 不計） | 重發同一 request（`contextSummaryMaxAttempts`，預設 3 次總計；1 = 一次；≤0 = 無限）→ 仍超 → gate 問 user：[使用這次壓完 / 重壓 / 這次不壓]；use it = 建 cmp（接受超標 summary）；retry = 嘗試次數重新計算後重跑；skip = 不建 cmp、維持全量 context | §6（v3） |
 | gate 等待期間 abort（flow stop / Stop 鍵） | 等同 skip（fail-open），不建 cmp | §6（v3） |
 | server 沒回 summary 的 token 數 | 成功判定改用 `byteLen(summary content)` 代入（E：無 API 數 → byte 數） | §3.4/§6（v3） |
 
@@ -356,17 +356,16 @@ onFlowComplete / onComplete(且無 stream 在跑)/ agentic turn 之間:
      && planCompaction(path, budget) 有有效斷點:   # budget = (threshold − keepTarget)% × n_ctx(§3.3)
         → 執行壓縮:
             1. summarize(max_tokens = summaryMax% × n_ctx,不變)
-            2. 成功判定(新):
+            2. 成功判定(新;v4:system head 不計——併進首段總和):
                summaryTokens = summary 回應的實際 completion tokens(API)
                                # server 沒回時 → byteLen(summary content)
-               headBytes     = system head 的 byte 數(無獨立 API 數)
-               headBytes + summaryTokens ≤ keepTarget% × n_ctx ?
+               summaryTokens ≤ keepTarget% × n_ctx ?
                  是 → 建 cmp,完成
                  否 → 重發同一個 compact request
                       (總嘗試次數 = contextSummaryMaxAttempts,預設 3;
                        1 = 總共一次;≤ 0 = 無限)
                       仍超 → 停下,gate 問 user(同 maxTurns/tool 確認機制):
-                        顯示:當前 compact 完的 token 數(head + summary,
+                        顯示:當前 compact 完的 token 數(summary,
                               實際值/byte 數)vs keepTarget% 目標
                         [使用這次壓完 (use it)] → 建 cmp(接受超標 summary)
                         [重壓 (retry)]          → 重跑 summary 迴圈
@@ -375,12 +374,12 @@ onFlowComplete / onComplete(且無 stream 在跑)/ agentic turn 之間:
 ```
 
 - **觸發**:`threshold` = 純觸發點(「超過這個 % 才檢查」),用真實 `contextUsed`(gauge 同源)。
-- **成功判定**:「壓到多小」用**事後實際數字**判定——`system head + summary ≤
-  keepTarget% × n_ctx`。summary 的 token 數是 API 回應的實際值(需要非 streaming
-  路徑解析 `timings`,見 03-§3);head 無獨立真實值,用 bytes/4 估算(靜態小文字,
-  誤差可忽略)。**kept 區不進成功判定**——它已由切點(§3.3)約束在
-  (threshold − keepTarget)% 內;總量 = (head + summary) + kept ≤ threshold%
-  × n_ctx,不會立刻再觸發。
+- **成功判定**:「壓到多小」用**事後實際數字**判定——mode B:
+  `summary ≤ keepTarget% × n_ctx`(v4:system head 不計,併進首段總和);
+  mode A:`summary + kept ≤ window − keep`。summary 的 token 數是 API 回應的實際值
+  (需要非 streaming 路徑解析 `timings`,見 03-§3)。**kept 區不進成功判定**(mode B)——
+  它已由切點(§3.3)約束在 (threshold − keepTarget)% 內;總量 = summary + kept
+  ≤ threshold% × n_ctx,不會立刻再觸發。
 - **超標處理**:server 有強制 `max_tokens`,summary 本身不會超過它;超標只可能
   來自 summary 真的太長(模型寫太多)→ 重發同一個 request 幾次(stochastic)
   通常可解;仍超則交給 user 決(三選項)。in-loop 時 flow 暫停等 user

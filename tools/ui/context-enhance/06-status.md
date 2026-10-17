@@ -893,7 +893,7 @@ mode 應進 config、預留空間。
 `npx vitest --project=client --run tests/client/settings-registry-invariants.svelte.test.ts`
 全綠。
 
-### 3.20 v3 重設計：實際 token 計數 + compact 成功判定 + 超標重試/user gate（設計已確認，未實做）
+### 3.20 v3 重設計：實際 token 計數 + compact 成功判定 + 超標重試/user gate（✅ 已實做为雙 mode 方法 B；token 計數部分後被 v4 取代，見 §3.24/§3.25）
 
 **背景（2026-10-16 使用者報告）**：Context 面板 262.14K / 262.14K（100%），
 Inspector 顯示 Estimated send 175,490（66.9%），但自動壓縮**從未觸發**。
@@ -957,13 +957,11 @@ summary 的 completion tokens）；**msg 不是 API 來的 / API 缺失 token
 該設定實際是 byte budget）；觸發式 `window − keepRecentTokens` 混 token 尺度
 （window）與 byte 尺度（keep）（CJK 下觸發點實際偏高，即較晚才壓）。
 
-**狀態**：v3 設計已確認（budget 公式為 A 第二輪版）；v3 現為雙 mode 規格的
-**方法 B**（§3.22，2026-10-17 定稿）；02/03/04/05 已同步；**未實做**。
-實做清單見 05-雙 mode；完成後使用者自行 `npm run check` + unit
-（compaction-policy / summarize / context-builder + 新 planCompactionRecentWindow）
-+ client（settings-registry-invariants + 卡片測試 + 回歸）驗證。
+**狀態**：✅ 已實做並確認（2026-10-17，作為雙 mode 的**方法 B**，見
+§3.22/§3.23）；v3 的 token 計數部分（API 值 / byte 數）已被 **v4 真實
+per-message token** 取代（§3.24/§3.25，見 02-§3.4）。
 
-### 3.21 N6：split 切允許空 kept（使用者要求 2026-10-16，未實做）
+### 3.21 N6：split 切允許空 kept（使用者要求 2026-10-16；✅ 已實做並確認 2026-10-17）
 
 **背景**：split 切原本要求「最後 ≥2 則（含大 tool result）放得下 budget」
 （`contextKeepMinMessages` 預設 2）。budget 極緊時（典型：agentic 最後一組
@@ -1404,9 +1402,9 @@ request body(已確認 chat.service.ts:1142-1162 / 883-897)。
   `chat-message-compaction` / `context-gauge-compaction` 全綠
   （第一輪 2 支 client 失敗已修：卡片標記空白 + builder summary 段
   char/4 遺漏，見 §3.23）。
-- **v4（目前停點）🚧**：來源碼 9 檔 + unit `compaction-policy` 重寫完成
-  （本輪靜態核實，見 §3.25）；剩 2 unit + 4 client 測試 stale → 更新後
-  使用者跑完整指令（見檔首恢復點）。
+- **v4（目前停點）🚧**：來源碼 9 檔 + 2 unit + 4 client 測試全數更新
+  （本輪靜態核實，見 §3.25；含修 `DialogContextInspector` `row.tokens`
+  模板殘留 bug）→ 使用者跑完整指令（見檔首恢復點）。
 - **Phase 1 5.8 手動驗收（未做；可與 v4 一併驗）**：
   1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
   2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。

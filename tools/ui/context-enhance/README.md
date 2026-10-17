@@ -15,10 +15,11 @@
 > default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status §3.18）；
 > **N5 ✅ 完成並確認**（新設定 `contextSummaryMode`：summary 的 prompt
 > 模式開放給 user 選，見 06-status §3.19））。
-> **目前停點**：**v4 真實 token 計數 🚧 實做中**（2026-10-17）——
-> 來源碼 9 檔 + unit `compaction-policy` 重寫完成（已靜態核實）；
-> 剩 2 unit + 4 client 測試（stale，明細見 06-status §3.25），
-> 待使用者編譯驗證。v4 = 計數/觸發/成功判定/Inspector 全用真實
+> **目前停點**：**v4 真實 token 計數 🚧 待編譯驗證**（2026-10-17）——
+> 來源碼 9 檔 + 2 unit + 4 client 測試全數更新完成（已靜態核實,
+> 明細見 06-status §3.25；含修 `DialogContextInspector` `row.tokens` 模板
+> 殘留 bug），待使用者 `npm run check` + 測試驗證。v4 = 計數/觸發/成功判定/
+> Inspector 全用真實
 > token（`deriveRealMessageTokens`：assistant=predicted_n、段真實總和歸該段
 > 最後一則非-assistant）、觸發 = 真實 `contextUsed`（gauge 同源）、無資料
 > 例外（system / 尚未送出尾端）才 `bytes/4` 估算；設定數字不變、現為
@@ -27,7 +28,7 @@
 > 兩種作法、user 選 mode、**default = A（recent-window / pi reference）**：
 > A = 至少留最近 `keepRecentTokens` 原樣 + 觸發 `window − keep`（window =
 > min(n_ctx, `contextMaxContextOverride`）；B = v3 + N6（kept ≤
-> （threshold−keepTarget）%、成功判定 head+summary ≤ keepTarget%、允許空
+> （threshold−keepTarget）%、成功判定 summary ≤ keepTarget%（v4:head 不計）、允許空
 > kept）。超標 → 重試（`contextSummaryMaxAttempts`）→ user gate（使用/重壓/跳過）。
 > 設計見 06-status §3.22/§3.24、實做明細見 §3.23/§3.25。此前皆完成並確認：
 > N6（split 切允許空 kept，2026-10-17）；N1–N5（2026-07-22：summary 上限
@@ -70,15 +71,15 @@
    span 前半段進 summary,後半段(最近 tool 交換)保留;連最近 tool 交換都
    放不下時,切點落在**最後一則訊息之後**(空 kept,全部壓縮;
    N6,2026-10-16,見 06-status §3.21)。
-5. **自動觸發**:flow 之間(用 server `timings.prompt_n` 對照 mode 觸發點),
-   以及 **agentic 迴圈 turn 之間**(「兩次 user 訊息之間」的 context 爆炸就
-   發生在迴圈內,只在 flow 結束後檢查來不及;觸發點皆非 streaming 中)。
+5. **自動觸發**:flow 之間與 **agentic 迴圈 turn 之間**（「兩次 user 訊息之間」的 context 爆炸
+   發生在迴圈內,只在 flow 結束後檢查來不及;觸發點皆非 streaming 中）。觸發值 = 真實
+   `contextUsed`（gauge 同源,v4）。
    **雙 mode(2026-10-17 定稿,預設 A)**:A = recent-window(pi reference):
    觸發 `window − keepRecentTokens`(window = min(n_ctx, maxContextOverride))、
    切點 = 從最後往回加真實 token 數(02-§3.4;無資料例外 bytes/4)到 ≥ keep(尾端 tool 跨越留其前 ass)、成功判定
-   `head + summary + kept ≤ window − keep`;B = threshold-target(v3 + N6):
+   `summary + kept ≤ window − keep`(v4:system head 不計);B = threshold-target(v3 + N6):
    觸發 `threshold% × n_ctx`、kept ≤ (threshold−keepTarget)%、成功判定
-   `head + summary ≤ keepTarget%`、允許空 kept。超標(兩 mode 共用)→ 重試
+   `summary ≤ keepTarget%`(v4:system head 不計)、允許空 kept。超標(兩 mode 共用)→ 重試
    (`contextSummaryMaxAttempts`,預設 3 共計)→ user gate(使用/重壓/跳過,
    同 maxTurns 卡片機制)。設計與根因分析見 06-status §3.20/§3.22。
 6. **Inspector 永遠可用**(不受自動壓縮開關影響):顯示精確的 payload、
@@ -111,5 +112,6 @@ LLM 實際收到:  system │ [summary, role=user] │ usr │ ass │ tool │ 
   agentic flow 開始時套用、split user-message span(span 超預算時切在 span 內)。
 - ❌ 不做(留給後續):兩段式 summary(兩次 LLM 呼叫再合併;v1 用單呼叫雙段
   prompt)、多 summary 合併策略(舊 cmp 直接落在 kept 區時按一般訊息送出即可)、
-  server 端 compaction。（token 計數 v3 已定:API 實際值優先、否則 UTF-8
-  byte 數,見 02-§3.4）
+  server 端 compaction。（token 計數 v4 已定:真實 per-message token
+  （`deriveRealMessageTokens`）,無資料例外（system / 尚未送出尾端）才
+  `bytes/4` 估算,見 02-§3.4）
