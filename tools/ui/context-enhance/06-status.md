@@ -3,7 +3,19 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新）**：**第一輪 check + unit 驗證的錯誤已修（11 type errors + 3 test
+> **恢復點（最新）**：**雙 mode（共用 + A + B）✅ 完成並確認**（2026-10-17）——
+> 使用者重跑上一恢復點的 4 條指令：`npm run check` + client
+> `compaction-decision-card`（9/9）+ client `context-inspector`（14/14）+ unit
+> `context-builder` 回歸，**全綠**（第一輪的 2 支 client 失敗——卡片標記空白 +
+> builder summary 段 char/4 遺漏——已修，明細見 §4）；併上上一輪全綠（unit
+> `compaction-policy` / `summarize` + client `settings-registry-invariants` /
+> `chat-message-compaction` / `context-gauge-compaction`），雙 mode（共用 + A +
+> B）**完成**。05-雙 mode 清單全勾、§3.22/§3.23 狀態改「完成並確認」。
+> **下一步**：① Phase 1 5.8 手動驗收（見 §4 清單；A/B mode 行為可一併驗）；
+> ② Phase 3 可選後續（兩段式 summary / per-conversation 覆蓋 / 合併重摘要
+> 提示 / summary 獨立 model / endpoint，05-§1；token 校準已被 v3 取代）。
+>
+> 此前恢復點：**第一輪 check + unit 驗證的錯誤已修（11 type errors + 3 test
 > failures）、待使用者重跑確認**（2026-10-17）——使用者跑 `npm run check` + unit
 > `compaction-policy` 回報 11 型別錯誤（3 檔）+ 3 支測試失敗；全部定位為**型別/
 > 測試硬編碼層面的 mechanical 錯誤、來源碼邏輯無誤**，已修：
@@ -125,7 +137,7 @@
 | Phase 1 — 送出路徑接 builder + 手動壓縮 | 🚧 5.1–5.7 ✅ 全部完成並確認（見 §4）；只剩 5.8 手動驗收 |
 | Phase 2 — 自動觸發 + 人工介入 + flow 內再壓縮 | ✅ 完成：P2.1 ✅（見 §4）；P2.2 ✅（見 §2h/§4）；P2.3 ✅（見 §2i/§4）；P2.4 ✅（client 10/10 + check 全綠，見 §4/§2j/§2m/§2n）；P2.5 ✅（compaction 10/10 + inspector 10/10 回歸 + check 全綠，見 §4/§2o）；**P2.6 ✅ 完成並確認**（client 8/8 + check 全綠，見 §4/§2p/§2q/§2r） |
 | Phase 3 — 可選後續 | ⬜ |
-| 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | 🚧 規格定稿（2026-10-17）；**來源碼 + 測試完成（共用 + A + B，§3.23）**；第一輪 check + unit 抓到 11 type errors + 3 test failures（全 mechanical、已修，見恢復點），待使用者重跑確認 |
+| 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
 | 下一輪 — 5 項增強（N1 summary 上限 / N2 keep target 設定 / N3 Stop 鍵 / N4 prefix-stable 模式 / N5 summary mode 設定，§5c） | ✅ **N1–N5 全部完成並確認**：N1（§3.13：改 n_ctx × %）；N2（§3.14：threshold 預設 80→70 + `contextKeepTargetPercent`）；N3（§3.15：手動壓縮 Stop 鍵）；N4（§3.18：prefix-stable default + 附件原樣送 + reasoning 跟隨主送出開關；第一輪 test bug 已修、重跑全綠）；N5（§3.19：`contextSummaryMode` SELECT 設定） |
@@ -1226,7 +1238,7 @@ boundary 切維持原規則（整個最後一個 turn 要放得下 budget）。
 抓到 `context-builder.ts` 語法錯（`keptIndex` 三元漏 `?`）、已修（2026-10-17，
 見 §4 N6 第一輪）。
 
-### 3.22 雙 mode 壓縮：recent-window（A，預設）+ threshold-target（B = v3+N6）（規格定稿 2026-10-17，未實做）
+### 3.22 雙 mode 壓縮：recent-window（A，預設）+ threshold-target（B = v3+N6）（規格定稿 2026-10-17，✅ 完成並確認 2026-10-17）
 
 **背景**：§3.20 的 v3 設計（budget 公式修正 + 實際 token 計數 + 成功判定/
 重試/gate）已確認未實做；使用者另引入 pi reference 的切點（下限：從最後
@@ -1282,17 +1294,16 @@ boundary 切維持原規則（整個最後一個 turn 要放得下 budget）。
   （Q2 已解：byte 加算 + 記錄後果）、兩個 planner 的長期維護（皆小純函式、
   回同一 CompactionPlan 型別）。
 
-**狀態**：規格定稿（Q1–Q3）；02/03/04/05 已同步；**來源碼完成（2026-10-17，
-§3.23，18 檔，已逐檔確認存在且與明細一致）+ 測試已寫（2026-10-17，見 §3.23
-「下一步」執行記錄）**、待使用者編譯驗證。實做順序已照規劃執行：共用基礎
-（timings 解析 / `{content, tokens}` / byte 計數 / 重試+gate / settings 鏈 /
-卡片）→ A（planner + 觸發/判定 + gauge）→ B（budget 公式 + 觸發/判定）→
-測試（unit 重寫/更新 + client 新 suite + 1 項回歸修正）。下一步 = 使用者跑
-`npm run check` + unit（compaction-policy / summarize / context-builder）+
-client（settings-registry-invariants + compaction-decision-card + 回歸）驗證 →
-全綠 → 勾 05-雙 mode 清單、狀態改「完成並確認」。
+**狀態**：✅ **完成並確認（2026-10-17）**——規格定稿（Q1–Q3）；02/03/04/05
+已同步；來源碼（§3.23，18 檔）+ 測試（unit 重寫/更新 + client 新 suite +
+1 項回歸修正，見 §3.23 執行記錄）全部完成；使用者完整指令全綠（check +
+unit 3 支 + client 5 支；第一輪 2 支 client 失敗已修，見 §4）。實做順序已照
+規劃執行：共用基礎（timings 解析 / `{content, tokens}` / byte 計數 / 重試+
+gate / settings 鏈 / 卡片）→ A（planner + 觸發/判定 + gauge）→ B（budget
+公式 + 觸發/判定）→ 測試（unit 重寫/更新 + client 新 suite + 1 項回歸修正）。
+05-雙 mode 清單已全勾。
 
-## 3.23 雙 mode 實做（共用 + A + B）（2026-10-17；來源碼 + 測試完成、待編譯驗證）
+## 3.23 雙 mode 實做（共用 + A + B）（2026-10-17；✅ 完成並確認）
 
 > 實做順序照 §3.22：共用基礎 → A → B。本輪一次完成三個層（同一個可編譯
 > 單位，末尾以使用者 check + 測試收口）。
@@ -1751,6 +1762,17 @@ endpoint）。（N6 編譯/測試確認 ✅ 已完成並確認，見下方 N6 �
    + `npx vitest --project=client --run tests/client/context-inspector.svelte.test.ts`
    （unit `context-builder` 可一併回歸）。全綠 → 勾 05-雙 mode 清單、
    §3.22/§3.23 狀態改「完成並確認」、README 停點更新。
+ 
+- **雙 mode 重跑 ✅ 完成並確認**（使用者 2026-10-17）：使用者重跑上一條的 4
+   條指令——`npm run check` + client `compaction-decision-card`（**9/9**）+
+   client `context-inspector`（**14/14**）+ unit `context-builder` 回歸——
+   **全綠**。第一輪 2 支 client 失敗結案（見上一條）。併上上一輪全綠（unit
+   `compaction-policy` / `summarize` + client `settings-registry-invariants` /
+   `chat-message-compaction` / `context-gauge-compaction`），雙 mode（共用 +
+   A + B）完成。05-雙 mode 清單全勾、§3.22/§3.23 狀態改「完成並確認」、
+   README 停點更新。**剩**：Phase 1 5.8 手動驗收 + Phase 3 可選後續（兩段式
+   summary / per-conversation 覆蓋 / 合併重摘要提示 / summary 獨立 model /
+   endpoint，05-§1；token 校準已被 v3 取代）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 

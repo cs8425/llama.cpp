@@ -56,7 +56,7 @@
 ✅ 驗收:長對話(或測試用低 threshold)自動壓縮發生一次且只發生一次;
 編輯 summary 後下一輪 payload 即變;Expand 後 context 完整還原。
 
-### 雙 mode — recent-window(A,預設)+ threshold-target(B = v3 + N6)(規格定稿 2026-10-17;來源碼 + 測試完成 2026-10-17,待使用者編譯驗證)
+### 雙 mode — recent-window(A,預設)+ threshold-target(B = v3 + N6)(規格定稿 2026-10-17;✅ 完成並確認 2026-10-17)
 
 > 背景:自動壓縮從未觸發(262.14K/262.14K 案例)——根因是舊 budget 公式
 > (summary max 70% × 1.5 = 105% n_ctx 的 reserve)把 keepBudget 壓死在 10% floor,
@@ -67,18 +67,13 @@
 > 無 token 數用 byte、**不做派生比例**。決策見 06-status §3.22;設計:
 > 02-§3.3/§3.4/§6(雙 mode)、03-§2/§3/§4.2/§4.4、04-§3/§4。
 >
-> **狀態(2026-10-17)**:共用 / A / B 三塊**來源碼全部完成**(18 檔,明細見
-> 06-status §3.23);**測試已全部寫完**(第二輪,零來源碼改動,見 06-status
-> §3.23 執行記錄):unit `compaction-policy` 重寫(byte 語義 + v3 差值公式 +
-> 8 個新 suite + 既有 11 支 `planCompaction` 重調 + savings fixture 重算)、
-> unit `summarize` 更新(`{ content, tokens }` 斷言 + `SummaryResult` 3 支 +
-> `summarizeWithRetry` 8 支)、client 新 `compaction-decision-card` suite
-> (卡片 6 + gate 3)、回歸修正 `context-gauge-compaction`(`~1,794` →
-> `~1,658`,byte 語義)。待使用者 `npm run check` + unit 3 支
-> (compaction-policy / summarize / context-builder)+ client 5 支
-> (settings-registry-invariants / compaction-decision-card + 回歸
-> chat-message-compaction / context-inspector / context-gauge-compaction)
-> 全綠後,§3.22/§3.23 狀態改「完成並確認」、README 停點更新。
+> **狀態(2026-10-17)**:✅ **完成並確認**——共用 / A / B 三塊來源碼(18 檔,
+> 明細見 06-status §3.23)+ 測試(unit `compaction-policy` 重寫 / unit
+> `summarize` 更新 / client `compaction-decision-card` 新 suite /
+> `context-gauge-compaction` 回歸修正,見 06-status §3.23 執行記錄)全部完成;
+> 使用者完整指令全綠(`npm run check` + unit 3 支 + client 5 支;第一輪 2 支
+> client 失敗——卡片標記空白 + builder summary 段 char/4 遺漏——已修,見
+> 06-status §4)。下列清單全部勾選。
 
 #### 共用(兩 mode)
 
