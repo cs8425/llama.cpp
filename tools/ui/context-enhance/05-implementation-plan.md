@@ -246,9 +246,9 @@ payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點�
 副欄 bytes+bytes/4;切點/觸發/成功判定全真實 token;無資料例外(system、尚未送出
 尾端)才 bytes/4;設定數字不變(現 token 尺度)。
 
-### N7 — 壓縮進行中:輸入 queue + in-chat 指標列(Stop)(設計定稿 2026-11-04;✅ 完成並確認 2026-11-04,使用者重跑全綠,見 06-status §2u/§3.26)
+### N7 — 壓縮進行中:輸入 queue + in-chat 指標列(Stop)(設計定稿 2026-10-04;✅ 完成並確認 2026-10-04,使用者重跑全綠,見 06-status §2u/§3.26)
 
-> 背景(分析已對 code 驗證,2026-11-04,見 06-status §3.26):post-flow 自動
+> 背景(分析已對 code 驗證,2026-10-04,見 06-status §3.26):post-flow 自動
 > 壓縮兩個觸發點是 fire-and-forget;I7 guard 只在 `compactConversation` 開頭
 > 檢查一次、`sendMessage` 不查 `compacting` → user 在 summary 期間立刻送下一句:
 > (a) cmp 懸空(新 turn 的 `updateCurrentNode` 覆蓋 cmp 的)→ Summary 靜默丟失;
@@ -256,7 +256,7 @@ payload = `[system, summary]`、inspector 顯示「無保留訊息」、斷點�
 > Re-summarize / 斷點後移同窗。in-loop 不受影響(loop block、輸入走
 > steering)。進行中狀態也只在 gauge popup 可見、post-flow 聊天區無 Stop 入口。
 >
-> **使用者決策(2026-11-04)**:queue 不 block(輸入 → pending、壓縮完成後
+> **使用者決策(2026-10-04)**:queue 不 block(輸入 → pending、壓縮完成後
 > 自動送)+ in-chat 明確指標列(含 Stop)+ pending row 顯示於指標列下方
 > (既有 `ChatMessageUserPending`)。設計:04-§4.2;實做明細:06-status §2u。
 
@@ -377,7 +377,7 @@ payload = `[system, summary, kept]`、不 overflow；DB 無 orphan cmp（或有�
 server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、但 tool 執行不
 復原——既有）；N7 in-memory queue（pending messages）F5 即失（既有、輕微）。
 
-### N10 — in-loop compaction 的 cmp 被接成 sibling（系統性 bug；最高優先；規格定稿 2026-10-18；未實做；明細見 06-status §3.29）
+### N10 — in-loop compaction 的 cmp 被接成 sibling（系統性 bug；✅ 完成並確認 2026-10-18；明細見 06-status §3.29）
 
 > 背景（使用者回報 + 已對 code 驗證，2026-10-18）：agentic loop 連壓兩次正常停下
 > 後，UI 看得到 summary；但 F5 或匯出→匯入後**所有 summary 消失**、inspector 顯示
@@ -398,8 +398,10 @@ server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、�
 - [x] 已損樹修復（單一 IDB transaction：`c2.parent = c.id`、`p.children` 移除
       `c2.id`、`c.children` 加入 `c2.id`）+ app 啟動一次性 migration +
       `loadConversation` 防禦層
-- [ ] 核心回歸：in-loop compaction 後下一則 assistant 訊息 `parent === cmp.id`
-- [ ] 回歸：`npm run check` + 既有 5 支 client compaction suite 零改動全綠
+- [x] 回歸：`npm run check` + unit `branching`（`findCompactionGraftFixes` 5 向量）
+      + 既有 5 支 client compaction suite 零改動全綠（2026-10-18 確認）
+- [ ] 核心回歸（手動）：in-loop compaction 後下一則 assistant 訊息
+      `parent === cmp.id`
 - [ ] 手動驗收（使用者原始場景）：agentic loop 連壓兩次正常停下 → F5 → summary
       都在、inspector = 壓縮後 context；匯出 → 匯入 → 同；session 可繼續
 - [ ] 既有已損對話：啟動 migration 後開啟 → summary 回到路徑上、可繼續
@@ -413,27 +415,9 @@ server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、�
 
 ### Phase 3 —(可選,後續)
 
-> **下一輪(規劃已定;N1–N5 ✅ 全部完成並確認,明細見 06-status §3.13–§3.19,依序 N1→N5)**:
-> 1. **N1** ✅ summary 上限 = n_ctx × %（新設定 `contextSummaryMaxTokensPercent`
->    預設 70：128k → ~91k、256k → ~183k；舊固定 key 移除——完成並確認，
->    見 06-status §3.13）。
-> 2. **N2** ✅ 新設定 `contextKeepTargetPercent`(INPUT 10–90,預設 50)——
->    compact target 從固定 50% 常數(`KEEP_TARGET_FRACTION`)提出来給
->    user 自訂(完成並確認,見 06-status §3.14/§5c)。
-> 3. **N3** ✅ 手動壓縮 [Stop] 按鈕——`compacting` 期間可中斷 summary 呼叫
->    (`chatStore.stopCompaction()` abort → `summarizeMessages` 丟真
->    `AbortError` → 既有 fail-open:不建 cmp、toast「Compaction stopped」);
->    inspector 與 cmp row 動作列換 [Stop];in-loop 沿用 flow abort
->    (完成並確認,見 06-status §3.15/§5c)。
-> 4. **N4** ✅ prefix-stable summary 模式(新增、**設為 default**):
->    `[system, 被壓縮訊息原文, 要求壓縮的 prompt]`,前綴完全一致、
->    只有最後的壓縮 prompt 不同(KV 前綴重用);transcript 模式保留為
->    fallback(設計見 03-§2.1;附件原樣送 + reasoning 跟隨主送出開關,
->    完成並確認,見 06-status §3.18)。
-> 5. **N5** ✅ 新設定 `contextSummaryMode`(SELECT:`prefix-stable` /
->    `transcript`,預設 prefix-stable):summary 的 prompt 模式開放給 user 選
->    (逃生門:server 拒絕 prefix-stable payload 時可切回 transcript);
->    3 個呼叫點經 `toSummaryMode()` 透傳(完成並確認,見 06-status §3.19)。
+> **下一輪(N1–N5)✅ 全部完成並確認**——明細見 06-status §3.13–§3.19 / §5c
+> (N1 summary 上限 n_ctx × % / N2 keep target 設定 / N3 手動壓縮 Stop 鍵 /
+> N4 prefix-stable default / N5 `contextSummaryMode`)。
 
 - [ ] 兩段式 summary(兩次 LLM 呼叫再合併)取代單呼叫雙段 prompt
 - [x] ~~token 估計校準:用 `timings.prompt_n` 反推每則成本~~ → v3 一度以 byte 數取代;
@@ -460,6 +444,7 @@ server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、�
 | `src/lib/components/app/chat/ChatMessages/ChatMessage/ChatMessageCompaction/ChatMessageCompaction.svelte` | cmp 渲染 |
 | `src/lib/components/app/dialogs/DialogContextInspector.svelte` | inspector(可再拆 2~3 個子元件:訊息列、已裁切區、進階區) |
 | `src/lib/components/app/chat/ChatMessages/ChatMessageCompacting.svelte` | (N7)壓縮進行中指標列(spinner + Stop) |
+| `tests/unit/branching.test.ts` | (N10)`findCompactionGraftFixes` 5 向量 |
 | `tests/unit/context-builder.test.ts` | |
 | `tests/unit/compaction-policy.test.ts` | |
 | `tests/stories/ChatMessageCompaction.stories.svelte` | |
@@ -470,10 +455,14 @@ server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、�
 | ---- | ---- |
 | `src/lib/enums/chat.enums.ts` | `MessageType.COMPACTION` |
 | `src/lib/types/database.d.ts` | `CompactionMeta` + `DatabaseMessage.compactionMeta?` |
-| `src/lib/services/database.service.ts` | `createCompactionMessage()`;(必要時)`reparentDirectChildren` 開放給 expand 流程 |
+| `src/lib/services/database.service.ts` | `createCompactionMessage()`;(必要時)`reparentDirectChildren` 開放給 expand 流程;(N10)`applyCompactionGraftFixes`(單一 IDB transaction) |
+| `src/lib/utils/branching.ts` | (N10)`findCompactionGraftFixes` 純函式(路徑邏輯零改動) |
+| `src/lib/services/migration.service.ts` | (N10)`compaction-graft-fix-v1` 啟動 migration |
+| `src/lib/stores/conversations/index.svelte.ts` | (N10)`loadConversation` 防禦層(graft fix 檢查 + 套用) |
+| `src/lib/types/agentic.d.ts` / `types/chat.d.ts` | (N10)`onCompaction` callback 型別 |
 | `src/lib/services/chat.service.ts` | `sendMessage` / `preEncode` 改走 builder(簽名不變) |
-| `src/lib/stores/agentic/index.svelte.ts` | flow 開始前改走 builder;(N7)`compactBetweenTurns` 改 `setCompacting(convId)`;(N8)`compactBetweenTurns` plan 改餵 effective path |
-| `src/lib/stores/chat/index.svelte.ts` | `compactConversation()`、自動觸發掛 `onFlowComplete`、inspector 快照;(N7)`sendMessage` guard + `endCompactionState` finalizer + `compacting` 前移 + `abortCurrentFlow` 補 `stopCompaction()`;(N8)`compactConversation` plan 改餵 effective path |
+| `src/lib/stores/agentic/index.svelte.ts` | flow 開始前改走 builder;(N7)`compactBetweenTurns` 改 `setCompacting(convId)`;(N8)`compactBetweenTurns` plan 改餵 effective path;(N10)callbacks 傳入、cmp 建後呼叫 `onCompaction` |
+| `src/lib/stores/chat/index.svelte.ts` | `compactConversation()`、自動觸發掛 `onFlowComplete`、inspector 快照;(N7)`sendMessage` guard + `endCompactionState` finalizer + `compacting` 前移 + `abortCurrentFlow` 補 `stopCompaction()`;(N8)`compactConversation` plan 改餵 effective path;(N10)`streamChatCompletion` 接 `onCompaction` → 推進 `lastCreatedInFlow` |
 | `src/lib/stores/chat/context-stats.svelte.ts` | (Phase 2)compacted 指標;(N7)`compactingConvId` + `setCompacting` helper |
 | `src/lib/constants/settings-keys.constants.ts` | 6 個新 key |
 | `src/lib/constants/settings.constants.ts` | `SETTINGS_REGISTRY` 條目 |
@@ -484,8 +473,9 @@ server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、�
 | `src/lib/components/app/chat/index.ts` / `dialogs/index.ts` | export |
 
 **刻意不改的**:`conversationsStore` 的路徑邏輯(`filterByLeafNodeId` 對新 type
-透明)、`branching.ts`、import/export 服務、`ChatService.convertDbMessageToApiChatMessageData`
-(builder 複用它,不 fork 一份)。
+透明)、import/export 服務、`ChatService.convertDbMessageToApiChatMessageData`
+(builder 複用它,不 fork 一份)。(`branching.ts` 原列此處;N10 新增純函式
+`findCompactionGraftFixes`,路徑邏輯本身仍零改動。)
 
 ## 3. 測試計畫
 
@@ -557,7 +547,7 @@ server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、�
 | KV cache 前綴改變 → compaction 後首次全量 re-prompt | 該輪變慢(一次性) | compaction 完成立即 preEncode(新 context);自動壓縮只發生在 flow 間 |
 | 個別 chat template 對 user 開頭/連續 user 訊息敏感 | 極少數模型報錯 | summary 用 user role 是業界常規做法;出錯時 fail 在送出前可偵測(inspector 可先驗證);需要時可在 builder 加「summary 併入 system」的 fallback 開關(預設關) |
 | token 估計不準(char/4) | 斷點位置偏差 | 估計只決定「切哪」,不決定「送不送得下」;真正超標會 server 報錯,inspector 有真實 `prompt_n` 校準可看;Phase 3 升級 |
-| 自動壓縮與 send 競態(N7) | 壓縮進行中(fire-and-forget)user 送新訊息 → cmp 懸空 / Summary 靜默丟失 + 未壓縮 context 送出 overflow | N7(設計 2026-11-04,06-§3.26):`sendMessage` guard(同 conv `compacting` → pending queue,任何結束皆自動送)+ per-conv `compactingConvId` + `compacting=true` 前移 + 四路徑 finalizer;UI 指標列(Stop)為第二層。I7 維持(觸發點 + 雙重檢查) |
+| 自動壓縮與 send 競態(N7) | 壓縮進行中(fire-and-forget)user 送新訊息 → cmp 懸空 / Summary 靜默丟失 + 未壓縮 context 送出 overflow | N7(設計 2026-10-04,06-§3.26):`sendMessage` guard(同 conv `compacting` → pending queue,任何結束皆自動送)+ per-conv `compactingConvId` + `compacting=true` 前移 + 四路徑 finalizer;UI 指標列(Stop)為第二層。I7 維持(觸發點 + 雙重檢查) |
 | mid-flow 再壓縮延遲(summary 呼叫在迴圈內) | agentic 該 turn 間隔變長 | 只在超 threshold 時發生;summary 可中斷(signal 綁 flow abort);fail-open 續跑;可用獨立開關(`contextAutoCompactionInLoop`)關閉 |
 | flow 在 cmp 建立後中斷 | 狀態不一致? | cmp 已落 DB + currNode 已移,中斷只是「少幾則訊息」,路徑仍合法;重載後重建即用 |
 | 斷點後移造成靜默資料遺失 | 品質 | 02-§4 規定:後移必須重新 summary,UI 強制流程 |
