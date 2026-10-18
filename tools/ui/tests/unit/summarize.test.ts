@@ -198,7 +198,7 @@ function makePlanWithHead(): { plan: CompactionPlan; planPath: DatabaseMessage[]
 		toSummarize
 	};
 
-	return { plan, planPath: [head, ...toSummarize, ...kept] };
+	return { plan, planPath: [head, ...toSummarize, ...plan.kept] };
 }
 
 function lastSentMessages(): ApiChatMessageData[] {
@@ -319,7 +319,7 @@ describe('summarizeMessages (prefix-stable payload, N11.2 / A4)', () => {
 		vi.mocked(ChatService.sendMessage).mockResolvedValue('the summary');
 		const { plan, planPath } = makePlanWithHead();
 
-		await summarizeMessages(planPath, plan, null, { prompt: '  my custom prompt  ' });
+		await summarizeMessages(planPath, plan, null, undefined, { prompt: '  my custom prompt  ' });
 
 		expect(lastSentMessages()).toEqual(await expectedPayload(planPath, 'my custom prompt'));
 	});
@@ -345,7 +345,7 @@ describe('summarizeMessages (prefix-stable payload, N11.2 / A4)', () => {
 		const plan = { ...makePlanWithHead().plan, toSummarize: [withReasoning] };
 		const planPath = [head, withReasoning, kept];
 
-		await summarizeMessages(planPath, plan, null, { excludeReasoning: true });
+		await summarizeMessages(planPath, plan, null, undefined, { excludeReasoning: true });
 
 		const sent = lastSentMessages();
 
@@ -638,7 +638,7 @@ describe('summarizeMessages (transcript fallback, v1)', () => {
 		vi.mocked(ChatService.sendMessage).mockResolvedValue('the summary');
 		const { plan, planPath } = makePlanWithHead();
 
-		await summarizeMessages(planPath, plan, null, { mode: 'transcript' });
+		await summarizeMessages(planPath, plan, null, undefined, { mode: 'transcript' });
 
 		expect(ChatService.convertDbMessageToApiChatMessageData).not.toHaveBeenCalled();
 		expect(lastSentMessages()).toEqual([

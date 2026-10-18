@@ -3,12 +3,14 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新，2026-10-18）**：**N11 compact request 前綴一致性——N11.1 + N11.2 source + N11.3 測試完成、未確認**。
+> **恢復點（最新，2026-10-18）**：**N11 compact request 前綴一致性——N11.1 + N11.2 source + N11.3 測試完成；`summarize.test.ts` 2 處測試檔 desync 已修（來源碼零改動）、待重跑確認**。
 > N11.1（P0：tool result 附件在 DB→API 被丟）+ N11.2（A4 full-path summary）+
 > D1（shared-builder 路徑、無 model 參數 / 無新 gating）source 完成；N11.3 測試完成
 > （`summarize.test.ts` 依決定 B 修好 + 新 `tests/unit/chat-conversion.test.ts`
-> 合成 fixture 回歸；明細見 §3.30 / §5g）。
-> **待辦（依序）**：① 使用者跑 `npm run check`（+ unit `summarize` /
+> 合成 fixture 回歸；明細見 §3.30 / §5g）。第一輪 `npm run check` + unit 回報
+> 4 type + 6 runtime 失敗全在 `summarize.test.ts`（desync：`makePlanWithHead`
+> spread 單則 `kept` / 3 處 options 傳到 `signal` 參位），已修、來源碼零改動。
+> **待辦（依序）**：① 使用者重跑 `npm run check`（+ unit `summarize` /
 > `chat-conversion` / `context-builder`）確認；② N11 手動驗收（MCP screenshot
 > flow → 連壓兩次 + F5 → `cache_n` 高命中；可與 N10/N8/N7/5.8 一併驗）。
 >

@@ -7,7 +7,7 @@
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
 > [06-status.md](./06-status.md)。
 >
-> **目前停點（2026-10-18）**：**N11 compact request 前綴一致性——N11.1 + N11.2 source + N11.3 測試完成、未確認**
+> **目前停點（2026-10-18）**：**N11 compact request 前綴一致性——N11.1 + N11.2 source + N11.3 測試完成；`summarize.test.ts` 2 處測試檔 desync 已修（來源碼零改動）、待重跑確認**
 > （N11.1 P0：tool result 附件（MCP screenshot base64）在 DB→API 轉換被丟 →
 > compact request 前綴在第一張 screenshot 分岔 → KV cache 失效；N11.2 = A4：
 > summary 用**整個 effective path**產生（compact request =
@@ -16,7 +16,7 @@
 > `summarize.test.ts` 依決定 B 修好 + 新 `tests/unit/chat-conversion.test.ts`
 > （轉換矩陣 / byte-identity / 空 content 三態 / compact request = 最後 payload
 > byte-prefix + instruction 合成 fixture）。明細見 06-status §3.30 / §5g。）
-> **待辦（依序）**：使用者 `npm run check` + unit 確認 → 手動驗收（MCP
+> **待辦（依序）**：使用者重跑 `npm run check` + unit 確認 → 手動驗收（MCP
 > screenshot → 連壓兩次 + F5 → `cache_n` 高命中）。
 > 本目錄兩份抓包 `before-trigger.json` / `compact-requset.json` 只作根因文檔證據（修後 wire 形狀刻意
 > 改變、不適用當 byte-prefix oracle；回歸測試用合成 fixture）。
@@ -39,7 +39,8 @@
 > 1. **N11 compact request 前綴一致性**（06-status §3.30 / §5g）：N11.1
 >    前綴一致性修（P0；D1 shared-builder 路徑）✅ source 完成 → N11.2 full-path
 >    summary（A4）✅ source 完成 → N11.3 測試 ✅ 已寫（`summarize.test.ts` 依決定 B
->    修好 + `chat-conversion.test.ts` 合成 fixture 回歸）→ ⏸ 使用者 `npm run check`
+>    修好 + `chat-conversion.test.ts` 合成 fixture 回歸；2 處測試檔 desync 已修、
+>    來源碼零改動）→ ⏸ 使用者重跑 `npm run check`
 >    + unit 確認 → 手動驗收。
 > 2. **N9 F5 / refresh 韌性**（06-status §3.28 / 05-N9 / §5e）。
 > 3. **手動驗收（未做、可一併驗）**：N10（agentic loop 連壓兩次後 F5 → summary 都在、
