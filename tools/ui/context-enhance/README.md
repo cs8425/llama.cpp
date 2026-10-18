@@ -7,7 +7,16 @@
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
 > [06-status.md](./06-status.md)。
 >
-> **目前停點（2026-10-18）**：**N10 in-loop cmp sibling 系統性 bug ✅ 完成並確認**
+> **目前停點（2026-10-18）**：**N11 compact request 前綴一致性——分析 + 規劃完成、未實做**
+> （使用者抓包確認兩問題：① P0 bug——tool result 附件（MCP screenshot base64）在
+> DB→API 轉換被丟 → compact request 前綴在第一張 screenshot 分岔 → KV cache 失效
+> （同根因另波及 post-compaction 下一 turn / F5 後第一 turn / preEncode / inspector
+> WYSIWYG）；② 設計決策待使用者拍板——mode B 切點保留 ≤5% 尾段 vs summarize 整個
+> effective path（empty kept → compact request 前綴 = 完整最後 payload、最大 cache
+> 亲和性）。證據 fixture `before-trigger.json` / `compact-requset.json` 在本目錄；
+> 明細見 06-status §3.30 / §5g）。
+>
+> **已完成並確認（2026-10-18）**：**N10 in-loop cmp sibling 系統性 bug ✅**
 > （N10.1 根因修：`onCompaction` callback + `lastCreatedInFlow` 推進；N10.2 已損樹修復：
 > `findCompactionGraftFixes` 純函式 + `applyCompactionGraftFixes` IDB transaction +
 > 啟動 migration + `loadConversation` 防禦層；N10.3 unit 5 向量；
@@ -22,14 +31,16 @@
 >   overflow guard，見 06-status §3.28 / 05-N9。
 >
 > **剩（依序）**：
-> 1. **N9 F5 / refresh 韌性**（06-status §3.28 / 05-N9 / §5e）。
-> 2. **手動驗收（未做、可一併驗）**：N10（agentic loop 連壓兩次後 F5 → summary 都在、
+> 1. **N11 compact request 前綴一致性**（06-status §3.30 / §5g）：N11.1
+>    前綴一致性修（P0）→ N11.2 mode B 切點決策（待使用者拍板）→ N11.3 測試。
+> 2. **N9 F5 / refresh 韌性**（06-status §3.28 / 05-N9 / §5e）。
+> 3. **手動驗收（未做、可一併驗）**：N10（agentic loop 連壓兩次後 F5 → summary 都在、
 >    匯出匯入同、既有已損對話 migration 後恢復）
 >    + N8（agentic loop 連壓兩次：第二次 summary
 >    請求 = `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑）+ N7 5 項
 >    （05-§3 #8–#12）+ Phase 1 5.8（06-status §4 清單；A/B mode 行為 + v4 真實
 >    token 顯示可一併驗）。
-> 3. Phase 3 可選後續（兩段式 summary / per-conversation 覆蓋 / 合併重摘要
+> 4. Phase 3 可選後續（兩段式 summary / per-conversation 覆蓋 / 合併重摘要
 >    提示 / summary 獨立 model / endpoint / gauge savings 顯示，見 05-§1；
 >    token 校準已被 v3/v4 取代）。
 >
