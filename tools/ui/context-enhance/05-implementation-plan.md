@@ -479,18 +479,22 @@ server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、�
       （`toSummarize + kept`）
 - [x] N11.2（A4）：兩呼叫點 `summarizedCount` = `plan.toSummarize.length +
       plan.kept.length`（`agentic:616` / `chat:677`；`chat:871` 邊界移動不改）
-- [ ] unit：`buildExtraContentParts` / 轉換矩陣（tool result × image / audio / 兩者 /
+- [x] unit：`buildExtraContentParts` / 轉換矩陣（tool result × image / audio / 兩者 /
       無 extra → 固定序、cap 被呼叫、無 extra 回 string + `tool_call_id`）；in-flow 與
       DB rebuild 的 **byte-identity**（同函式同輸入）；空 content 序列化三態
       （assistant + tool_calls + 空 → 欄位省略；tool_calls 非空 → 保留；無 tool_calls
-      空 → `content: ''` 不變）（N11.3）
-- [ ] regression（N11.3，合成 fixture：screenshot tool result data URL 圖 + audio）：
+      空 → `content: ''` 不變）（N11.3 → `tests/unit/chat-conversion.test.ts`）
+- [x] regression（N11.3，合成 fixture：screenshot tool result data URL 圖 + audio）：
       in-flow ≡ DB rebuild byte-identical；compact request = 最後一筆 payload 的
       **byte-prefix** + instruction（本目錄兩份抓包只作根因文檔證據、不適用當 oracle）
+      （→ `tests/unit/chat-conversion.test.ts`）
+- [x] `tests/unit/summarize.test.ts` 過期修正（決定 B，使用者 2026-10-18：併入
+      N11.3）：呼叫補 `planPath` + mock `convertDbMessageToApiChatMessageData`
+      （faithful stand-in）+ payload assertions = `buildLlmContext(planPath).messages`
+      + instruction（無 cmp / 有 cmp、prompt 選擇、excludeReasoning、transcript =
+      `toSummarize + kept`）
 - [ ] 回歸：`npm run check` + 既有 5 支 client compaction suite 零改動全綠
-      （⏸ 2026-10-18 待使用者編譯確認；`tests/unit/summarize.test.ts` 現已過期——
-      呼叫缺 `planPath` + mock 缺 `convertDbMessageToApiChatMessageData`，待使用者
-      決定 A（現在最小更新）/ B（留 N11.3））
+      （⏸ 2026-10-18 待使用者編譯確認）
 - [ ] 手動驗收：MCP screenshot flow → 連壓兩次 + F5 → server `cache_n`（gauge）
       在 compact request 與後續 turns 皆高命中
 
