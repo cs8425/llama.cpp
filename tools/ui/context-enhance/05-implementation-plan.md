@@ -341,6 +341,42 @@ payload = `[system, summary, kept…] + 新 turn`;Stop → 不建 cmp、queue �
 `moveCompactionBoundary`（後移）（`buildRegionPlan` 的 raw-region 語義）/
 `estimateCompactionSavings` / policy 函式契約（collapse 在呼叫端）。
 
+### N9 — F5 / refresh 韌性：in-loop compaction 原子 commit + orphan 收編（規格定稿 2026-10-18；未實做；明細見 06-status §3.28）
+
+> 背景（已對 code 驗證，2026-10-18）：in-loop compaction 的
+> `createCompactionMessage`（單一 IDB transaction）與 `updateCurrentNode`（獨立 IDB
+> 寫入）**非原子** → 兩寫之間 F5（或 `updateCurrentNode` 拋錯）→ cmp orphan（在
+> DB、leaf 的 child、不在 active path、UI 不可見）→ `buildLlmContext` reload 後看不到
+> cmp → 全量送出 → context overflow + 不可見孤兒節點。F5 在 summary 呼叫中（最可能
+> 的刷新時刻）= 設計中的 fail-open（不建 cmp、≤n_ctx 自愈；>n_ctx 需手動 compact）。
+> 非「永久狀態損毀」：無資料遺失（compaction 從不刪訊息）、手動 Compact now 可恢復。
+> 修復規格與完整分析：06-status §3.28。
+
+- [ ] `database.service.ts`：新 `commitCompactionMessage({ convId, parentId, content,
+      compactionMeta })`——單一 IDB transaction 跨 `[messages, conversations]`（add cmp
+      + 附 parent children + `currNode = cmp.id`，all-or-nothing；同
+      `expandCompactionMessage` 模式）
+- [ ] `agentic compactBetweenTurns` + `chat compactConversation`：改走原子 commit、
+      移除獨立 `updateCurrentNode`
+- [ ] 純函式 `findOrphanedCompaction(allMessages, currNodeId) → cmpId | null` + unit
+      4 向量（leaf child / leaf descendant / 無 cmp / 其它分支）
+- [ ] `loadConversation`：偵測 orphan cmp（currNode 的 child）→ 收編（`currNode =
+      cmp.id`，持久化 + in-memory）
+- [ ] （可選）送出前 overflow guard：built payload 估計 > n_ctx → 擋下 +
+      [Compact now / 刪訊息 / 強制送出]
+- [ ] 02-§4 邊界情境表：F5 列（已同步）
+- [ ] 回歸：`npm run check` + 既有 5 支 client compaction suite 零改動全綠
+- [ ] 手動驗收：兩寫視窗 breakpoint 模擬 → F5 → cmp 在 path、不 overflow；summary
+      呼叫中 F5 → 全量 context、自動再觸發；預植 orphan → 載入收編
+
+✅ 驗收：in-loop compaction 的 transaction commit 後任何時刻 F5 → reload path 含 cmp、
+payload = `[system, summary, kept]`、不 overflow；DB 無 orphan cmp（或有則載入時自動
+收編）；summary 呼叫中 F5 = 設計中的 fail-open（不建 cmp、≤n_ctx 自愈）。
+
+**明確不做**（06-§3.28）：agentic loop 跨 F5 可復原（in-memory loop 不復原；
+server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、但 tool 執行不
+復原——既有）；N7 in-memory queue（pending messages）F5 即失（既有、輕微）。
+
 ### Phase 3 —(可選,後續)
 
 > **下一輪(規劃已定;N1–N5 ✅ 全部完成並確認,明細見 06-status §3.13–§3.19,依序 N1→N5)**:

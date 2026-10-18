@@ -16,11 +16,17 @@
 > 05-N8 / §5d）**：
 >
 > **剩（依序）**：
-> 1. **手動驗收（未做、可一併驗）**：N8（使用者原始場景：agentic loop 連壓兩次，
+> 1. **N9 — F5 / refresh 韌性（規格定稿 2026-10-18、未實做；§3.28 / 05-N9 / §5e）**：
+>    in-loop compaction 的 cmp + currNode 是兩次獨立 IDB 寫（非原子）→ 兩寫之間 F5
+>    （或 `updateCurrentNode` 拋錯）→ cmp orphan（在 DB、不在 path、不可見）→
+>    reload 後全量送出 → overflow；非永久損毀（無資料遺失、可恢復）。規格 =
+>    原子 commit（N9.1）+ 載入收編 orphan（N9.2）+ 可選送出前 overflow guard
+>    （N9.3）+ fail-open 語義入 02-§4（N9.4）。
+> 2. **手動驗收（未做、可一併驗）**：N8（使用者原始場景：agentic loop 連壓兩次，
 >    第二次 summary 請求 = `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑）
 >    + N7 5 項（05-§3 #8–#12）+ Phase 1 5.8
 >    （§4 清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）。
-> 2. Phase 3 可選後續（05-§1）。
+> 3. Phase 3 可選後續（05-§1）。
 >
 > **此前里程碑（皆完成並確認）**：N8（2026-10-18，§3.27/§4）→ N7（2026-11-04，§2u/§3.26）→ v4 真實
 > token 計數（2026-10-17，
@@ -39,6 +45,7 @@
 | v4 — 真實 token 計數（§3.24/§3.25） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` 82/82 / `context-builder` / `summarize` + client `context-inspector` / `chat-message-compaction` / `context-gauge-compaction` / `compaction-decision-card` / `settings-registry-invariants` 全綠；第一輪 9 失敗已修、3 根因全在測試檔，見 §3.25 / 檔首恢復點；05-v4 清單已全勾） |
 | N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（§3.26/§2u） | ✅ **完成並確認**（2026-11-04：四輪跑測 8 支失敗全在測試檔已修、來源碼零改動；使用者重跑 `chat-message-compaction` 11/11 + check + 4 回歸檔全綠；queue 不 block + 指標列 + per-conv `compactingConvId` + sendMessage guard + finalizer 自動送 + client 11 支；手動驗收 #8–#12 未做） |
 | N8 — 第二次壓縮：plan 改在 effective path（bug 修正；§3.27） | ✅ **完成並確認**（2026-10-18：N8.1–N8.3（3 來源檔 + 3 unit 檔）；第一輪 2 失敗全在測試檔已修（期望值筆誤、來源碼零改動）；使用者重跑 `npm run check` + unit 3 支 + client 5 支 compaction suite 全綠；手動驗收未做（§4 清單）；執行清單 05-N8 / §5d） |
+| N9 — F5 / refresh 韌性：in-loop compaction 兩寫非原子（§3.28） | ⬜ **規格定稿、未實做**（2026-10-18：問題已對 code 驗證——`createCompactionMessage`（單一 IDB transaction）與 `updateCurrentNode`（獨立 IDB 寫）非原子 → 兩寫之間 F5 / `updateCurrentNode` 拋錯 → cmp orphan（在 DB、不在 path、不可見）→ reload 後全量送出 → overflow；非永久損毀（無資料遺失、手動 compact 可恢復）。規格 = 原子 commit（N9.1）+ 載入收編 orphan（N9.2）+ 可選送出前 overflow guard（N9.3）+ fail-open 語義入 02-§4（N9.4）；執行清單 05-N9 / §5e） |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
@@ -1607,6 +1614,117 @@ summary 呼叫 = [system, cmp_1 (user), 101..cut, instruction]   ← 放得下 c
   不可達。修正 = 兩筆期望陣列補 `'u1'` + 兩筆註解（含「cmp1 = first
   segment」誤標——v4 規則第一段總和歸段內最後非-assistant = u1、cmp1 計 0）。
 
+## 3.28 N9: F5 / refresh 韌性 — in-loop compaction 兩寫非原子（問題驗證 + 規格 2026-10-18；未實做）
+
+### 問題（已對 code 驗證，2026-10-18）
+
+使用者問題：agentic loop 內觸發自動壓縮、summary node 產生後繼續執行，F5 後
+summary node 不見、context 超過 LLM 能處理的大小、造成整個狀態損毀——會不會發生？
+
+**結論：會，在兩個視窗（其中一個正是題述鏈）；不是「永久狀態損毀」（無資料
+遺失、可恢復），而是暫時性 hard failure + 不可見孤兒節點。**
+
+**已驗證的持久化鏈：**
+
+1. Agentic loop：assistant / tool 訊息建立時即逐則落 DB
+   （`createMessageBranch`，`chat/index.svelte.ts:1651–1714`），`currNode` 同步推進
+   （active → `conversationsStore.updateCurrentNode` → DB；non-active →
+   `DatabaseService.updateCurrentNode` 直寫）。
+2. In-loop compaction `compactBetweenTurns`
+   （`agentic/index.svelte.ts:481–660`，call site `:1226`——本 turn tool results
+   落 DB 後、下一 turn 送出前）：
+   - `DatabaseService.createCompactionMessage`
+     （`database.service.ts:282–319`）：**單一 IDB transaction**（add cmp + 附到
+     parent `children`），原子。
+   - `updateCurrentNode(cmp.id)`（`agentic:624/626`、`chat:686/688` →
+     `database.service.ts:725–729`）：**另一次 IDB 寫入**（conversations 表），
+     **與上者非原子**。
+3. F5 → `loadConversation`（`conversations/index.svelte.ts:521–549`）→
+   `activeMessages = filterByLeafNodeId(allMessages, currNode)`（沿 DB currNode
+   的 parent 鏈回溯）。
+4. `buildLlmContext`（`context-builder.ts:157`）只認 **path 上** 的 cmp
+   （`findLastCompactionEntry`）；path 上無 cmp → 全量送出。
+5. **載入路徑沒有任何 orphan cmp 修復邏輯**（conversations store 無 orphan /
+   COMPACTION 處理）。
+6. （補充）F5 後 `discoverActiveStream`（`+page.svelte:88/108/127`）可能把
+   server 端 in-flight stream 接回、完成目前 assistant turn，但 in-memory agentic
+   loop（tool 執行、turn k+1）不會復原——既有行為、N9 範圍外。
+
+**F5 三個時機：**
+
+| F5 時機 | cmp 在 DB？ | currNode | reload 後 path | 結果 |
+| --- | --- | --- | --- | --- |
+| A. summary LLM 呼叫中 / gate 卡片等待中（`createCompactionMessage` 前） | 無（abort → fail-open、不建 cmp） | 最後一則 | 全量 | 設計中的 fail-open。≤n_ctx：下一則送出成功、下個 flow-complete 自動再觸發（自愈；`contextUsed` 從持久化的 timings 重算）；>n_ctx：下一則送出 overflow → hard failure、需手動 compact |
+| B. **`createCompactionMessage` 與 `updateCurrentNode` 之間**（ms 級視窗；`updateCurrentNode` 拋錯同路徑） | **有（orphan）** | 指向 cmp 的 parent | 全量（cmp 不在 path） | **題述鏈**：cmp「不見」（在 DB 但不可見——leaf 的 child、不在 active path）→ 全量送出 → overflow + 留不可見孤兒節點 |
+| C. `updateCurrentNode` commit 後 | 有 | cmp（或更後節點） | 含 cmp | **節點不消失**、狀態一致 |
+
+- **A 是最可能按 F5 的時刻**（「Compacting context…」顯示中、呼叫數秒到數分鐘、
+  「畫面卡住就重刷」是最可能的使用者行為）；後果較輕（無 orphan）。
+- **B 的視窗 ms 級**（兩個 awaited IDB operation 之間），低機率但真實；
+  `updateCurrentNode` 拋錯（IDB quota / locked 等）會放大。
+
+**「狀態損毀」評估：**
+
+- **無資料遺失**：compaction 從不刪除任何原始訊息（只加節點 + 移 currNode），
+  完整歷史恆在 DB。
+- **暫時性 hard failure**：A（>n_ctx）/ B 時，下一則 LLM 送出以 context overflow
+  失敗（server error dialog）；user 需手動 Compact now（inspector 入口恆可用、
+  手動跳過 threshold gate）或刪訊息才能恢復。
+- B 另留 **不可見 orphan cmp**（leaf 的 child；UI 只顯示 active path，永遠看不到）。
+
+### 規格（N9，未實做）
+
+- **N9.1（根因修、建議）— cmp + currNode 原子 commit**：新
+  `DatabaseService.commitCompactionMessage({ convId, parentId, content,
+  compactionMeta })`：**單一** IDB transaction 跨 `[messages, conversations]`——add
+  cmp + 附 parent children + `currNode = cmp.id`，all-or-nothing（與既有
+  `expandCompactionMessage` 同一 transaction 模式，`database.service.ts:335–339`）。
+  兩個呼叫點（`agentic compactBetweenTurns`、`chat compactConversation`）改走原子
+  commit、移除獨立 `updateCurrentNode`。效果：視窗 B 完全消失；transaction commit
+  後任何時刻 F5 → 狀態一致。視窗 A 是固有的（summary 在 LLM 呼叫回傳前不存在），
+  由 N9.4 語義 +（可選）N9.3 涵蓋。
+- **N9.2（防禦層）— 載入時收編 orphan cmp**：`loadConversation`（或 app 啟動、
+  每 conversation 一次）偵測「cmp 是 currNode 的 child」簽名（`type === COMPACTION`
+  且 `parent === conversation.currNode`）→ **收編**：`currNode = cmp.id`（持久化 +
+  in-memory）。此簽名只能來自中斷的兩寫序列：完整 commit 後 currNode 不會回到 leaf
+  且其 child cmp 仍存（唯一把 currNode 移回 parent 的路徑 expand 會刪掉 cmp）；
+  完整 commit 後 user 若從 leaf branch，currNode 會是 cmp 的 descendant 而非 leaf。
+  效果：修復 DB 中已發生的視窗 B 狀態（含 N9.1 上線前產生的 orphan）。偵測抽純函式
+  （如 `findOrphanedCompaction(allMessages, currNode) → cmpId | null`）供 unit 測試。
+- **N9.3（UX 安全網、可選）— 送出前 overflow guard**：送出 choke point 若 built
+  payload 估計 > n_ctx → 擋下送出 + dialog [Compact now / 刪訊息 / 強制送出]，
+  不讓 request 出包失敗。把殘餘失敗態（A 的 >n_ctx、任何既有超標狀態）變成引導式
+  恢復；與 F5 正交。
+- **N9.4（文件）— fail-open 語義定案**：「F5 / abort 在 summary 呼叫中 = 壓縮取消：
+  不建 cmp、對話維持全量 context；auto-compaction 在下個 flow-complete / turn
+  boundary 再觸發。」加入 02-§4。
+
+**明確不做**：agentic loop 跨 F5 可復原（in-memory loop 不復原；server-side stream
+可能經 `discoverActiveStream` 接回完成目前 turn、但 tool 執行不復原——既有）；N7
+in-memory queue（pending messages）F5 即失（既有、輕微）。
+
+### 測試計畫
+
+- unit：`findOrphanedCompaction` 純函式（若 N9.2 採此形式）：(a) cmp 是 leaf 的
+  child → 收編；(b) cmp 是 leaf 的 descendant（正常 commit 後）→ 無；(c) 無 cmp →
+  無；(d) cmp 在其它分支（parent 不在 path）→ 無。
+- Dexie 層（`commitCompactionMessage` transaction 語義）依既有慣例不在 unit 範圍
+  （見 §4 Phase 1 5.4/5.5 註記），以手動驗收覆蓋。
+- 手動驗收：
+  1. In-loop compaction：在 `updateCurrentNode` 設 breakpoint（模擬視窗內 F5）→
+     F5 → 對話顯示 cmp row、payload = `[system, summary, kept]`、不 overflow（N9.1）；
+  2. F5 在 summary 呼叫中（「Compacting…」）→ reload 後無 cmp、全量 context；
+     ≤n_ctx：下一則送出成功且 flow 完成後自動再壓縮；>n_ctx：overflow dialog
+     （N9.3 若實做則為 guard）；
+  3. 預植 orphan 狀態（devtools：手動把 currNode 改回 cmp 的 parent）→ 開啟對話 →
+     自動收編（cmp row 出現、payload 壓縮）（N9.2）。
+- 回歸：`npm run check` + 既有 5 支 client compaction suite + conversations-store
+  相關 suite。
+
+### 狀態
+
+- ⬜ **未實做**（規格定稿 2026-10-18；執行清單 §5e / 05-N9）。
+
 ## 4. 驗證狀態
 
 > 逐輪過程記錄已精簡（里程碑結案後只留最終狀態 + 根因索引）。
@@ -2050,6 +2168,46 @@ static async createCompactionMessage(params: {
 - [ ] 手動驗收（使用者原始場景）：agentic loop 連壓兩次 → 第二次 summary 請求
       = `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑；toast / gauge
       token 數字與 effective context 一致
+
+## 5e. N9 執行清單（依序做；每完成一項可請使用者編譯確認）
+
+> F5 / refresh 韌性：in-loop compaction 兩寫非原子（規格 §3.28）。根因修 = 原子
+> commit（N9.1）；防禦層 = 載入時收編 orphan（N9.2）；可選 = 送出前 overflow
+> guard（N9.3）；N9.4 純文件。
+
+### N9.1 原子 commit `commitCompactionMessage`（`database.service.ts`）
+- [ ] 新 `static commitCompactionMessage({ convId, parentId, content, compactionMeta })`：
+      單一 IDB transaction 跨 `[messages, conversations]`——add cmp +
+      `addChildToParent` + `currNode = cmp.id`（同 `expandCompactionMessage` 的
+      transaction 模式）；任一失敗全回滾
+- [ ] `stores/agentic/index.svelte.ts compactBetweenTurns`：改走原子 commit、移除獨立
+      `updateCurrentNode`（active / non-active 分支統一；non-active 保留 in-memory
+      `applyConversationUpdate` mirror）
+- [ ] `stores/chat/index.svelte.ts compactConversation`：同上（涵蓋 post-flow auto +
+      手動 Compact now）
+- [ ] 確認下游零改動（`preCompactionPath` / `triggerPreEncode` / `sessionMessages`
+      重建 / cmp meta / toast）
+
+### N9.2 載入時收編 orphan cmp
+- [ ] 純函式 `findOrphanedCompaction(allMessages, currNodeId) → cmpId | null`（放
+      `utils/branching.ts` 或 `services/context/`，實做時定）+ unit 4 向量（leaf child /
+      leaf descendant / 無 cmp / 其它分支）
+- [ ] `loadConversation`：偵測到 orphan → `updateCurrentNode(cmpId)`（持久化）+ in-memory
+      `currNode` 更新（active + conversations array）
+- [ ] （可選）app 啟動時對非 active conversations 掃一次（或只做 load 時——實做時定）
+
+### N9.3 送出前 overflow guard（可選）
+- [ ] 送出 choke point：built payload 估計 > n_ctx → 擋下 + dialog
+      [Compact now / 刪訊息 / 強制送出]
+
+### N9.4 文件
+- [x] 02-§4 邊界情境表：F5 列（已同步）
+- [ ] README / 05-N9 狀態更新（N9 完成後）
+
+### N9.5 回歸 + 驗收
+- [ ] `npm run check` + 既有 5 支 client compaction suite 零改動全綠
+- [ ] 手動驗收 3 項（§3.28 測試計畫）：兩寫視窗 breakpoint 模擬 / summary 呼叫中 F5 /
+      預植 orphan 收編
 
 ## 6. 專案慣例 / 陷阱（Phase 1 寫碼前速讀）
 

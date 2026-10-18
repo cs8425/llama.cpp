@@ -14,12 +14,19 @@
 > + 兩個 planning 呼叫點餵它；`npm run check` + unit 3 支 + client 5 支
 > compaction suite 全綠；明細見 06-status §3.27 / 05-N8）。
 >
+> **新規格（2026-10-18 定稿、未實做）**：**N9 F5 / refresh 韌性**——in-loop
+> compaction 的 cmp + currNode 是兩次獨立 IDB 寫（非原子）→ 兩寫之間 F5（或
+> `updateCurrentNode` 拋錯）→ cmp orphan（在 DB、不在 path、不可見）→ reload 後全量
+> 送出 → overflow；非永久損毀（無資料遺失、手動 compact 可恢復）。規格 = 原子
+> commit + 載入收編 orphan + 可選送出前 overflow guard，見 06-status §3.28 / 05-N9。
+>
 > **剩（依序）**：
-> 1. **手動驗收（未做、可一併驗）**：N8（agentic loop 連壓兩次：第二次 summary
+> 1. **N9 F5 / refresh 韌性**（規格定稿、未實做；06-status §3.28 / 05-N9 / §5e）。
+> 2. **手動驗收（未做、可一併驗）**：N8（agentic loop 連壓兩次：第二次 summary
 >    請求 = `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑）+ N7 5 項
 >    （05-§3 #8–#12）+ Phase 1 5.8（06-status §4 清單；A/B mode 行為 + v4 真實
 >    token 顯示可一併驗）。
-> 2. Phase 3 可選後續（兩段式 summary / per-conversation 覆蓋 / 合併重摘要
+> 3. Phase 3 可選後續（兩段式 summary / per-conversation 覆蓋 / 合併重摘要
 >    提示 / summary 獨立 model / endpoint / gauge savings 顯示，見 05-§1；
 >    token 校準已被 v3/v4 取代）。
 >

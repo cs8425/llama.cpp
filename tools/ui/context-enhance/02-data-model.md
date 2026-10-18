@@ -284,6 +284,7 @@ mode B 切點原本「byte 對 token budget」的錯配順手修好。
 | 單一 span 超 budget(典型 agentic 長 turn) | split 切:切在 span 內 assistant,span 前半進 summary,後半(最近 tool 交換)保留;`isSplitTurn=true`;連最近 tool 交換都放不下 → 空 kept(全壓,`firstKeptMessageId` 缺) | §3.1 |
 | split 切空 kept(全部壓縮) | payload = `[system, summary]`;cmp 之後追加的新訊息成為 kept;inspector 斷點選擇器顯示「無保留訊息」、只能前移(選一則訊息);Re-summarize 的 region = cmp 之前的所有訊息(排除 cmp 節點本身) | I5/§3.3 |
 | agentic flow 進行中(context 逼近上限) | turn 之間(非 streaming 中)觸發:建 cmp(parent=最後一則)→ 重建 in-memory `sessionMessages` → 續跑;flow 中斷時 cmp 已落 DB,狀態一致 | §6 |
+| F5 / 頁面重刷(in-loop compaction 期間) | 三個時機:(a) summary 呼叫中 / gate 等待中 → 不建 cmp(fail-open),reload 後全量 context、下個 flow-complete 自動再觸發(≤n_ctx 自愈);(b) **`createCompactionMessage` 與 `updateCurrentNode` 之間**(兩寫非原子)→ cmp orphan(在 DB、不在 path、不可見)→ reload 後全量送出 → overflow;(c) currNode commit 後 → cmp 在 path、狀態一致。修復規格(原子 commit + 載入收編 orphan + 可選送出前 guard)= N9,見 06-§3.28 | N9(06-§3.28) |
 | split 切後 flow 繼續追加 turns | 新訊息接在 cmp 之後;下次壓縮照「最後一筆 cmp 生效」(I2)涵蓋它 | I2 |
 | 該 span 的 user 訊息被 summarize 後,user 又編輯了它 | 編輯落在 summarize 區:不影響送出(不在 kept 區);summary 文字不自動更新,可手動「重新摘要」 | — |
 | 第二次壓縮(已有一筆 cmp) | plan 在 **effective path**(builder 觀點,N8/06-§3.27)上:新 cmp 的 summarize 區 = effective path 前綴(含舊 cmp 節點,rolling summary);舊 cmp 已 drop 的原始訊息不重送;舊 cmp 被 drop,新 summary 涵蓋它 | I2 |
