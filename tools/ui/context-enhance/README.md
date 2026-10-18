@@ -7,13 +7,17 @@
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
 > [06-status.md](./06-status.md)。
 >
-> **目前停點（2026-10-18）**：**N11 compact request 前綴一致性——分析 + 規劃完成、未實做**
-> （使用者抓包確認兩問題：① P0 bug——tool result 附件（MCP screenshot base64）在
+> **目前停點（2026-10-18）**：**N11 compact request 前綴一致性——分析 + 規劃 + 使用者決策 A4 完成、未實做**
+> （① P0 bug——tool result 附件（MCP screenshot base64）在
 > DB→API 轉換被丟 → compact request 前綴在第一張 screenshot 分岔 → KV cache 失效
 > （同根因另波及 post-compaction 下一 turn / F5 後第一 turn / preEncode / inspector
-> WYSIWYG）；② 設計決策待使用者拍板——mode B 切點保留 ≤5% 尾段 vs summarize 整個
-> effective path（empty kept → compact request 前綴 = 完整最後 payload、最大 cache
-> 亲和性）。證據 fixture `before-trigger.json` / `compact-requset.json` 在本目錄；
+> WYSIWYG）；② **A4 定案（使用者 2026-10-18）**——summary 用**整個 effective path**
+> 產生：compact request = `buildLlmContext(effectivePath).messages` + instruction
+> （复用原 chat UI code path、不自組裝 → 前綴 = 完整最後送出 payload、最大 cache
+> 亲和性）；切點 / cmp 嫁接 / post-compaction 形狀不變（kept 尾段 append 到
+> summary 後、與 summary 刻意重複確保精確度）；scope = 所有 compaction；prompt /
+> max_tokens 不變、無新 meta 欄位 / 無新設定 / 無 fallback。
+> 證據 fixture `before-trigger.json` / `compact-requset.json` 在本目錄；
 > 明細見 06-status §3.30 / §5g）。
 >
 > **已完成並確認（2026-10-18）**：**N10 in-loop cmp sibling 系統性 bug ✅**
@@ -32,7 +36,7 @@
 >
 > **剩（依序）**：
 > 1. **N11 compact request 前綴一致性**（06-status §3.30 / §5g）：N11.1
->    前綴一致性修（P0）→ N11.2 mode B 切點決策（待使用者拍板）→ N11.3 測試。
+>    前綴一致性修（P0）→ N11.2 full-path summary（A4 已定案）→ N11.3 測試。
 > 2. **N9 F5 / refresh 韌性**（06-status §3.28 / 05-N9 / §5e）。
 > 3. **手動驗收（未做、可一併驗）**：N10（agentic loop 連壓兩次後 F5 → summary 都在、
 >    匯出匯入同、既有已損對話 migration 後恢復）

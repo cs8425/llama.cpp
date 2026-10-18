@@ -413,7 +413,7 @@ server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、�
 **與 N9 的關係**（06-§3.29）：N9.1（原子 commit）/ N9.2（收編 currNode 的 child）
 仍需要、與 N10 互補；N10.2 偵測簽名不同（sibling of path node vs child of leaf）。
 
-### N11 — compact request 前綴一致性：tool result 附件被丟（N11.1，P0）+ mode B 切點 cache 亲和性（N11.2，待使用者決策）（分析 + 規劃 2026-10-18；未實做；明細見 06-status §3.30 / §5g）
+### N11 — compact request 前綴一致性：tool result 附件被丟（N11.1，P0）+ full-path summary（N11.2 = A4，使用者定案 2026-10-18）（分析 + 規劃 + 決策 2026-10-18；未實做；明細見 06-status §3.30 / §5g）
 
 > 背景（使用者抓包 + 已對 code 驗證，2026-10-18）：使用者 agentic loop
 > （mode B threshold-target、threshold 40% / keepTarget 35% / n_ctx 262144、
@@ -435,11 +435,12 @@ server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、�
 > `agentic:947` `turnContent || undefined` 省略、轉換送 `''`）；image cap 不一致
 > （轉換有 `capImageDataURLSize`、in-flow 不 cap）。
 >
-> ② **設計決策（N11.2，待使用者拍板）**：mode B 切點保留 ≤5% 尾段（現行 spec
-> 行為：`planCompaction` stage 2 找 suffix ≤ budget 的最早切點；抓包 = 切在 165、
-> kept = 165..186）vs summarize **整個 effective path**（empty kept → compact
-> request 前綴 = 完整最後送出 payload、最大 cache 亲和性；代價 = 最近 24 則 tool
-> 交換進 summary 不原樣保留）。
+> ② **設計決策（N11.2，A4 使用者定案 2026-10-18）**：summary 用**整個 effective
+> path**產生（compact request = `buildLlmContext(effectivePath).messages` +
+> instruction、复用原 chat UI code path 不自組裝 → 前綴 = 完整最後送出 payload、
+> 最大 cache 亲和性）；切點 / cmp 嫁接 / post-compaction 形狀**不變**（抓包例：
+> kept = 165..186 append 到 summary 後，與 summary 刻意重複確保精確度）。scope =
+> 所有 compaction；prompt / max_tokens 不變；無新 meta / 無新設定 / 無 fallback。
 
 - [ ] N11.1（P0）：`ChatService.convertDbMessageToApiChatMessageData` 加 `model`
       （或 `supportsVision`/`supportsAudio`）參數；`role=tool + extra` 不再
@@ -458,13 +459,16 @@ server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、�
       content 欄位**（向 in-flow 對齊——cache 是 in-flow 建的，重建端要跟它一致）
 - [ ] N11.1：`sendMessage` 的 vision filter（`chat.service.ts:1114–1140`，
       API-shaped 陣列路徑保留）與轉換**共用同一 gating 判斷**（避免兩套）
-- [ ] N11.2：**使用者拍板**：A1（empty kept、summarize 整路徑）/ A2（現狀 kept ≤
-      5%）/ A3（新設定，如 `contextCompactionCacheAffinity`）；A1 的 scope（只
-      in-loop / 所有 mode B）
-- [ ] （若 A1）`planCompaction` 加選項（如 `emptyKept: true` → stage 2 直接
-      `j = path.length`、minSummarizeTokens 照查、空 kept 走既有 N6/I5 語義：
-      `firstKeptMessageId` 缺、split 下限 M=0）+ 呼叫點傳入
-- [ ] （若 A3）settings 註冊表新 key + 接進 plan
+- [ ] N11.2（A4）：`summarizeMessages` / `summarizeWithRetry` 加 `planPath` 參數
+      （effective path，呼叫點已有：`agentic:559` / `chat:623` / re-summarize）
+- [ ] N11.2（A4）：prefix-stable payload =
+      `buildLlmContext(planPath, { excludeReasoning, model }).messages` + instruction；
+      **刪除**現行 `normalizeMessagesForApi([systemHead]) + normalize(toSummarize)`
+      自組裝（`summarize.ts:213–223`）
+- [ ] N11.2（A4）：transcript 模式 `buildSummaryTranscript` 區段同步改 full path
+      （`toSummarize + kept`）
+- [ ] N11.2（A4）：兩呼叫點 `summarizedCount` = `plan.toSummarize.length +
+      plan.kept.length`（`agentic:616` / `chat:677`）
 - [ ] unit：tool result 轉換矩陣（image/audio × vision on/off × cap on/off）；
       in-flow helper 與 DB rebuild 的 **byte-identity**（同一 DB message → 相同
       API message）；空 content 序列化（assistant + tool_calls + 空 → 欄位省略）
@@ -477,17 +481,20 @@ server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、�
 
 ✅ 驗收：所有 DB 重建路徑（compact request / post-compaction 下一 turn / F5 後
 第一 turn / preEncode / inspector）與 in-flow 送出的前綴 **byte-identical** →
-KV cache 不因任何重建失效；inspector == 實際送出（WYSIWYG 恢復）。若 N11.2 選
-A1：compact request = `[system, 舊summary, 101..186]` + instruction、前綴 =
-完整最後送出 payload（到 184）。
+KV cache 不因任何重建失效；inspector == 實際送出（WYSIWYG 恢復）。N11.2（A4）：
+compact request = `[system, 舊summary, 101..186]` + instruction、前綴 =
+完整最後送出 payload（到 184）；post-compaction = `[system, 新summary, 165..186]`
+繼續執行。
 
 **與 N9 的關係**（06-§3.30）：獨立（N9 = cmp/currNode 兩寫原子性；N11 = payload
 前綴一致性）。N11.1 修掉「reload 後第一 turn 斷前綴」的症狀，但 N9 的 orphan
 cmp 韌性仍需要。
 
-**明確不改**（06-§3.30）：mode A（recent-window）語義（其設計目的就是保留最近
-keepRecentTokens 原樣；N11.2 選項表只套 mode B）；`buildSummaryTranscript`
-（transcript fallback 本就用佔位符）；cmp 節點格式 / `compactionMeta`。
+**明確不改**（06-§3.30）：`planCompaction` / 切點 / budget / 雙 mode 語義（A4
+只改 summary 輸入區段、切點照現行計算——mode A/B 皆適用）；cmp 節點格式 /
+`compactionMeta` 欄位（不新增）；prompt 文字；`max_tokens`
+（`computeSummaryMaxTokens`）；over-target check / retry / gate；無新設定、無
+fallback / overhead 邏輯。
 
 ### Phase 3 —(可選,後續)
 
@@ -514,8 +521,8 @@ keepRecentTokens 原樣；N11.2 選項表只套 mode B）；`buildSummaryTranscr
 | ---- | ---- |
 | `src/lib/services/context/types.ts` | `CompactionPlan` / `ContextBuildResult`；(N11)`ContextBuildOptions` 加 `model` |
 | `src/lib/services/context/context-builder.ts` | `buildLlmContext`(唯一 choke point) + `effectiveCompactionPath`(N8:套用 cmp 後的 path = planning 輸入)；(N11)thread `model` 進轉換 |
-| `src/lib/services/context/compaction-policy.ts` | `planCompaction` / `deriveRealMessageTokens` / `messageSize` / `messageBytes`；(N11.2，若 A1)加 empty-kept 選項 |
-| `src/lib/services/context/summarize.ts` | transcript 組裝 + summary 呼叫；(N11)thread model 進 `normalizeMessagesForApi` / 轉換 |
+| `src/lib/services/context/compaction-policy.ts` | `planCompaction` / `deriveRealMessageTokens` / `messageSize` / `messageBytes`（N11.2 A4 不改：切點照現行計算） |
+| `src/lib/services/context/summarize.ts` | transcript 組裝 + summary 呼叫；(N11)thread model 進 `buildLlmContext` / 轉換；(N11.2 A4)收 `planPath` 參數、prefix-stable payload = `buildLlmContext(planPath).messages` + instruction（刪自組裝）、transcript 區段 = full path |
 | `src/lib/services/context/index.ts` | barrel |
 | `src/lib/components/app/chat/ChatMessages/ChatMessage/ChatMessageCompaction/ChatMessageCompaction.svelte` | cmp 渲染 |
 | `src/lib/components/app/dialogs/DialogContextInspector.svelte` | inspector(可再拆 2~3 個子元件:訊息列、已裁切區、進階區) |
@@ -537,8 +544,8 @@ keepRecentTokens 原樣；N11.2 選項表只套 mode B）；`buildSummaryTranscr
 | `src/lib/stores/conversations/index.svelte.ts` | (N10)`loadConversation` 防禦層(graft fix 檢查 + 套用) |
 | `src/lib/types/agentic.d.ts` / `types/chat.d.ts` | (N10)`onCompaction` callback 型別 |
 | `src/lib/services/chat.service.ts` | `sendMessage` / `preEncode` 改走 builder(簽名不變)；(N11)`convertDbMessageToApiChatMessageData` 加 model 參數 + tool result 組 parts（同序 / 同 gating / 同 cap）+ 空 content 序列化對齊 + vision filter 共用 gating |
-| `src/lib/stores/agentic/index.svelte.ts` | flow 開始前改走 builder;(N7)`compactBetweenTurns` 改 `setCompacting(convId)`;(N8)`compactBetweenTurns` plan 改餵 effective path;(N10)callbacks 傳入、cmp 建後呼叫 `onCompaction`；(N11)tool result parts 抽 shared helper + `toAgenticMessages` 保留 parts + （若 A1）`compactBetweenTurns` 傳 empty-kept 選項 |
-| `src/lib/stores/chat/index.svelte.ts` | `compactConversation()`、自動觸發掛 `onFlowComplete`、inspector 快照;(N7)`sendMessage` guard + `endCompactionState` finalizer + `compacting` 前移 + `abortCurrentFlow` 補 `stopCompaction()`;(N8)`compactConversation` plan 改餵 effective path;(N10)`streamChatCompletion` 接 `onCompaction` → 推進 `lastCreatedInFlow` |
+| `src/lib/stores/agentic/index.svelte.ts` | flow 開始前改走 builder;(N7)`compactBetweenTurns` 改 `setCompacting(convId)`;(N8)`compactBetweenTurns` plan 改餵 effective path;(N10)callbacks 傳入、cmp 建後呼叫 `onCompaction`；(N11)tool result parts 抽 shared helper + `toAgenticMessages` 保留 parts；(N11.2 A4)傳 `planPath` 進 `summarizeWithRetry` + `summarizedCount` = full path 覆蓋 |
+| `src/lib/stores/chat/index.svelte.ts` | `compactConversation()`、自動觸發掛 `onFlowComplete`、inspector 快照;(N7)`sendMessage` guard + `endCompactionState` finalizer + `compacting` 前移 + `abortCurrentFlow` 補 `stopCompaction()`;(N8)`compactConversation` plan 改餵 effective path;(N10)`streamChatCompletion` 接 `onCompaction` → 推進 `lastCreatedInFlow`；(N11.2 A4)同 agentic：傳 `planPath` + `summarizedCount` = full path 覆蓋 |
 | `src/lib/stores/chat/context-stats.svelte.ts` | (Phase 2)compacted 指標;(N7)`compactingConvId` + `setCompacting` helper |
 | `src/lib/constants/settings-keys.constants.ts` | 6 個新 key |
 | `src/lib/constants/settings.constants.ts` | `SETTINGS_REGISTRY` 條目 |

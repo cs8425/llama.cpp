@@ -243,12 +243,13 @@ valid(j) = path[j].role ∈ {user, assistant}
   切點可以落在該 tool result **之後**的 assistant 上,把它整段 drop;
   連最後一組 `ass + tool` 都放不下時,切點落在最後一則之後(空 kept),
   該 tool result 整段進 summary。
-- **cache 亲和性選項(N11.2,待使用者決策;06-§3.30)**:mode B 的 compact
-  request 可選**恆 summarize 整個 effective path**(empty kept、切點在尾端)
-  → compact request 前綴 = 完整最後送出 payload(KV cache 重用最大);代價 =
-  最近 tool 交換進 summary 不再原樣保留(split prompt 變體已要求保留
-  in-progress state),kept budget((threshold − keepTarget)%)在 in-loop
-  不再被使用。未拍板前現行行為 = kept ≤ budget。
+- **full-path summary（N11.2 = A4，使用者定案 2026-10-18；06-§3.30；未實做）**:
+  所有 compaction 的 summary 皆用**整個 effective path**產生(compact request =
+  `buildLlmContext(effectivePath).messages` + instruction、复用原 chat UI code
+  path、不自組裝)→ compact request 前綴 = 完整最後送出 payload(KV cache 重用
+  最大);切點 / kept 視窗照現行計算(kept ≤ budget),kept 尾段 append 到 summary
+  後繼續執行——尾段同時在 summary(濃縮)與 kept(原樣),刻意重複換精確度。
+  原「empty kept 選項」提案(A1)不採用:`planCompaction` 不改。
 
 ### 3.4 token 計數(v4:真實 per-message 優先,無資料例外才 bytes/4 估算)
 
@@ -294,7 +295,7 @@ mode B 切點原本「byte 對 token budget」的錯配順手修好。
 | in-loop compaction 後 flow 繼續追加 turns(**N10 系統性 bug**) | 未修前:cmp 與下一則 flow 訊息成 sibling(`lastCreatedInFlow` 不被推進)→ cmp 不在 root→currNode 路徑 → F5 / 匯出匯入後所有 summary 消失、inspector 全量、session 無法繼續;in-memory 平陣列遮住分岔。修復 = compaction 後推進 flow 接掛點(N10.1)+ 已損樹 migration(N10.2),見 06-§3.29 | N10(06-§3.29) |
 | split 切後 flow 繼續追加 turns | 新訊息接在 cmp 之後;下次壓縮照「最後一筆 cmp 生效」(I2)涵蓋它 | I2 |
 | 該 span 的 user 訊息被 summarize 後,user 又編輯了它 | 編輯落在 summarize 區:不影響送出(不在 kept 區);summary 文字不自動更新,可手動「重新摘要」 | — |
-| 第二次壓縮(已有一筆 cmp) | plan 在 **effective path**(builder 觀點,N8/06-§3.27)上:新 cmp 的 summarize 區 = effective path 前綴(含舊 cmp 節點,rolling summary);舊 cmp 已 drop 的原始訊息不重送;舊 cmp 被 drop,新 summary 涵蓋它 | I2 |
+| 第二次壓縮(已有一筆 cmp) | plan 在 **effective path**(builder 觀點,N8/06-§3.27)上:新 cmp 的 summarize 區 = **整個 effective path**(含舊 cmp 節點,rolling summary;A4,N11.2);舊 cmp 已 drop 的原始訊息不重送;舊 cmp 被 drop,新 summary 涵蓋它 | I2 |
 | 第二次壓縮的斷點落在**舊 cmp 之後**(kept 區含舊 cmp) | 舊 cmp 按一般 user 訊息送出(content=舊 summary) | I2 |
 | User 在 cmp **之前**的訊息 branch/regenerate | 新分支路徑不經過 cmp → 全量 context | 路徑定義 |
 | User 在 cmp **之後** branch | 路徑仍含 cmp → 分支也壓縮 | I6 |
@@ -315,14 +316,16 @@ mode B 切點原本「byte 對 token budget」的錯配順手修好。
   `generateTitleWithLLM` 同模式),`summarizeMessages` 的 `mode` 參數決定
   payload 形狀(**default = `prefix-stable`**;`transcript` = v1 fallback):
   - **prefix-stable**(default):前綴與主對話 payload 的 prefix 完全一致
-    (同一套 `normalizeMessagesForApi` 轉換、附件原樣送、
-    `reasoning_content` 跟隨 `excludeReasoningFromContext` 開關),
-    同一 summarize 區的重複摘要(Re-summarize、同區再壓)可重用 KV cache
-    前綴;模型看到原始訊息結構,摘要忠度更高:
+    (**A4,N11.2:payload = `buildLlmContext(effectivePath).messages` +
+    instruction**——與 chat UI 送出路徑同一 choke point、不自組裝:有舊 cmp =
+    `[system head, 舊summary(user role), kept…]`、無 = 整路徑;
+    `reasoning_content` 跟隨 `excludeReasoningFromContext` 開關)→ compact
+    request 前綴 = 完整最後送出 payload(KV cache 重用最大);模型看到原始訊息
+    結構,摘要忠度更高:
     ```
-    [ { role: 'system',      content: 對話的 system head(原樣) },
-      …被 summarize 的 1..i-1 則(逐則轉換,保留原 role/結構:
-        user/assistant/tool、tool_calls、attachments),
+    [ …buildLlmContext(effectivePath) 輸出(= 最後一筆 live payload:
+        system head、舊summary(user role)、1..n 則逐則轉換,保留原
+        role/結構:user/assistant/tool、tool_calls、attachments),
       { role: 'user',        content: 壓縮指令 } ]
     ```
     只有最後一則壓縮指令會變(default / 自訂 `contextSummaryPrompt`、
@@ -336,7 +339,7 @@ mode B 切點原本「byte 對 token budget」的錯配順手修好。
   - **transcript**(v1 fallback):
     ```
     [ { role: 'system', content: 壓縮指令 },
-      { role: 'user',   content: transcript(被 summarize 的 1..i-1 則) } ]
+      { role: 'user',   content: transcript(整個 effective path,A4) } ]
     ```
 - **transcript 格式**(僅 transcript 模式):`[role] content`,attachments 以佔位符表示
   (`[image: name.jpg]`、`[file: x.ts, 12KB]`),避免把 base64 餵進 summary 呼叫。
