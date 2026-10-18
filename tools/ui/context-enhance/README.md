@@ -7,7 +7,7 @@
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
 > [06-status.md](./06-status.md)。
 >
-> **目前停點（2026-10-18）**：**N11 compact request 前綴一致性——分析 + 規劃 + 使用者決策 A4 完成、未實做**
+> **目前停點（2026-10-18）**：**N11 compact request 前綴一致性——分析 + 規劃 + 使用者決策 A4 + D1（shared-builder 路徑）完成、未實做**
 > （① P0 bug——tool result 附件（MCP screenshot base64）在
 > DB→API 轉換被丟 → compact request 前綴在第一張 screenshot 分岔 → KV cache 失效
 > （同根因另波及 post-compaction 下一 turn / F5 後第一 turn / preEncode / inspector
@@ -16,8 +16,14 @@
 > （复用原 chat UI code path、不自組裝 → 前綴 = 完整最後送出 payload、最大 cache
 > 亲和性）；切點 / cmp 嫁接 / post-compaction 形狀不變（kept 尾段 append 到
 > summary 後、與 summary 刻意重複確保精確度）；scope = 所有 compaction；prompt /
-> max_tokens 不變、無新 meta 欄位 / 無新設定 / 無 fallback。
-> 證據 fixture `before-trigger.json` / `compact-requset.json` 在本目錄；
+> max_tokens 不變、無新 meta 欄位 / 無新設定 / 無 fallback；③ **D1 定案（使用者 2026-10-18）**——
+> tool result DB 重建與 in-flow 走 **user input 同路徑**：轉換的 `extra → parts` 區塊抽成
+> shared builder（同序 `[...images, ...audio, text]`、images 一律 cap）、**不新增 model 參數 /
+> 不新增 gating**（model gating 由下游既有 `sendMessage` vision filter 處理；原規劃
+> 「參數 thread」整段刪除、所有簽名不變）；in-flow 改採 user input 順序（既有 agentic
+> 對話 wire 形狀一次性改變）。
+> 本目錄兩份抓包 `before-trigger.json` / `compact-requset.json` 只作根因文檔證據（修後 wire 形狀刻意
+> 改變、不適用當 byte-prefix oracle；回歸測試用合成 fixture）；
 > 明細見 06-status §3.30 / §5g）。
 >
 > **已完成並確認（2026-10-18）**：**N10 in-loop cmp sibling 系統性 bug ✅**
@@ -36,7 +42,8 @@
 >
 > **剩（依序）**：
 > 1. **N11 compact request 前綴一致性**（06-status §3.30 / §5g）：N11.1
->    前綴一致性修（P0）→ N11.2 full-path summary（A4 已定案）→ N11.3 測試。
+>    前綴一致性修（P0；D1 shared-builder 路徑已定案）→ N11.2 full-path summary（A4 已定案）
+>    → N11.3 測試（合成 fixture）。
 > 2. **N9 F5 / refresh 韌性**（06-status §3.28 / 05-N9 / §5e）。
 > 3. **手動驗收（未做、可一併驗）**：N10（agentic loop 連壓兩次後 F5 → summary 都在、
 >    匯出匯入同、既有已損對話 migration 後恢復）
@@ -81,6 +88,9 @@
    `sendMessage`、`preEncode`、agentic flow、以及 inspector UI 全部走它,
    保證「inspector 看到的 == 網路上實際送的」(WYSIWYG)。
    壓縮規則(找斷點)與套用規則(組裝 payload)分兩個純模組,各自可單元測試。
+   DB→API 轉換同樣單一:tool result 與 user input 走同一個 `extra → parts`
+   shared builder(N11 D1,2026-10-18),所有重建路徑與 in-flow 送出路徑
+   byte-identical。
 4. **斷點規則:只切在 user 或 assistant 訊息之前,絕不切在 tool result**
    (tool result 必須與它的 tool call 同存共毀)。若**單一 user-message span**
    (兩則 user 訊息之間,典型 = 一個 agentic turn)本身就超 keep 預算,
