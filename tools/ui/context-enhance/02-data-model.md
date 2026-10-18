@@ -243,6 +243,12 @@ valid(j) = path[j].role ∈ {user, assistant}
   切點可以落在該 tool result **之後**的 assistant 上,把它整段 drop;
   連最後一組 `ass + tool` 都放不下時,切點落在最後一則之後(空 kept),
   該 tool result 整段進 summary。
+- **cache 亲和性選項(N11.2,待使用者決策;06-§3.30)**:mode B 的 compact
+  request 可選**恆 summarize 整個 effective path**(empty kept、切點在尾端)
+  → compact request 前綴 = 完整最後送出 payload(KV cache 重用最大);代價 =
+  最近 tool 交換進 summary 不再原樣保留(split prompt 變體已要求保留
+  in-progress state),kept budget((threshold − keepTarget)%)在 in-loop
+  不再被使用。未拍板前現行行為 = kept ≤ budget。
 
 ### 3.4 token 計數(v4:真實 per-message 優先,無資料例外才 bytes/4 估算)
 
@@ -321,6 +327,12 @@ mode B 切點原本「byte 對 token budget」的錯配順手修好。
     ```
     只有最後一則壓縮指令會變(default / 自訂 `contextSummaryPrompt`、
     正常 / split-turn 變體),前綴恆定。
+    > **D1 也涵蓋 tool result 附件(N11.1,未實做,06-§3.30)**:「附件原樣送」
+    > 對 MCP screenshot 等 tool result 的 base64 附件必須成立——原實做
+    > `convertDbMessageToApiChatMessageData` 對 `role=tool` early-return、忽略
+    > `extra` → 所有 DB 重建路徑(compact request / post-compaction 重建 /
+    > F5 後 / preEncode / inspector)前綴在第一張圖分岔 → KV cache 失效。修正 =
+    > 轉換與 in-flow 送出路徑 byte-identical(同序 / 同 gating / 同 cap)。
   - **transcript**(v1 fallback):
     ```
     [ { role: 'system', content: 壓縮指令 },

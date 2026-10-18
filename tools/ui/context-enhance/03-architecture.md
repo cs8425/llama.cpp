@@ -140,6 +140,13 @@ transcript,摘要忠度更高。實做時兩點已定(使用者 2026-07-22,D1/D2
 - **附件原樣送**(base64 照主對話 payload 送):前綴與主 payload byte 一致、
   摘要忠度最高;非 vision 模型由 `sendMessage` 既有的 vision filter 自動
   剝除 image parts(與主送出路徑同行為)。
+  > **N11 gap(2026-10-18,未實做;06-§3.30)**:D1 對 **tool result 附件**從未
+  > 實做——`convertDbMessageToApiChatMessageData` 對 `role=tool` early-return、
+  > 忽略 `extra`(MCP screenshot base64 被丟)→ 所有 DB 重建路徑(compact
+  > request / post-compaction 重建 / F5 後 / preEncode / inspector)前綴在
+  > 第一張圖分岔 → KV cache 失效(使用者抓包確認,fixture 在
+  > `context-enhance/` 根目錄)。修正 = N11.1(轉換對 tool result 組與 in-flow
+  > 同序 / 同 gating / 同 cap 的 parts + thread model 參數)。
 - **`reasoning_content` 跟隨 `excludeReasoningFromContext` 開關**:summary
   呼叫把同一開關傳進 `sendMessage`,兩種設定下前綴都與主 payload 一致。
 
