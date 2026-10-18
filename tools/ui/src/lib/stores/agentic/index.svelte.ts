@@ -23,7 +23,6 @@ import {
 import { BuiltInTool, ToolPermissionDecision, ToolSource } from '$lib/enums';
 import {
 	AttachmentType,
-	ContentPartType,
 	MessageRole,
 	MimeTypePrefix,
 	ToolCallType
@@ -76,7 +75,6 @@ import type {
 } from '$lib/types/agentic';
 import type {
 	ApiChatCompletionToolCall,
-	ApiChatMessageContentPart,
 	ApiChatMessageData
 } from '$lib/types/api';
 import type {
@@ -88,15 +86,12 @@ import type {
 } from '$lib/types/chat';
 import type {
 	DatabaseMessage,
-	DatabaseMessageExtra,
-	DatabaseMessageExtraAudioFile,
-	DatabaseMessageExtraImageFile
+	DatabaseMessageExtra
 } from '$lib/types/database';
 import {
 	executeBrowserInfoTool,
 	executeGetDatetimeTool,
 	filterByLeafNodeId,
-	getAudioInputFormat,
 	getConversationModel,
 	isAbortError
 } from '$lib/utils';
@@ -149,7 +144,7 @@ function toAgenticMessages(messages: ApiChatMessageData[]): AgenticMessage[] {
 
 		if (message.role === MessageRole.TOOL && message.tool_call_id) {
 			return {
-				content: typeof message.content === 'string' ? message.content : '',
+				content: message.content,
 				role: MessageRole.TOOL,
 				tool_call_id: message.tool_call_id
 			} satisfies AgenticMessage;
@@ -585,7 +580,7 @@ class AgenticStore {
 			// inside the agentic message; aborting the flow = skip). The summary
 			// call shares the flow's model and abort signal: stopping the flow
 			// aborts a running summary, which fails open below.
-			const summary = await summarizeWithRetry(plan, model || null, signal, {
+			const summary = await summarizeWithRetry(planPath, plan, model || null, signal, {
 				checkParams: {
 					contextKeepRecentTokens: config.contextKeepRecentTokens,
 					contextKeepTargetPercent: config.contextKeepTargetPercent,
@@ -613,7 +608,7 @@ class AgenticStore {
 					firstKeptMessageId: plan.firstKeptMessageId,
 					isSplitTurn: plan.isSplitTurn || undefined,
 					model: model || undefined,
-					summarizedCount: plan.toSummarize.length
+					summarizedCount: plan.toSummarize.length + plan.kept.length
 				},
 				content: `${SUMMARY_CONTENT_PREFIX} ${summary.content}`,
 				convId: conversationId,
@@ -1165,42 +1160,18 @@ class AgenticStore {
 					onAttachments?.(toolResultMessage.id, attachments);
 				}
 
-				// Build content parts for session history (including images for vision models)
-				const contentParts: ApiChatMessageContentPart[] = [
-					{ text: cleanedResult, type: ContentPartType.TEXT }
-				];
-
-				for (const attachment of attachments) {
-					if (attachment.type === AttachmentType.AUDIO) {
-						if (modelsStore.props.modelSupportsAudio(effectiveModel)) {
-							contentParts.push({
-								input_audio: {
-									data: (attachment as DatabaseMessageExtraAudioFile).base64Data,
-									format: getAudioInputFormat(
-										(attachment as DatabaseMessageExtraAudioFile).mimeType
-									)
-								},
-								type: ContentPartType.INPUT_AUDIO
-							});
-						}
-					} else if (attachment.type === AttachmentType.IMAGE) {
-						if (modelsStore.props.modelSupportsVision(effectiveModel)) {
-							contentParts.push({
-								image_url: {
-									url: (attachment as DatabaseMessageExtraImageFile).base64Url
-								},
-								type: ContentPartType.IMAGE_URL
-							});
-						} else {
-							console.info(
-								`[AgenticStore] Skipping image attachment (model "${effectiveModel}" does not support vision)`
-							);
-						}
-					}
-				}
+				// Build content parts for session history with the same shared
+				// builder as the DB→API conversion (N11.1): fixed part order,
+				// images capped, no model gating here — the downstream
+				// sendMessage vision filter applies. A single text part collapses
+				// back to a string, so the no-attachment wire shape is unchanged.
+				const contentParts = await ChatService.buildExtraContentParts({
+					content: cleanedResult,
+					extra: attachments
+				});
 
 				sessionMessages.push({
-					content: contentParts.length === 1 ? cleanedResult : contentParts,
+					content: contentParts.length <= 1 ? cleanedResult : contentParts,
 					role: MessageRole.TOOL,
 					tool_call_id: toolCall.id
 				});

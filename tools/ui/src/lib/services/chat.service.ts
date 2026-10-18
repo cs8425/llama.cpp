@@ -132,54 +132,30 @@ export class ChatService {
 	}
 
 	/**
-	 * Converts a database message with attachments to API chat message format.
-	 * Processes various attachment types (images, text files, PDFs) and formats them
-	 * as content parts suitable for the chat completion API.
+	 * Builds the API content parts for a message's text content plus its
+	 * attachments (`extra`) — the single shared `extra → parts` builder
+	 * (N11 D1, 2026-10-18).
+	 *
+	 * The user-input path is the reference: fixed part order (text files,
+	 * legacy context, images, audio, content text, video, PDF, MCP prompt,
+	 * MCP resource), images always capped at `MAX_IMAGE_RESOLUTION`, no model
+	 * gating — the downstream `sendMessage` vision filter strips images for
+	 * non-vision models. Tool results go through the same builder (and the
+	 * agentic in-flow push reuses it), so every DB-rebuild path and the
+	 * in-flow send path produce byte-identical parts.
 	 */
-	static async convertDbMessageToApiChatMessageData(
-		message: DatabaseMessage & { extra?: DatabaseMessageExtra[] }
-	): Promise<ApiChatMessageData> {
-		// Handle tool result messages (role: 'tool')
-		if (message.role === MessageRole.TOOL && message.toolCallId) {
-			return {
-				content: message.content,
-				role: MessageRole.TOOL,
-				tool_call_id: message.toolCallId
-			};
-		}
-
-		// Parse tool calls for assistant messages
-		let toolCalls: ApiChatCompletionToolCall[] | undefined;
-
-		if (message.toolCalls) {
-			try {
-				toolCalls = JSON.parse(message.toolCalls);
-			} catch {
-				// Ignore parse errors for malformed tool calls
-			}
-		}
-
-		if (!message.extra || message.extra.length === 0) {
-			const result: ApiChatMessageData = {
-				content: message.content,
-				role: message.role as MessageRole
-			};
-
-			if (message.reasoningContent) {
-				result.reasoning_content = message.reasoningContent;
-			}
-
-			if (toolCalls && toolCalls.length > 0) {
-				result.tool_calls = toolCalls;
-			}
-
-			return result;
-		}
-
+	static async buildExtraContentParts({
+		content,
+		extra
+	}: {
+		content: string;
+		extra?: DatabaseMessageExtra[];
+	}): Promise<ApiChatMessageContentPart[]> {
+		const extras = extra ?? [];
 		const contentParts: ApiChatMessageContentPart[] = [];
-		const textFiles = message.extra.filter(
-			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraTextFile =>
-				extra.type === AttachmentType.TEXT
+		const textFiles = extras.filter(
+			(item: DatabaseMessageExtra): item is DatabaseMessageExtraTextFile =>
+				item.type === AttachmentType.TEXT
 		);
 
 		for (const textFile of textFiles) {
@@ -190,9 +166,9 @@ export class ChatService {
 		}
 
 		// Handle legacy 'context' type from the old UI (pasted content)
-		const legacyContextFiles = message.extra.filter(
-			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraLegacyContext =>
-				extra.type === AttachmentType.LEGACY_CONTEXT
+		const legacyContextFiles = extras.filter(
+			(item: DatabaseMessageExtra): item is DatabaseMessageExtraLegacyContext =>
+				item.type === AttachmentType.LEGACY_CONTEXT
 		);
 
 		for (const legacyContextFile of legacyContextFiles) {
@@ -206,9 +182,9 @@ export class ChatService {
 			});
 		}
 
-		const imageFiles = message.extra.filter(
-			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraImageFile =>
-				extra.type === AttachmentType.IMAGE
+		const imageFiles = extras.filter(
+			(item: DatabaseMessageExtra): item is DatabaseMessageExtraImageFile =>
+				item.type === AttachmentType.IMAGE
 		);
 
 		for (const image of imageFiles) {
@@ -223,9 +199,9 @@ export class ChatService {
 			});
 		}
 
-		const audioFiles = message.extra.filter(
-			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraAudioFile =>
-				extra.type === AttachmentType.AUDIO
+		const audioFiles = extras.filter(
+			(item: DatabaseMessageExtra): item is DatabaseMessageExtraAudioFile =>
+				item.type === AttachmentType.AUDIO
 		);
 
 		for (const audio of audioFiles) {
@@ -238,16 +214,16 @@ export class ChatService {
 			});
 		}
 
-		if (message.content) {
+		if (content) {
 			contentParts.push({
-				text: message.content,
+				text: content,
 				type: ContentPartType.TEXT
 			});
 		}
 
-		const videoFiles = message.extra.filter(
-			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraVideoFile =>
-				extra.type === AttachmentType.VIDEO
+		const videoFiles = extras.filter(
+			(item: DatabaseMessageExtra): item is DatabaseMessageExtraVideoFile =>
+				item.type === AttachmentType.VIDEO
 		);
 
 		for (const video of videoFiles) {
@@ -264,9 +240,9 @@ export class ChatService {
 			});
 		}
 
-		const pdfFiles = message.extra.filter(
-			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraPdfFile =>
-				extra.type === AttachmentType.PDF
+		const pdfFiles = extras.filter(
+			(item: DatabaseMessageExtra): item is DatabaseMessageExtraPdfFile =>
+				item.type === AttachmentType.PDF
 		);
 
 		for (const pdfFile of pdfFiles) {
@@ -285,9 +261,9 @@ export class ChatService {
 			}
 		}
 
-		const mcpPrompts = message.extra.filter(
-			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraMcpPrompt =>
-				extra.type === AttachmentType.MCP_PROMPT
+		const mcpPrompts = extras.filter(
+			(item: DatabaseMessageExtra): item is DatabaseMessageExtraMcpPrompt =>
+				item.type === AttachmentType.MCP_PROMPT
 		);
 
 		for (const mcpPrompt of mcpPrompts) {
@@ -302,9 +278,9 @@ export class ChatService {
 			});
 		}
 
-		const mcpResources = message.extra.filter(
-			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraMcpResource =>
-				extra.type === AttachmentType.MCP_RESOURCE
+		const mcpResources = extras.filter(
+			(item: DatabaseMessageExtra): item is DatabaseMessageExtraMcpResource =>
+				item.type === AttachmentType.MCP_RESOURCE
 		);
 
 		for (const mcpResource of mcpResources) {
@@ -318,6 +294,81 @@ export class ChatService {
 				type: ContentPartType.TEXT
 			});
 		}
+
+		return contentParts;
+	}
+
+	/**
+	 * Converts a database message with attachments to API chat message format.
+	 * Processes various attachment types (images, text files, PDFs) and formats them
+	 * as content parts suitable for the chat completion API.
+	 */
+	static async convertDbMessageToApiChatMessageData(
+		message: DatabaseMessage & { extra?: DatabaseMessageExtra[] }
+	): Promise<ApiChatMessageData> {
+		// Handle tool result messages (role: 'tool'): plain text when there are
+		// no attachments, the shared parts builder when there are (N11.1 — the
+		// old early-return silently dropped `extra`, e.g. MCP screenshot base64).
+		if (message.role === MessageRole.TOOL && message.toolCallId) {
+			if (!message.extra || message.extra.length === 0) {
+				return {
+					content: message.content,
+					role: MessageRole.TOOL,
+					tool_call_id: message.toolCallId
+				};
+			}
+
+			return {
+				content: await ChatService.buildExtraContentParts(message),
+				role: MessageRole.TOOL,
+				tool_call_id: message.toolCallId
+			};
+		}
+
+		// Parse tool calls for assistant messages
+		let toolCalls: ApiChatCompletionToolCall[] | undefined;
+
+		if (message.toolCalls) {
+			try {
+				toolCalls = JSON.parse(message.toolCalls);
+			} catch {
+				// Ignore parse errors for malformed tool calls
+			}
+		}
+
+		if (!message.extra || message.extra.length === 0) {
+			const hasToolCalls = toolCalls !== undefined && toolCalls.length > 0;
+
+			// Serialization alignment with the in-flow push (agentic:947,
+			// `content: turnContent || undefined`): an assistant turn that
+			// carries tool calls and no text omits the empty content field, so
+			// the rebuilt payload stays byte-identical to the one that built
+			// the KV cache.
+			const omitEmptyContent =
+				message.role === MessageRole.ASSISTANT && hasToolCalls && message.content === '';
+
+			const result: ApiChatMessageData = {
+				content: message.content,
+				role: message.role as MessageRole
+			};
+
+			if (omitEmptyContent) {
+				// JSON serialization drops the undefined property
+				(result as { content?: string | ApiChatMessageContentPart[] }).content = undefined;
+			}
+
+			if (message.reasoningContent) {
+				result.reasoning_content = message.reasoningContent;
+			}
+
+			if (hasToolCalls) {
+				result.tool_calls = toolCalls;
+			}
+
+			return result;
+		}
+
+		const contentParts = await ChatService.buildExtraContentParts(message);
 
 		const result: ApiChatMessageData = {
 			content: contentParts,

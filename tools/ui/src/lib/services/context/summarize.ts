@@ -8,17 +8,19 @@
  *
  * Two prompt modes (`SummaryMode`):
  * - `prefix-stable` (default): the payload is
- *   `[system head (verbatim), …summarize region (converted per message, original
- *   roles/structure kept: user/assistant/tool, tool_calls, attachments),
- *   user (the instruction)]`. The prefix (system + region) is byte-identical to
- *   the main conversation payload's prefix — same `normalizeMessagesForApi`
- *   conversion the builder uses — so repeated summaries of the same region
- *   (re-summarize, re-compact) reuse the KV cache prefix, and the model sees
- *   the original message structure for higher fidelity. Only the trailing
- *   instruction varies (default / custom prompt, normal / split-turn variant).
+ *   `[buildLlmContext(planPath).messages, user (the instruction)]` where
+ *   `planPath` is the effective path (the builder's view after the in-effect
+ *   compaction entry, N11.2 / A4). The builder's output IS the last live
+ *   payload (with an old entry: `[system, old summary, kept…]`; without:
+ *   the full path), built through the same choke point as the main send
+ *   path — so the prefix is byte-identical to it (maximum KV-cache affinity)
+ *   and the model sees the original message structure for higher fidelity.
+ *   Only the trailing instruction varies (default / custom prompt, normal /
+ *   split-turn variant).
  * - `transcript` (v1 fallback): `[system (the instruction),
- *   user (buildSummaryTranscript flat text)]` — attachments become
- *   placeholders, tool calls reduce to names.
+ *   user (buildSummaryTranscript flat text)]` — the transcript covers the
+ *   full effective path (toSummarize + kept, system head excluded);
+ *   attachments become placeholders, tool calls reduce to names.
  */
 
 import { AttachmentType, MessageRole } from '$lib/enums';
@@ -27,6 +29,7 @@ import type { ApiChatMessageData } from '$lib/types/api';
 import type { ChatMessageTimings } from '$lib/types/chat';
 import type { DatabaseMessage, DatabaseMessageExtra } from '$lib/types/database';
 import { formatFileSize } from '$lib/utils/formatters';
+import { buildLlmContext } from './context-builder';
 import {
 	evaluateCompactionResult,
 	nextCompactionStep,
@@ -189,8 +192,14 @@ function summarizeToolCalls(toolCallsJson: string): string {
 /**
  * Runs the summary LLM call for a compaction plan.
  *
- * @param plan - The plan whose `toSummarize` region gets summarized (plus the
- *   `systemHead` sent first in prefix-stable mode).
+ * @param planPath - The effective path (the builder's view after the
+ *   in-effect compaction entry; `effectiveCompactionPath(path)` at the call
+ *   sites). The prefix-stable payload is `buildLlmContext(planPath).messages`
+ *   + the instruction — the exact last live payload (N11.2 / A4) — so the
+ *   KV-cache prefix is byte-identical to the main conversation's.
+ * @param plan - The plan; `toSummarize` + `kept` define the transcript region
+ *   (transcript mode) and the plan's metadata drives the prompt variant and
+ *   the success check.
  * @param model - Model to use (the conversation's model; required in ROUTER mode).
  * @param signal - Abort signal (the flow abort for mid-loop compaction, the
  *   stop-compaction controller for manual actions). An aborted signal throws
@@ -202,6 +211,7 @@ function summarizeToolCalls(toolCallsJson: string): string {
  *   caller must treat that as "do not compact".
  */
 export async function summarizeMessages(
+	planPath: DatabaseMessage[],
 	plan: CompactionPlan,
 	model: string | null,
 	signal?: AbortSignal,
@@ -214,11 +224,18 @@ export async function summarizeMessages(
 		options.mode === 'transcript'
 			? [
 					{ content: instruction, role: MessageRole.SYSTEM },
-					{ content: buildSummaryTranscript(plan.toSummarize), role: MessageRole.USER }
+					{
+						content: buildSummaryTranscript([...plan.toSummarize, ...plan.kept]),
+						role: MessageRole.USER
+					}
 				]
 			: [
-				...(plan.systemHead ? await ChatService.normalizeMessagesForApi([plan.systemHead]) : []),
-				...(await ChatService.normalizeMessagesForApi(plan.toSummarize)),
+				// The builder's output IS the last live payload (same choke point
+				// as the main send path) — the prefix stays byte-identical to it
+				// (N11.2 / A4); sourceId tags are stripped by the send mapping.
+				...(await buildLlmContext(planPath, {
+					excludeReasoning: options.excludeReasoning === true
+				})).messages,
 				{ content: instruction, role: MessageRole.USER }
 			];
 
@@ -297,11 +314,14 @@ export interface SummarizeWithRetryOptions extends SummarizeOptions {
  * skip). The manual paths (Compact now / Re-summarize / backward boundary
  * move) run the same flow.
  *
+ * @param planPath - The effective path for the summary payload (see
+ *   {@link summarizeMessages}).
  * @returns The summary (success, or the user's "use it"), or null when the
  *   user skipped — the caller must NOT create/update the compaction entry.
  *   Throws on summary-call failure / abort (the caller fails open).
  */
 export async function summarizeWithRetry(
+	planPath: DatabaseMessage[],
 	plan: CompactionPlan,
 	model: string | null,
 	signal: AbortSignal | undefined,
@@ -315,7 +335,7 @@ export async function summarizeWithRetry(
 	while (true) {
 		attempts++;
 
-		last = await summarizeMessages(plan, model, signal, options);
+		last = await summarizeMessages(planPath, plan, model, signal, options);
 
 		const summarySize = resolveSummarySize(last.tokens, last.content);
 		const check = nCtx > 0 ? evaluateCompactionResult(plan, summarySize, compactionMode, checkParams) : null;

@@ -655,6 +655,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				const summary = await this.runCompactionSummary(
 					convId,
 					plan,
+					planPath,
 					model,
 					nCtx,
 					mode,
@@ -674,7 +675,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 						firstKeptMessageId: plan.firstKeptMessageId,
 						isSplitTurn: plan.isSplitTurn || undefined,
 						model: model ?? undefined,
-						summarizedCount: plan.toSummarize.length
+						summarizedCount: plan.toSummarize.length + plan.kept.length
 					},
 					content: `${SUMMARY_CONTENT_PREFIX} ${summary.content}`,
 					convId,
@@ -1167,13 +1168,14 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 	private async runCompactionSummary(
 		convId: string,
 		plan: CompactionPlan,
+		planPath: DatabaseMessage[],
 		model: string | null,
 		nCtx: number,
 		mode: CompactionMode,
 		config: typeof settingsStore.config,
 		signal: AbortSignal
 	): Promise<SummaryResult | null> {
-		return summarizeWithRetry(plan, model, signal, {
+		return summarizeWithRetry(planPath, plan, model, signal, {
 			checkParams: {
 				contextKeepRecentTokens: config.contextKeepRecentTokens,
 				contextKeepTargetPercent: config.contextKeepTargetPercent,
@@ -1250,9 +1252,14 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		const nCtx = this.getContextSizeForConversation(convId, path);
 		const plan = this.buildRegionPlan(path, boundaryIndex, isSplitTurn, entryId);
 
+		// N11.2 (A4): the summary payload is the full effective path (the
+		// builder's view, old entry included — rolling summary).
+		const planPath = effectiveCompactionPath(path);
+
 		return this.runCompactionSummary(
 			convId,
 			plan,
+			planPath,
 			this.resolveCompactionModel(path),
 			nCtx ?? 0,
 			toCompactionMode(config.contextCompactionMode),
