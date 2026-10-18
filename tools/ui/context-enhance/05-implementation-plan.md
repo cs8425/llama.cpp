@@ -442,40 +442,55 @@ server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、�
 > kept = 165..186 append 到 summary 後，與 summary 刻意重複確保精確度）。scope =
 > 所有 compaction；prompt / max_tokens 不變；無新 meta / 無新設定 / 無 fallback。
 
-- [ ] N11.1（P0）：`ChatService.convertDbMessageToApiChatMessageData` 加 `model`
-      （或 `supportsVision`/`supportsAudio`）參數；`role=tool + extra` 不再
-      early-return：組 `[text, image_url（capImageDataURLSize）, input_audio]`
-      parts，**與 in-flow 同序、同 gating**（`chat.service.ts:142–149`）
-- [ ] N11.1：參數 thread：`normalizeMessagesForApi` / `resolveOutgoingMessages` /
-      `buildLlmContext`（`ContextBuildOptions` 加 `model`）/ `summarizeMessages`
-      （已有 model）/ `preEncode`（已有 model）/ inspector 呼叫點（conversation
-      model）
-- [ ] N11.1：in-flow tool result parts 建構（`agentic/index.svelte.ts:1168–1206`）
-      與轉換抽成**同一 shared helper**（cap 統一；順手修掉 in-flow 不 cap）
-- [ ] N11.1：`toAgenticMessages` TOOL 分支保留 parts content
+> **D1 定案（使用者 2026-10-18）取代原規劃的「model 參數 / 參數 thread / vision
+> filter 共用 gating」三項（已整段刪除）**：tool result DB 重建與 in-flow 走 user input
+> 同路徑（shared builder、無 model 參數、無新 gating）。
+
+- [x] N11.1（P0）：`chat.service.ts` 把 `extra → parts` 區塊原樣抽出為
+      `ChatService.buildExtraContentParts({ content, extra })`（固定序、images 一律
+      `capImageDataURLSize`、無 model gating）
+- [x] N11.1：`convertDbMessageToApiChatMessageData`：`role=tool + toolCallId + 有 extra`
+      不再 early-return：`{ content: await buildExtraContentParts(message), role: TOOL,
+      tool_call_id }`；`tool + 無 extra` 現行 plain early-return 不變；非 tool 有 extra
+      改調 shared builder（行為不變）
+- [x] N11.1：序列化對齊：assistant + tool_calls 且 content 空 → 轉換**省略
+      content 欄位**（向 in-flow 對齊——cache 是 in-flow 建的，重建端要跟它一致）
+- [x] N11.1：in-flow tool result parts 建構（`agentic/index.svelte.ts:1168–1206`）
+      整段改調 `buildExtraContentParts` + `parts.length <= 1 ? cleanedResult : parts`
+      （cap 統一、順手修掉 in-flow 不 cap；順序改 user input 路徑；`<= 1` 讓空 content
+      + 無附件邊界情境 wire 不變）
+- [x] N11.1：`toAgenticMessages` TOOL 分支保留 parts content
       （`AgenticMessage.content: string | ApiChatMessageContentPart[]`、
       `agentic:150–156` 不再 `→ ''`）
-- [ ] N11.1：序列化對齊：assistant + tool_calls 且 content 空 → 轉換**省略
-      content 欄位**（向 in-flow 對齊——cache 是 in-flow 建的，重建端要跟它一致）
-- [ ] N11.1：`sendMessage` 的 vision filter（`chat.service.ts:1114–1140`，
-      API-shaped 陣列路徑保留）與轉換**共用同一 gating 判斷**（避免兩套）
-- [ ] N11.2（A4）：`summarizeMessages` / `summarizeWithRetry` 加 `planPath` 參數
-      （effective path，呼叫點已有：`agentic:559` / `chat:623` / re-summarize）
-- [ ] N11.2（A4）：prefix-stable payload =
-      `buildLlmContext(planPath, { excludeReasoning, model }).messages` + instruction；
+- [x] N11.1：清理不再使用的 import（`ContentPartType` / `ApiChatMessageContentPart` /
+      `getAudioInputFormat` / `DatabaseMessageExtraAudioFile` /
+      `DatabaseMessageExtraImageFile`）
+- [x] **一律不動**：`normalizeMessagesForApi` / `resolveOutgoingMessages` /
+      `buildLlmContext` / `ContextBuildOptions` / `preEncode` / `sendMessage` /
+      vision filter（D1：無 model 參數、無新 gating）
+- [x] N11.2（A4）：`summarizeMessages` / `summarizeWithRetry` 加 `planPath` 參數
+      （effective path，呼叫點已有：`agentic:559` / `chat:623` / re-summarize =
+      `effectiveCompactionPath(path)`）
+- [x] N11.2（A4）：prefix-stable payload =
+      `buildLlmContext(planPath, { excludeReasoning }).messages` + instruction；
       **刪除**現行 `normalizeMessagesForApi([systemHead]) + normalize(toSummarize)`
       自組裝（`summarize.ts:213–223`）
-- [ ] N11.2（A4）：transcript 模式 `buildSummaryTranscript` 區段同步改 full path
+- [x] N11.2（A4）：transcript 模式 `buildSummaryTranscript` 區段同步改 full path
       （`toSummarize + kept`）
-- [ ] N11.2（A4）：兩呼叫點 `summarizedCount` = `plan.toSummarize.length +
-      plan.kept.length`（`agentic:616` / `chat:677`）
-- [ ] unit：tool result 轉換矩陣（image/audio × vision on/off × cap on/off）；
-      in-flow helper 與 DB rebuild 的 **byte-identity**（同一 DB message → 相同
-      API message）；空 content 序列化（assistant + tool_calls + 空 → 欄位省略）
-- [ ] regression（本目錄兩份抓包當 fixture）：assert compact request 前綴是
-      before-trigger payload 的 **byte-prefix**；assert post-compaction 下一 turn
-      payload 前綴與壓縮前一致
+- [x] N11.2（A4）：兩呼叫點 `summarizedCount` = `plan.toSummarize.length +
+      plan.kept.length`（`agentic:616` / `chat:677`；`chat:871` 邊界移動不改）
+- [ ] unit：`buildExtraContentParts` / 轉換矩陣（tool result × image / audio / 兩者 /
+      無 extra → 固定序、cap 被呼叫、無 extra 回 string + `tool_call_id`）；in-flow 與
+      DB rebuild 的 **byte-identity**（同函式同輸入）；空 content 序列化三態
+      （assistant + tool_calls + 空 → 欄位省略；tool_calls 非空 → 保留；無 tool_calls
+      空 → `content: ''` 不變）（N11.3）
+- [ ] regression（N11.3，合成 fixture：screenshot tool result data URL 圖 + audio）：
+      in-flow ≡ DB rebuild byte-identical；compact request = 最後一筆 payload 的
+      **byte-prefix** + instruction（本目錄兩份抓包只作根因文檔證據、不適用當 oracle）
 - [ ] 回歸：`npm run check` + 既有 5 支 client compaction suite 零改動全綠
+      （⏸ 2026-10-18 待使用者編譯確認；`tests/unit/summarize.test.ts` 現已過期——
+      呼叫缺 `planPath` + mock 缺 `convertDbMessageToApiChatMessageData`，待使用者
+      決定 A（現在最小更新）/ B（留 N11.3））
 - [ ] 手動驗收：MCP screenshot flow → 連壓兩次 + F5 → server `cache_n`（gauge）
       在 compact request 與後續 turns 皆高命中
 
@@ -519,10 +534,10 @@ fallback / overhead 邏輯。
 
 | 檔案 | 說明 |
 | ---- | ---- |
-| `src/lib/services/context/types.ts` | `CompactionPlan` / `ContextBuildResult`；(N11)`ContextBuildOptions` 加 `model` |
-| `src/lib/services/context/context-builder.ts` | `buildLlmContext`(唯一 choke point) + `effectiveCompactionPath`(N8:套用 cmp 後的 path = planning 輸入)；(N11)thread `model` 進轉換 |
+| `src/lib/services/context/types.ts` | `CompactionPlan` / `ContextBuildResult`（N11 不改：無 model 參數） |
+| `src/lib/services/context/context-builder.ts` | `buildLlmContext`(唯一 choke point) + `effectiveCompactionPath`(N8:套用 cmp 後的 path = planning 輸入)；(N11 不改) |
 | `src/lib/services/context/compaction-policy.ts` | `planCompaction` / `deriveRealMessageTokens` / `messageSize` / `messageBytes`（N11.2 A4 不改：切點照現行計算） |
-| `src/lib/services/context/summarize.ts` | transcript 組裝 + summary 呼叫；(N11)thread model 進 `buildLlmContext` / 轉換；(N11.2 A4)收 `planPath` 參數、prefix-stable payload = `buildLlmContext(planPath).messages` + instruction（刪自組裝）、transcript 區段 = full path |
+| `src/lib/services/context/summarize.ts` | transcript 組裝 + summary 呼叫；(N11.2 A4)收 `planPath` 參數、prefix-stable payload = `buildLlmContext(planPath).messages` + instruction（刪自組裝）、transcript 區段 = full path |
 | `src/lib/services/context/index.ts` | barrel |
 | `src/lib/components/app/chat/ChatMessages/ChatMessage/ChatMessageCompaction/ChatMessageCompaction.svelte` | cmp 渲染 |
 | `src/lib/components/app/dialogs/DialogContextInspector.svelte` | inspector(可再拆 2~3 個子元件:訊息列、已裁切區、進階區) |
@@ -543,7 +558,7 @@ fallback / overhead 邏輯。
 | `src/lib/services/migration.service.ts` | (N10)`compaction-graft-fix-v1` 啟動 migration |
 | `src/lib/stores/conversations/index.svelte.ts` | (N10)`loadConversation` 防禦層(graft fix 檢查 + 套用) |
 | `src/lib/types/agentic.d.ts` / `types/chat.d.ts` | (N10)`onCompaction` callback 型別 |
-| `src/lib/services/chat.service.ts` | `sendMessage` / `preEncode` 改走 builder(簽名不變)；(N11)`convertDbMessageToApiChatMessageData` 加 model 參數 + tool result 組 parts（同序 / 同 gating / 同 cap）+ 空 content 序列化對齊 + vision filter 共用 gating |
+| `src/lib/services/chat.service.ts` | `sendMessage` / `preEncode` 改走 builder(簽名不變)；(N11)`buildExtraContentParts` shared builder（`extra → parts` 原樣抽出、images 一律 cap、無 gating）+ `convertDbMessageToApiChatMessageData` tool+extra 走它 + 空 content 序列化對齊（無 model 參數、無新 gating） |
 | `src/lib/stores/agentic/index.svelte.ts` | flow 開始前改走 builder;(N7)`compactBetweenTurns` 改 `setCompacting(convId)`;(N8)`compactBetweenTurns` plan 改餵 effective path;(N10)callbacks 傳入、cmp 建後呼叫 `onCompaction`；(N11)tool result parts 抽 shared helper + `toAgenticMessages` 保留 parts；(N11.2 A4)傳 `planPath` 進 `summarizeWithRetry` + `summarizedCount` = full path 覆蓋 |
 | `src/lib/stores/chat/index.svelte.ts` | `compactConversation()`、自動觸發掛 `onFlowComplete`、inspector 快照;(N7)`sendMessage` guard + `endCompactionState` finalizer + `compacting` 前移 + `abortCurrentFlow` 補 `stopCompaction()`;(N8)`compactConversation` plan 改餵 effective path;(N10)`streamChatCompletion` 接 `onCompaction` → 推進 `lastCreatedInFlow`；(N11.2 A4)同 agentic：傳 `planPath` + `summarizedCount` = full path 覆蓋 |
 | `src/lib/stores/chat/context-stats.svelte.ts` | (Phase 2)compacted 指標;(N7)`compactingConvId` + `setCompacting` helper |
@@ -557,8 +572,9 @@ fallback / overhead 邏輯。
 
 **刻意不改的**:`conversationsStore` 的路徑邏輯(`filterByLeafNodeId` 對新 type
 透明)、import/export 服務。（`convertDbMessageToApiChatMessageData` 原本列此處;
-**N11.1 改它**——加 model 參數 + tool result parts——但仍維持單一副本不 fork：
-builder 與 in-flow shared helper 都複用它。）(`branching.ts` 原列此處;N10 新增純函式
+**N11.1 改它**——tool+extra 走 shared builder + 空 content 序列化對齊——但仍維持
+單一副本不 fork：builder 與 in-flow 都調同一個 `buildExtraContentParts`。）
+(`branching.ts` 原列此處;N10 新增純函式
 `findCompactionGraftFixes`,路徑邏輯本身仍零改動。）
 
 ## 3. 測試計畫
