@@ -827,6 +827,37 @@ const mcpServerOverridesToToolPolicyMigration: Migration = {
 			);
 	}
 };
+
+// Migration 12: Compaction Graft Fix (N10.2)
+
+// eslint-disable-next-line padding-line-between-statements -- comment header separates this const group
+const COMPACTION_GRAFT_FIX_MIGRATION_ID = 'compaction-graft-fix-v1';
+const compactionGraftFixMigration: Migration = {
+	description:
+		'Re-attach compaction entries grafted as siblings of the next flow message onto the root→currNode path (N10.2)',
+	id: COMPACTION_GRAFT_FIX_MIGRATION_ID,
+
+	async run(): Promise<void> {
+		const db = await getDatabaseService();
+		const { findCompactionGraftFixes } = await import('$lib/utils/branching');
+		const conversations = await db.getAllConversations();
+
+		let totalApplied = 0;
+
+		for (const conv of conversations) {
+			const allMessages = await db.getConversationMessages(conv.id);
+			const fixes = findCompactionGraftFixes(allMessages, conv.currNode);
+
+			if (fixes.length === 0) continue;
+
+			const applied = await db.applyCompactionGraftFixes(fixes);
+			totalApplied += applied;
+		}
+
+		if (import.meta.env.DEV && import.meta.env.VITE_DEBUG)
+			console.log(`[Migration] Compaction graft fix: applied ${totalApplied} fixes`);
+	}
+};
 const migrations: Migration[] = [
 	localStorageMigration,
 	idxdbMigration,
@@ -838,7 +869,8 @@ const migrations: Migration[] = [
 	configTypesMigration,
 	renderKeysMigration,
 	modelOrgNameKeyMigration,
-	mcpServerOverridesToToolPolicyMigration
+	mcpServerOverridesToToolPolicyMigration,
+	compactionGraftFixMigration
 ];
 
 export const MigrationService = {

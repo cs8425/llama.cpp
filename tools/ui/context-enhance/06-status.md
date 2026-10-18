@@ -3,25 +3,16 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新；N8 **完成 + 回歸確認**（N8.1–N8.3 代碼完成；
-> N8.4 第一輪 unit 跑測 2 失敗全在測試檔已修（N8 向量期望值
-> `toSummarize` 漏 `'u1'` 筆誤、來源碼零改動，見 §3.27 狀態）；使用者重跑 `npm run check`
-> + 3 支 unit 檔 + 5 支 client compaction suite 全綠，見 §4）——第二次（及之後）
-> 自動壓縮的 plan 是在 raw DB path 上算的 → `toSummarize` 含舊 cmp 已 drop
-> 的原始訊息 → prefix-stable summary 呼叫把整段原始歷史重送 → context
-> overflow、summary 無法產生（fail-open、不建 cmp）→ agentic loop 卡在超標
-> context。修正 = 新 `effectiveCompactionPath()`（context-builder.ts、與
-> `buildLlmContext` 共用窗口解析 `resolveCompactionWindow`）+ 兩個 planning
-> 呼叫點餵它（`planPath`）；根因 / 邊界情境 / 測試計畫見 §3.27、執行清單見
-> 05-N8 / §5d）**：
+> **恢復點（最新；N10 **代碼完成、待編譯確認**（N10.1 根因修：`onCompaction`
+> callback + `lastCreatedInFlow` 推進；N10.2 已損樹修復：`findCompactionGraftFixes`
+> 純函式 + `applyCompactionGraftFixes` IDB transaction + 啟動 migration +
+> `loadConversation` 防禦層；N10.3 unit 5 向量；待 `npm run check` + unit 確認；
+> 明細見 §3.29 / 05-N10 / §5f）**：
 >
 > **剩（依序）**：
 > 1. **N10 — in-loop compaction 的 cmp 被接成 sibling（系統性 bug、最高優先；§3.29 / 05-N10 / §5f）**：
->    flow 的 `lastCreatedInFlow` closure 變數不被 compaction 推進 → cmp 與下一則
->    flow 訊息成 sibling（不在 root→currNode 路徑上）→ F5 / 匯出匯入後所有
->    summary 消失、inspector 全量、session 無法繼續；in-memory 平陣列遮住分岔。
->    規格 = compaction 後推進 flow 接掛點（N10.1）+ 已損樹修復 migration
->    （N10.2）+ 測試鎖定（N10.3）。
+>    代碼完成、待編譯確認（N10.1 根因修 + N10.2 已損樹修復 + N10.3 unit 5 向量）。
+>    待 `npm run check` + unit 確認 + 手動驗收。
 > 2. **N9 — F5 / refresh 韌性（規格定稿 2026-10-18、未實做；§3.28 / 05-N9 / §5e）**：
 >    in-loop compaction 的 cmp + currNode 是兩次獨立 IDB 寫（非原子）→ 兩寫之間 F5
 >    （或 `updateCurrentNode` 拋錯）→ cmp orphan（在 DB、不在 path、不可見）→
@@ -52,7 +43,7 @@
 | N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（§3.26/§2u） | ✅ **完成並確認**（2026-11-04：四輪跑測 8 支失敗全在測試檔已修、來源碼零改動；使用者重跑 `chat-message-compaction` 11/11 + check + 4 回歸檔全綠；queue 不 block + 指標列 + per-conv `compactingConvId` + sendMessage guard + finalizer 自動送 + client 11 支；手動驗收 #8–#12 未做） |
 | N8 — 第二次壓縮：plan 改在 effective path（bug 修正；§3.27） | ✅ **完成並確認**（2026-10-18：N8.1–N8.3（3 來源檔 + 3 unit 檔）；第一輪 2 失敗全在測試檔已修（期望值筆誤、來源碼零改動）；使用者重跑 `npm run check` + unit 3 支 + client 5 支 compaction suite 全綠；手動驗收未做（§4 清單）；執行清單 05-N8 / §5d） |
 | N9 — F5 / refresh 韌性：in-loop compaction 兩寫非原子（§3.28） | ⬜ **規格定稿、未實做**（2026-10-18：問題已對 code 驗證——`createCompactionMessage`（單一 IDB transaction）與 `updateCurrentNode`（獨立 IDB 寫）非原子 → 兩寫之間 F5 / `updateCurrentNode` 拋錯 → cmp orphan（在 DB、不在 path、不可見）→ reload 後全量送出 → overflow；非永久損毀（無資料遺失、手動 compact 可恢復）。規格 = 原子 commit（N9.1）+ 載入收編 orphan（N9.2）+ 可選送出前 overflow guard（N9.3）+ fail-open 語義入 02-§4（N9.4）；執行清單 05-N9 / §5e） |
-| N10 — in-loop compaction 的 cmp 被接成 sibling（系統性 bug；§3.29） | 🔴 **最高優先、規格定稿、未實做**（2026-10-18：使用者確認——agentic loop 連壓兩次正常停下後，F5 / 匯出匯入 → 所有 summary 消失、inspector 全量、session 無法繼續。根因已對 code 驗證：flow 的 `lastCreatedInFlow`（`chat/index.svelte.ts:1596/1675/1711`）不被 compaction 推進 → `101.parent = 099 = cmp1.parent`（sibling）→ cmp 不在 root→currNode 路徑上；in-memory 平陣列遮住分岔。規格 = 推進 flow 接掛點（N10.1）+ 已損樹修復 migration（N10.2）+ 測試鎖定（N10.3）；執行清單 05-N10 / §5f） |
+| N10 — in-loop compaction 的 cmp 被接成 sibling（系統性 bug；§3.29） | 🚧 **代碼完成、待編譯確認**（2026-10-18：N10.1 根因修（`onCompaction` callback + `lastCreatedInFlow` 推進）+ N10.2 已損樹修復（`findCompactionGraftFixes` 純函式 + `applyCompactionGraftFixes` IDB transaction + 啟動 migration + `loadConversation` 防禦層）+ N10.3 unit 5 向量全寫入；待 `npm run check` + unit 確認；執行清單 05-N10 / §5f） |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
@@ -1827,8 +1818,7 @@ child）**抓不到**此案例（這裡 cmp 是路徑中間節點的 sibling）�
 
 ### 狀態
 
-- ⬜ **未實做（最高優先）**：使用者已確認的系統性資料損毀；規格定稿 2026-10-18；
-  執行清單 §5f / 05-N10。
+- 🚧 **代碼完成、待編譯確認**（2026-10-18）：N10.1 根因修（`onCompaction` callback + `lastCreatedInFlow` 推進）+ N10.2 已損樹修復（`findCompactionGraftFixes` 純函式 + `applyCompactionGraftFixes` IDB transaction + 啟動 migration + `loadConversation` 防禦層）+ N10.3 unit 5 向量全寫入；待 `npm run check` + unit 確認；執行清單 §5f / 05-N10。
 
 ## 4. 驗證狀態
 
@@ -2321,29 +2311,28 @@ static async createCompactionMessage(params: {
 > 測試鎖定（N10.3）。
 
 ### N10.1 compaction 後推進 flow 的接掛點
-- [ ] agentic flow callback 型別新增 `onCompaction?(cmp: DatabaseMessage)`
-      （`stores/chat/flows.svelte.ts` 或 agentic callbacks 型別定義處）
-- [ ] `stores/chat/index.svelte.ts streamChatCompletion`：接線
+- [x] agentic flow callback 型別新增 `onCompaction?(cmp: DatabaseMessage)`
+      （`types/agentic.d.ts` `AgenticFlowCallbacks` + `types/chat.d.ts` `ChatStreamCallbacks`）
+- [x] `stores/chat/index.svelte.ts streamChatCompletion`：接線
       `onCompaction: (cmp) => { lastCreatedInFlow = cmp.id; }`
-- [ ] `stores/agentic/index.svelte.ts compactBetweenTurns`：把 callbacks（或
-      `onCompaction`）傳入；`createCompactionMessage` + currNode 更新成功後呼叫
-      `callbacks.onCompaction?.(cmp)`
-- [ ] 確認 `createAssistantMessage` / `createToolResultMessage` 下游零改動（parent
+- [x] `stores/agentic/index.svelte.ts compactBetweenTurns`：把 callbacks 傳入；
+      `createCompactionMessage` + currNode 更新成功後呼叫
+      `callbacks.onCompaction?.(cmp)`；`executeAgenticLoop` 傳入 `callbacks`
+- [x] 確認 `createAssistantMessage` / `createToolResultMessage` 下游零改動（parent
       來源不變、只是 `lastCreatedInFlow` 的值推進了）
 
 ### N10.2 已損樹修復
-- [ ] 純函式 `findCompactionGraftFixes(allMessages, currNodeId) →
-      { cmpId, reattachId }[]`（放 `utils/branching.ts` 或 `services/context/`，
-      實做時定）+ unit 5 向量（§3.29 N10.3）
-- [ ] 修復套用（單一 IDB transaction）：`c2.parent = c.id`、`p.children` 移除
-      `c2.id`、`c.children` 加入 `c2.id`；冪等
-- [ ] app 啟動時一次性 migration（掃所有 conversations）+ `loadConversation`
-      防禦層檢查
+- [x] 純函式 `findCompactionGraftFixes(allMessages, currNodeId) →
+      { cmpId, reattachId }[]`（`utils/branching.ts`）+ unit 5 向量（§3.29 N10.3）
+- [x] 修復套用（單一 IDB transaction）：`c2.parent = c.id`、`p.children` 移除
+      `c2.id`、`c.children` 加入 `c2.id`；冪等（`database.service.ts` `applyCompactionGraftFixes`）
+- [x] app 啟動時一次性 migration（`migration.service.ts` `compaction-graft-fix-v1`）
+      + `loadConversation` 防禦層檢查（`conversations/index.svelte.ts`）
 
 ### N10.3 回歸 + 驗收
 - [ ] 核心回歸：in-loop compaction 後下一則 assistant 訊息 `parent === cmp.id`
-      （DB 樹 == 平陣列）
-- [ ] `npm run check` + 既有 5 支 client compaction suite 零改動全綠
+      （DB 樹 == 平陣列）——待編譯確認後手動驗
+- [ ] `npm run check` + 既有 5 支 client compaction suite 零改動全綠——待執行
 - [ ] 手動驗收（使用者原始場景）：agentic loop 連壓兩次正常停下 → F5 → summary
       都在、inspector = 壓縮後 context；匯出 → 匯入 → 同；session 可繼續
 - [ ] 既有已損對話：啟動 migration 後開啟 → summary 回到路徑上、可繼續

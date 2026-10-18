@@ -7,14 +7,13 @@
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
 > [06-status.md](./06-status.md)。
 >
-> **目前停點（2026-10-18）**：**N8 第二次壓縮：plan 改在 effective path
-> （bug 修正）✅ 完成 + 回歸確認**（第二次（及之後）
-> 壓縮的 plan 在 raw DB path 上算 → summary 呼叫重送舊 cmp 已 drop 的原始歷史 → context overflow、
-> summary 無法產生、agentic loop 卡死；修正 = 新 `effectiveCompactionPath()`
-> + 兩個 planning 呼叫點餵它；`npm run check` + unit 3 支 + client 5 支
-> compaction suite 全綠；明細見 06-status §3.27 / 05-N8）。
+> **目前停點（2026-10-18）**：**N10 in-loop cmp sibling 系統性 bug 🚧 代碼完成、待編譯確認**
+> （N10.1 根因修：`onCompaction` callback + `lastCreatedInFlow` 推進；N10.2 已損樹修復：
+> `findCompactionGraftFixes` 純函式 + `applyCompactionGraftFixes` IDB transaction +
+> 啟動 migration + `loadConversation` 防禦層；N10.3 unit 5 向量；
+> 待 `npm run check` + unit 確認；明細見 06-status §3.29 / 05-N10）。
 >
-> **新規格（2026-10-18 定稿、未實做）**：
+> **新規格（2026-10-18 定稿）**：
 >
 > - **N10（🔴 最高優先、系統性 bug）**：in-loop compaction 的 cmp 被接成下一則
 >   flow 訊息的 **sibling**（flow 的 `lastCreatedInFlow` closure 變數不被 compaction
@@ -28,9 +27,10 @@
 >   overflow guard，見 06-status §3.28 / 05-N9。
 >
 > **剩（依序）**：
-> 1. **N10 in-loop cmp sibling 系統性 bug**（最高優先；06-status §3.29 / 05-N10 / §5f）。
+> 1. **N10 in-loop cmp sibling 系統性 bug**（代碼完成、待編譯確認；06-status §3.29 / 05-N10 / §5f）。
 > 2. **N9 F5 / refresh 韌性**（06-status §3.28 / 05-N9 / §5e）。
-> 3. **手動驗收（未做、可一併驗）**：N8（agentic loop 連壓兩次：第二次 summary
+> 3. **手動驗收（未做、可一併驗）**：N10（agentic loop 連壓兩次後 F5 → summary 都在）
+>    + N8（agentic loop 連壓兩次：第二次 summary
 >    請求 = `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑）+ N7 5 項
 >    （05-§3 #8–#12）+ Phase 1 5.8（06-status §4 清單；A/B mode 行為 + v4 真實
 >    token 顯示可一併驗）。

@@ -388,14 +388,14 @@ server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、�
 > （load / export / import）都丟 cmp。post-flow 壓縮無此問題（下一則 user 訊息走
 > `addMessage('-1')` → live 陣列尾端 = cmp）。
 
-- [ ] agentic flow callback 型別新增 `onCompaction?(cmp: DatabaseMessage)`
-- [ ] `streamChatCompletion` 接線：`onCompaction: (cmp) => { lastCreatedInFlow =
+- [x] agentic flow callback 型別新增 `onCompaction?(cmp: DatabaseMessage)`
+- [x] `streamChatCompletion` 接線：`onCompaction: (cmp) => { lastCreatedInFlow =
       cmp.id; }`
-- [ ] `compactBetweenTurns`：callbacks 傳入；cmp 建立 + currNode 更新成功後呼叫
+- [x] `compactBetweenTurns`：callbacks 傳入；cmp 建立 + currNode 更新成功後呼叫
       `callbacks.onCompaction?.(cmp)`
-- [ ] 純函式 `findCompactionGraftFixes(allMessages, currNodeId) →
+- [x] 純函式 `findCompactionGraftFixes(allMessages, currNodeId) →
       { cmpId, reattachId }[]` + unit 5 向量
-- [ ] 已損樹修復（單一 IDB transaction：`c2.parent = c.id`、`p.children` 移除
+- [x] 已損樹修復（單一 IDB transaction：`c2.parent = c.id`、`p.children` 移除
       `c2.id`、`c.children` 加入 `c2.id`）+ app 啟動一次性 migration +
       `loadConversation` 防禦層
 - [ ] 核心回歸：in-loop compaction 後下一則 assistant 訊息 `parent === cmp.id`

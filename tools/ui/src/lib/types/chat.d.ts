@@ -161,6 +161,10 @@ export interface ChatStreamCallbacks {
 		extras?: DatabaseMessageExtra[]
 	) => Promise<void>;
 	createAssistantMessage?: () => Promise<DatabaseMessage>;
+	/** A compaction entry was created inside the flow — advance the flow's
+	 *  graft point so the next assistant / tool message is grafted under the
+	 *  compaction node instead of its sibling (context-enhance N10.1). */
+	onCompaction?: (cmp: DatabaseMessage) => void;
 	onFlowComplete?: (timings?: ChatMessageTimings) => void;
 	onError?: (error: Error) => void;
 	onTurnComplete?: (intermediateTimings: ChatMessageTimings) => void;

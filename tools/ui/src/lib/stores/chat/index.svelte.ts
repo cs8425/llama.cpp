@@ -1676,6 +1676,13 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 
 				return msg;
 			},
+			// N10.1: advance the flow's graft point after an in-loop compaction so
+			// the next assistant / tool message is grafted under the compaction
+			// node instead of its sibling (the closure var was never advanced
+			// before, leaving cmp off the root→currNode path).
+			onCompaction: (cmp) => {
+				lastCreatedInFlow = cmp.id;
+			},
 			createToolResultMessage: async (
 				toolCallId: string,
 				content: string,

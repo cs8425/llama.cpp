@@ -15,7 +15,7 @@
  *        └── message 5 (assistant)
  */
 
-import { MessageRole } from '$lib/enums';
+import { MessageRole, MessageType } from '$lib/enums';
 
 /**
  * Finds a message by its ID in the given messages array.
@@ -266,4 +266,78 @@ export function buildSiblingInfoMap(
 	}
 
 	return siblingMap;
+}
+
+/**
+ * A single graft fix: re-attach `reattachId` under `cmpId` so the compaction
+ * entry lands on the root→currNode path (context-enhance N10.2).
+ */
+export interface CompactionGraftFix {
+	cmpId: string;
+	reattachId: string;
+}
+
+/**
+ * Detects compaction entries that were grafted as siblings of the next flow
+ * message instead of as its parent (context-enhance N10). For each compaction
+ * entry `c` whose parent `p` also has a child `c2` that is an ancestor of
+ * `currNodeId` (i.e. the active path goes through `c2`, not `c`), emits a fix
+ * that re-attaches `c2` under `c`.
+ *
+ * Pure function: reads the flat message array, returns the list of fixes.
+ * Idempotent — once applied, `c` is on the path and the detection no longer
+ * matches.
+ */
+export function findCompactionGraftFixes(
+	allMessages: readonly DatabaseMessage[],
+	currNodeId: string | null | undefined
+): CompactionGraftFix[] {
+	if (!currNodeId) return [];
+
+	const nodeMap = new Map<string, DatabaseMessage>();
+
+	for (const msg of allMessages) {
+		nodeMap.set(msg.id, msg);
+	}
+
+	// Build the set of ancestors of currNodeId (including currNodeId itself)
+	// by walking the parent chain up to root.
+	const ancestors = new Set<string>();
+	let current: string | null = currNodeId;
+
+	while (current) {
+		ancestors.add(current);
+		const node = nodeMap.get(current);
+
+		if (!node) break;
+
+		current = node.parent;
+	}
+
+	const fixes: CompactionGraftFix[] = [];
+
+	for (const msg of allMessages) {
+		if (msg.type !== MessageType.COMPACTION) continue;
+
+		const parentId = msg.parent;
+
+		if (!parentId) continue;
+
+		const parent = nodeMap.get(parentId);
+
+		if (!parent) continue;
+
+		// Check if parent has a child c2 ≠ msg that is an ancestor of currNodeId
+		for (const childId of parent.children) {
+			if (childId === msg.id) continue;
+
+			if (ancestors.has(childId)) {
+				fixes.push({ cmpId: msg.id, reattachId: childId });
+
+				break; // one fix per cmp
+			}
+		}
+	}
+
+	return fixes;
 }

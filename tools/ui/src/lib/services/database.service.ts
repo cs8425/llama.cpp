@@ -393,6 +393,55 @@ export class DatabaseService {
 	}
 
 	/**
+	 * Applies compaction graft fixes in a single IDB transaction (context-enhance
+	 * N10.2). For each fix, re-attaches `reattachId` under `cmpId`: sets
+	 * `reattachId.parent = cmpId`, removes `reattachId` from the old parent's
+	 * children, and adds it to `cmpId`'s children. Idempotent — once applied,
+	 * the compaction entry is on the root→currNode path and the detection no
+	 * longer matches.
+	 *
+	 * @param fixes - List of graft fixes from {@link findCompactionGraftFixes}
+	 * @returns The number of fixes applied
+	 */
+	static async applyCompactionGraftFixes(fixes: readonly { cmpId: string; reattachId: string }[]): Promise<number> {
+		if (fixes.length === 0) return 0;
+
+		let applied = 0;
+
+		await db.transaction('rw', db[IDXDB_TABLES.messages], async () => {
+			for (const fix of fixes) {
+				const cmp = await db[IDXDB_TABLES.messages].get(fix.cmpId);
+				const reattach = await db[IDXDB_TABLES.messages].get(fix.reattachId);
+
+				if (!cmp || !reattach) continue;
+
+				const oldParentId = reattach.parent;
+
+				if (!oldParentId || oldParentId === cmp.id) continue;
+
+				const oldParent = await db[IDXDB_TABLES.messages].get(oldParentId);
+
+				if (!oldParent) continue;
+
+				// Re-attach: set parent, update children arrays
+				await db[IDXDB_TABLES.messages].put({ ...reattach, parent: cmp.id });
+				await db[IDXDB_TABLES.messages].put({
+					...oldParent,
+					children: oldParent.children.filter((id: string) => id !== reattach.id)
+				});
+				await db[IDXDB_TABLES.messages].put({
+					...cmp,
+					children: [...cmp.children, reattach.id]
+				});
+
+				applied++;
+			}
+		});
+
+		return applied;
+	}
+
+	/**
 	 * Deletes a conversation and all its messages.
 	 *
 	 * @param id - Conversation ID

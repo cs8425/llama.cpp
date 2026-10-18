@@ -25,9 +25,11 @@ export {
 	findMessageById,
 	findLeafNode,
 	findDescendantMessages,
+	findCompactionGraftFixes,
 	getMessageSiblings,
 	buildSiblingInfoMap
 } from './branching';
+export type { CompactionGraftFix } from './branching';
 
 // Code
 export {

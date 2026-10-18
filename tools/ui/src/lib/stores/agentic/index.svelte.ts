@@ -479,13 +479,14 @@ class AgenticStore {
 	}
 
 	private async compactBetweenTurns(params: {
+		callbacks: AgenticFlowCallbacks;
 		conversationId: string;
 		lastPrompt: number | null;
 		model: string;
 		sessionMessages: AgenticMessage[];
 		signal?: AbortSignal;
 	}): Promise<void> {
-		const { conversationId, lastPrompt, model, sessionMessages, signal } = params;
+		const { callbacks, conversationId, lastPrompt, model, sessionMessages, signal } = params;
 		const config = settingsStore.config;
 
 		// Both switches: the master auto-compaction gate plus the in-loop
@@ -626,6 +627,10 @@ class AgenticStore {
 				await DatabaseService.updateCurrentNode(conversationId, cmp.id);
 				conversationsStore.applyConversationUpdate(conversationId, { currNode: cmp.id });
 			}
+
+			// N10.1: advance the flow's graft point so the next assistant / tool
+			// message is grafted under the compaction node (not its sibling).
+			callbacks.onCompaction?.(cmp);
 
 			conversationsStore.updateConversationTimestamp(conversationId);
 
@@ -1224,6 +1229,7 @@ class AgenticStore {
 			// (context-enhance/03 §4.4). Fail-open: any issue keeps the old
 			// sessionMessages and the loop continues unchanged.
 			await this.compactBetweenTurns({
+				callbacks,
 				conversationId,
 				lastPrompt: turnTimings?.prompt_n ?? null,
 				model: effectiveModel,

@@ -22,7 +22,7 @@ import {
 } from '$lib/stores/conversations/preferences.svelte';
 import { settingsStore } from '$lib/stores/settings/index.svelte';
 import { tabsStore } from '$lib/stores/tabs.svelte';
-import { filterByLeafNodeId, findLeafNode, generateConversationTitle } from '$lib/utils';
+import { filterByLeafNodeId, findCompactionGraftFixes, findLeafNode, generateConversationTitle } from '$lib/utils';
 import { SvelteSet } from 'svelte/reactivity';
 import { toast } from 'svelte-sonner';
 
@@ -530,7 +530,19 @@ class ConversationsStore implements ConversationsPreferencesHost {
 			// it doesn't belong to this conversation.
 			this.preferences.pendingCwd = null;
 
-			const allMessages = await DatabaseService.getConversationMessages(convId);
+			const allMessagesRaw = await DatabaseService.getConversationMessages(convId);
+
+			// N10.2 defensive layer: fix any compaction entries grafted as
+			// siblings (the startup migration handles the bulk case; this
+			// catches conversations created before the migration ran).
+			const graftFixes = findCompactionGraftFixes(allMessagesRaw, conversation.currNode);
+
+			let allMessages = allMessagesRaw;
+
+			if (graftFixes.length > 0) {
+				await DatabaseService.applyCompactionGraftFixes(graftFixes);
+				allMessages = await DatabaseService.getConversationMessages(convId);
+			}
 
 			// set conversation and messages in one sync block so effects never see
 			// the new conversation with the previous conversation's messages
