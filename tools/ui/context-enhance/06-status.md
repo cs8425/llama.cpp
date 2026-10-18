@@ -3,37 +3,34 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新，2026-10-18）**：**N11 compact request 前綴一致性——N11.1 + N11.2 source + N11.3 測試完成；`summarize.test.ts` 2 處測試檔 desync 已修（來源碼零改動）、待重跑確認**。
+> **恢復點（最新，2026-10-18）**：**N11 compact request 前綴一致性——N11.1 + N11.2 source + N11.3 測試完成並確認**
+> （`npm run check` 0 錯 + unit `summarize` 28/28 / `chat-conversion` / `context-builder` 全綠；
+> 第一輪 4 type + 6 runtime 失敗全在 `summarize.test.ts` 測試檔 2 處 desync、已修、來源碼零改動）。
 > N11.1（P0：tool result 附件在 DB→API 被丟）+ N11.2（A4 full-path summary）+
 > D1（shared-builder 路徑、無 model 參數 / 無新 gating）source 完成；N11.3 測試完成
 > （`summarize.test.ts` 依決定 B 修好 + 新 `tests/unit/chat-conversion.test.ts`
-> 合成 fixture 回歸；明細見 §3.30 / §5g）。第一輪 `npm run check` + unit 回報
-> 4 type + 6 runtime 失敗全在 `summarize.test.ts`（desync：`makePlanWithHead`
-> spread 單則 `kept` / 3 處 options 傳到 `signal` 參位），已修、來源碼零改動。
-> **待辦（依序）**：① 使用者重跑 `npm run check`（+ unit `summarize` /
-> `chat-conversion` / `context-builder`）確認；② N11 手動驗收（MCP screenshot
-> flow → 連壓兩次 + F5 → `cache_n` 高命中；可與 N10/N8/N7/5.8 一併驗）。
+> 合成 fixture 回歸；明細見 §3.30 / §5g）。
+> **待辦（依序）**：① N11 手動驗收（MCP screenshot flow → 連壓兩次 + F5 →
+> `cache_n` 高命中；可與 N10/N8/N7/5.8 一併驗）；② N9 開始（規格定稿、未實做）。
 >
 > **剩（依序）**：
-> 1. **N11 — compact request 前綴一致性（§3.30 / §5g）**：⏸ 使用者
->    `npm run check` + unit 確認 → 手動驗收。
-> 2. **N9 — F5 / refresh 韌性（規格定稿 2026-10-18、未實做；§3.28 / 05-N9 / §5e）**：
+> 1. **N9 — F5 / refresh 韌性（規格定稿 2026-10-18、未實做；§3.28 / 05-N9 / §5e）**：
 >    in-loop compaction 的 cmp + currNode 是兩次獨立 IDB 寫（非原子）→ 兩寫之間 F5
 >    （或 `updateCurrentNode` 拋錯）→ cmp orphan（在 DB、不在 path、不可見）→
 >    reload 後全量送出 → overflow；非永久損毀（無資料遺失、可恢復）。規格 =
 >    原子 commit（N9.1）+ 載入收編 orphan（N9.2）+ 可選送出前 overflow guard
 >    （N9.3）+ fail-open 語義入 02-§4（N9.4）。
-> 3. **手動驗收（未做、可一併驗）**：N11（MCP screenshot → 連壓兩次 + F5 →
->    `cache_n` 高命中）
+> 2. **手動驗收（未做、可一併驗）**：N11（MCP screenshot → 連壓兩次 + F5 →
+>    `cache_n` 高命中；另重跑既有 5 支 client compaction suite，§5g）
 >    + N10（agentic loop 連壓兩次 → F5 → summary 都在、匯出匯入同、
 >    既有已損對話 migration 後恢復）
 >    + N8（agentic loop 連壓兩次：第二次 summary
 >    請求 = `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑）
 >    + N7 5 項（05-§3 #8–#12）+ Phase 1 5.8
 >    （§4 清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）。
-> 4. Phase 3 可選後續（05-§1）。
+> 3. Phase 3 可選後續（05-§1）。
 >
-> **此前里程碑（皆完成並確認）**：N10（2026-10-18，§3.29/§4）→ N8（2026-10-18，§3.27/§4）→ N7（2026-10-04，§2u/§3.26）→ v4 真實
+> **此前里程碑（皆完成並確認）**：N11（2026-10-18，§3.30/§4，手動驗收未做）→ N10（2026-10-18，§3.29/§4）→ N8（2026-10-18，§3.27/§4）→ N7（2026-10-04，§2u/§3.26）→ v4 真實
 > token 計數（2026-10-17，
 > §3.24/§3.25）→ 雙 mode 共用+A+B（2026-10-17，§3.22/§3.23）→
 > N6 空 kept（2026-10-17，§3.21）→ N1–N5（2026-07-22，§3.13–§3.19）→
@@ -52,7 +49,7 @@
 | N8 — 第二次壓縮：plan 改在 effective path（bug 修正；§3.27） | ✅ **完成並確認**（2026-10-18：N8.1–N8.3（3 來源檔 + 3 unit 檔）；第一輪 2 失敗全在測試檔已修（期望值筆誤、來源碼零改動）；使用者重跑 `npm run check` + unit 3 支 + client 5 支 compaction suite 全綠；手動驗收未做（§4 清單）；執行清單 05-N8 / §5d） |
 | N9 — F5 / refresh 韌性：in-loop compaction 兩寫非原子（§3.28） | ⬜ **規格定稿、未實做**（2026-10-18：問題已對 code 驗證——`createCompactionMessage`（單一 IDB transaction）與 `updateCurrentNode`（獨立 IDB 寫）非原子 → 兩寫之間 F5 / `updateCurrentNode` 拋錯 → cmp orphan（在 DB、不在 path、不可見）→ reload 後全量送出 → overflow；非永久損毀（無資料遺失、手動 compact 可恢復）。規格 = 原子 commit（N9.1）+ 載入收編 orphan（N9.2）+ 可選送出前 overflow guard（N9.3）+ fail-open 語義入 02-§4（N9.4）；執行清單 05-N9 / §5e） |
 | N10 — in-loop compaction 的 cmp 被接成 sibling（系統性 bug；§3.29） | ✅ **完成並確認**（2026-10-18：N10.1 根因修（`onCompaction` callback + `lastCreatedInFlow` 推進）+ N10.2 已損樹修復（`findCompactionGraftFixes` 純函式 + `applyCompactionGraftFixes` IDB transaction + 啟動 migration `compaction-graft-fix-v1` + `loadConversation` 防禦層）+ N10.3 unit 5 向量（`tests/unit/branching.test.ts`）；`npm run check` + unit + 既有 5 支 client compaction suite 全綠；剩手動驗收（§4 清單）；執行清單 05-N10 / §5f） |
-| N11 — compact request 前綴一致性：tool result 附件被丟（N11.1）+ full-path summary（N11.2 = A4，§3.30） | 🚧 **N11.1 + N11.2 source + N11.3 測試完成、未確認**（2026-10-18：N11.1——轉換的 `extra → parts` 抽成 `ChatService.buildExtraContentParts`（固定序 / images 一律 cap / 無 gating）、tool+extra 不再 early-return 丟附件、in-flow 調同一 builder（順手修不 cap + 順序改 user input 路徑）、`toAgenticMessages` TOOL 分支直通、序列化對齊（assistant + tool_calls + 空 content → 省略 content 欄位）、清理 5 個 unused imports；`normalizeMessagesForApi` / `resolveOutgoingMessages` / `buildLlmContext` / `preEncode` / `sendMessage` / vision filter 全未動（D1：無 model 參數、無新 gating）；N11.2（A4）——`summarizeMessages` / `summarizeWithRetry` 收 `planPath`、prefix-stable payload = `buildLlmContext(planPath).messages` + instruction（刪自組裝）、transcript = `toSummarize + kept`、兩呼叫點傳 `planPath`（re-summarize = `effectiveCompactionPath(path)`）+ `summarizedCount = toSummarize + kept`（`chat:871` 不改）；N11.3——`tests/unit/summarize.test.ts` 依決定 B 修好（補 `planPath` + mock `convertDbMessageToApiChatMessageData` + payload assertions = `buildLlmContext(planPath).messages` + instruction）+ 新 `tests/unit/chat-conversion.test.ts`（真 ChatService、stores / cap mock：`buildExtraContentParts` 固定序 + cap / 轉換矩陣 / 空 content 三態 / in-flow ≡ DB rebuild byte-identity / 合成 fixture compact request = 最後 payload byte-prefix + instruction）。**待辦**：① 使用者 `npm run check` + unit 確認 ② 手動驗收（MCP screenshot → 連壓兩次 + F5 → `cache_n` 高命中）。執行清單 §5g） |
+| N11 — compact request 前綴一致性：tool result 附件被丟（N11.1）+ full-path summary（N11.2 = A4，§3.30） | ✅ **完成並確認**（2026-10-18：N11.1——轉換的 `extra → parts` 抽成 `ChatService.buildExtraContentParts`（固定序 / images 一律 cap / 無 gating）、tool+extra 不再 early-return 丟附件、in-flow 調同一 builder（順手修不 cap + 順序改 user input 路徑）、`toAgenticMessages` TOOL 分支直通、序列化對齊（assistant + tool_calls + 空 content → 省略 content 欄位）、清理 5 個 unused imports；`normalizeMessagesForApi` / `resolveOutgoingMessages` / `buildLlmContext` / `preEncode` / `sendMessage` / vision filter 全未動（D1：無 model 參數、無新 gating）；N11.2（A4）——`summarizeMessages` / `summarizeWithRetry` 收 `planPath`、prefix-stable payload = `buildLlmContext(planPath).messages` + instruction（刪自組裝）、transcript = `toSummarize + kept`、兩呼叫點傳 `planPath`（re-summarize = `effectiveCompactionPath(path)`）+ `summarizedCount = toSummarize + kept`（`chat:871` 不改）；N11.3——`tests/unit/summarize.test.ts` 依決定 B 修好（補 `planPath` + mock `convertDbMessageToApiChatMessageData` + payload assertions = `buildLlmContext(planPath).messages` + instruction）+ 新 `tests/unit/chat-conversion.test.ts`（真 ChatService、stores / cap mock：`buildExtraContentParts` 固定序 + cap / 轉換矩陣 / 空 content 三態 / in-flow ≡ DB rebuild byte-identity / 合成 fixture compact request = 最後 payload byte-prefix + instruction）；`npm run check` 0 錯 + unit `summarize` 28/28 / `chat-conversion` / `context-builder` 全綠（第一輪 4 type + 6 runtime 全在 `summarize.test.ts` 測試檔 2 處 desync、已修、來源碼零改動）；手動驗收未做（MCP screenshot → 連壓兩次 + F5 → `cache_n` 高命中，§4 清單）；執行清單 §5g） |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
@@ -1409,7 +1406,7 @@ request body(已確認 chat.service.ts:1142-1162 / 883-897)。
 - 設計補充兩點（§2u「設計補充」）：finalizer 的 conv 已切走例外（pending 留
   queue 不送）+ 三個既有 `compacting` 消費者改 per-conv。
 
-### 3.27 N8：第二次壓縮 plan 在 raw path（bug）— 根因 + 修正（分析 + 規劃 2026-10-18；N8.1–N8.3 已實做、N8.4 第一輪測試修正後待重跑確認）
+### 3.27 N8：第二次壓縮 plan 在 raw path（bug）— 根因 + 修正（分析 + 規劃 + 實做 2026-10-18；完成並確認、見 §4）
 
 > 觸發：使用者實測 agentic loop——第一次自動壓縮 OK；loop 續跑、第二次觸發時
 > summary 呼叫實際送出 `[system, user_prompt, 001..199（全量原始歷史）,
@@ -1756,7 +1753,7 @@ child）**抓不到**此案例（這裡 cmp 是路徑中間節點的 sibling）�
 
 - ✅ **完成並確認（2026-10-18）**：N10.1 根因修（`onCompaction` callback + `lastCreatedInFlow` 推進）+ N10.2 已損樹修復（`findCompactionGraftFixes` 純函式 + `applyCompactionGraftFixes` IDB transaction + 啟動 migration `compaction-graft-fix-v1` + `loadConversation` 防禦層）+ N10.3 unit 5 向量（`tests/unit/branching.test.ts`）；`npm run check` + unit + 既有 5 支 client compaction suite（`chat-message-compaction` / `context-inspector` / `context-gauge-compaction` / `compaction-decision-card` / `chat-message-compacting`）全綠。剩手動驗收（使用者原始場景：agentic loop 連壓兩次 → F5 / 匯出匯入 summary 都在 + 既有已損對話 migration 後恢復；§4 清單）。
 
-## 3.30 N11: compact request 前綴一致性 — tool result 附件被丟 + mode B 切點 cache 亲和性（問題驗證 + 規劃 + 實做 2026-10-18；source + 測試完成、待確認）
+## 3.30 N11: compact request 前綴一致性 — tool result 附件被丟 + mode B 切點 cache 亲和性（問題驗證 + 規劃 + 實做 2026-10-18；source + 測試完成並確認）
 
 ### 問題（使用者回報 + 抓包驗證，2026-10-18）
 
@@ -1859,7 +1856,7 @@ meta 欄位（功能未正式推出、既有資料皆內部測試）；④ promp
 ⑤ 不做 INSTRUCTION_OVERHEAD / 動態 max_tokens / overflow fallback——summary
 呼叫參數 N11 前怎樣就維持怎樣。
 
-### 修正方案（N11，2026-10-18 定案；N11.1 + N11.2 source 改動完成 2026-10-18、未確認）
+### 修正方案（N11，2026-10-18 定案；N11.1 + N11.2 source 改動完成並確認 2026-10-18）
 
 > **決策記錄（D1，使用者 2026-10-18）**：原規劃 N11.1 #1/#2（轉換加 `model` 參數 +
 > 參數 thread）**撤回**——使用者追問「原本 chat UI flow 的 tool call result / user input
@@ -1968,7 +1965,7 @@ N11.1 修掉「reload 後第一 turn 斷前綴」的症狀，但 N9 的 orphan c
 
 ### 狀態
 
-- 🚧 **N11.1 + N11.2 source + N11.3 測試完成（2026-10-18，未確認）**：
+- ✅ **N11.1 + N11.2 source + N11.3 測試完成並確認（2026-10-18）**：
   - N11.1：`ChatService.buildExtraContentParts`（轉換的 `extra → parts` 區塊原樣抽出：
     固定序 text files / legacy / images（cap）/ audio / content text / video / PDF /
     MCP prompt / MCP resource、無 model gating）+ `convertDbMessageToApiChatMessageData`
@@ -2008,9 +2005,14 @@ N11.1 修掉「reload 後第一 turn 斷前綴」的症狀，但 N9 的 orphan c
     無新 meta / 無新設定 / 無 fallback；所有既有簽名（`buildLlmContext` /
     `ContextBuildOptions` / `normalizeMessagesForApi` / `resolveOutgoingMessages` /
     `preEncode` / `sendMessage` / vision filter——無 model 參數、無新 gating）。
-- ⏸ **待辦（依序）**：① 使用者跑 `npm run check` + unit（`summarize` /
-  `chat-conversion` / `context-builder`）確認；② 手動驗收（MCP screenshot flow →
-  連壓兩次 + F5 → server `cache_n` 高命中）。
+  - **確認（2026-10-18，使用者重跑）**：`npm run check` 0 錯 + unit `summarize`
+    28/28 / `chat-conversion` / `context-builder` 全綠。第一輪 4 type errors +
+    6 runtime 失敗全在 `tests/unit/summarize.test.ts` 測試檔 2 處 desync（①
+    `makePlanWithHead` 的 `planPath` 誤 spread 單則 `kept` → `...plan.kept`；② 3 處
+    options 傳到第 4 參 `signal` 位 → 補 `undefined`）、已修、來源碼零改動。
+- ⏸ **剩**：手動驗收（MCP screenshot flow → 連壓兩次 + F5 → server `cache_n`
+  高命中；可與 N10/N8/N7/5.8 一併驗，§4 清單）+ 重跑既有 5 支 client compaction
+  suite（§5g 未勾項）。
 
 ## 4. 驗證狀態
 
@@ -2593,7 +2595,9 @@ static async createCompactionMessage(params: {
       DB rebuild byte-identical；compact request = 最後一筆 payload 的 byte-prefix +
       instruction（本目錄兩份抓包只作文檔證據、不適用當 oracle）
       → `tests/unit/chat-conversion.test.ts`
-- [ ] `npm run check` + 既有 5 支 client compaction suite 全綠（停、使用者編譯確認）
+- [x] `npm run check` + unit（`summarize` 28/28 / `chat-conversion` /
+       `context-builder`）全綠（2026-10-18 使用者確認）
+- [ ] 既有 5 支 client compaction suite 重跑回歸（本輪未重跑）
 - [ ] 手動驗收：MCP screenshot flow → 連壓兩次 + F5 → `cache_n` 高命中（gauge）
 
 ## 6. 專案慣例 / 陷阱（Phase 1 寫碼前速讀）

@@ -142,7 +142,7 @@ transcript,摘要忠度更高。實做時兩點已定(使用者 2026-07-22,D1/D2
 - **附件原樣送**(base64 照主對話 payload 送):前綴與主 payload byte 一致、
   摘要忠度最高;非 vision 模型由 `sendMessage` 既有的 vision filter 自動
   剝除 image parts(與主送出路徑同行為)。
-  > **N11 gap(2026-10-18;source 修完、未確認;06-§3.30)**:D1 對 **tool result 附件**從未
+  > **N11 gap(2026-10-18;source 修完並確認;06-§3.30)**:D1 對 **tool result 附件**從未
   > 實做——`convertDbMessageToApiChatMessageData` 對 `role=tool` early-return、
   > 忽略 `extra`(MCP screenshot base64 被丟)→ 所有 DB 重建路徑(compact
   > request / post-compaction 重建 / F5 後 / preEncode / inspector)前綴在

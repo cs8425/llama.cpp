@@ -413,7 +413,7 @@ server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、�
 **與 N9 的關係**（06-§3.29）：N9.1（原子 commit）/ N9.2（收編 currNode 的 child）
 仍需要、與 N10 互補；N10.2 偵測簽名不同（sibling of path node vs child of leaf）。
 
-### N11 — compact request 前綴一致性：tool result 附件被丟（N11.1，P0）+ full-path summary（N11.2 = A4，使用者定案 2026-10-18）（分析 + 規劃 + 決策 + 實做 2026-10-18；source + 測試完成、待確認；明細見 06-status §3.30 / §5g）
+### N11 — compact request 前綴一致性：tool result 附件被丟（N11.1，P0）+ full-path summary（N11.2 = A4，使用者定案 2026-10-18）（分析 + 規劃 + 決策 + 實做 2026-10-18；source + 測試完成並確認；明細見 06-status §3.30 / §5g）
 
 > 背景（使用者抓包 + 已對 code 驗證，2026-10-18）：使用者 agentic loop
 > （mode B threshold-target、threshold 40% / keepTarget 35% / n_ctx 262144、

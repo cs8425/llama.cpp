@@ -243,7 +243,7 @@ valid(j) = path[j].role ∈ {user, assistant}
   切點可以落在該 tool result **之後**的 assistant 上,把它整段 drop;
   連最後一組 `ass + tool` 都放不下時,切點落在最後一則之後(空 kept),
   該 tool result 整段進 summary。
-- **full-path summary（N11.2 = A4，使用者定案 2026-10-18；source 改動完成 2026-10-18、未確認；06-§3.30）**:
+- **full-path summary（N11.2 = A4，使用者定案 2026-10-18；source + 測試完成並確認 2026-10-18；06-§3.30）**:
   所有 compaction 的 summary 皆用**整個 effective path**產生(compact request =
   `buildLlmContext(effectivePath).messages` + instruction、复用原 chat UI code
   path、不自組裝)→ compact request 前綴 = 完整最後送出 payload(KV cache 重用
@@ -330,7 +330,7 @@ mode B 切點原本「byte 對 token budget」的錯配順手修好。
     ```
     只有最後一則壓縮指令會變(default / 自訂 `contextSummaryPrompt`、
     正常 / split-turn 變體),前綴恆定。
-    > **D1 也涵蓋 tool result 附件（N11.1，source 修完 2026-10-18、未確認；06-§3.30）**：「附件原樣送」
+    > **D1 也涵蓋 tool result 附件（N11.1，source 修完並確認 2026-10-18；06-§3.30）**：「附件原樣送」
     > 對 MCP screenshot 等 tool result 的 base64 附件必須成立——原實做
     > `convertDbMessageToApiChatMessageData` 對 `role=tool` early-return、忽略
     > `extra` → 所有 DB 重建路徑（compact request / post-compaction 重建 /
