@@ -296,7 +296,7 @@ payload = `[system, summary, kept…] + 新 turn`;Stop → 不建 cmp、queue �
 照常送出(全量 context);他 conversation 輸入不受影響;in-loop 行為不變
 (steering)。
 
-### N8 — 第二次壓縮：plan 改在 effective path（bug 修正；規劃 2026-10-18；**未實做**，明細見 06-status §3.27）
+### N8 — 第二次壓縮：plan 改在 effective path（bug 修正；規劃 2026-10-18；✅ 完成 + 回歸確認（2026-10-18）、手動驗收未做；明細見 06-status §3.27）
 
 > 背景（分析已對 code 驗證，2026-10-18）：第二次（及之後）壓縮的
 > `planCompaction*` 收到的是 **raw DB path**（含舊 cmp 已 drop 的原始訊息 +
@@ -310,24 +310,24 @@ payload = `[system, summary, kept…] + 新 turn`;Stop → 不建 cmp、queue �
 > 共用窗口解析）+ 兩個 planning 呼叫點餵它。根因 / 邊界情境 / 測試計畫：
 > 06-status §3.27。
 
-- [ ] `services/context/context-builder.ts`：抽 `buildLlmContext` 現行窗口
+- [x] `services/context/context-builder.ts`：抽 `buildLlmContext` 現行窗口
       解析為共用內部 helper（I1 head / I2 最後一筆生效 / I3 fail-open）；新
       export 純函式 `effectiveCompactionPath(path)`：無 cmp → 原樣；boundary
       失效 → raw（fail-open）；否則 → `[...head, entry, ...kept]`（entry 留
       陣列當一般節點）
-- [ ] `stores/agentic/index.svelte.ts` `compactBetweenTurns`：
+- [x] `stores/agentic/index.svelte.ts` `compactBetweenTurns`：
       `planCompaction*(effectiveCompactionPath(path), …)`
-- [ ] `stores/chat/index.svelte.ts` `compactConversation`：同上（涵蓋
+- [x] `stores/chat/index.svelte.ts` `compactConversation`：同上（涵蓋
       post-flow auto + 手動 Compact now）
-- [ ] unit `context-builder.test.ts`：`effectiveCompactionPath` suite（無
+- [x] unit `context-builder.test.ts`：`effectiveCompactionPath` suite（無
       entry / 單 cmp / 空 kept / I3 ×2 / entry 後追加訊息 / 舊 cmp 落 kept
       區）
-- [ ] unit `compaction-policy.test.ts`：「第二次壓縮」向量（effective path →
+- [x] unit `compaction-policy.test.ts`：「第二次壓縮」向量（effective path →
       plan：summarize 區排除已 drop 原始訊息 / `firstKeptMessageId` 來自 cmp
       後區域 / `summarizeTokens` ≈ effective 規模）
-- [ ] unit `summarize.test.ts`：prefix-stable payload「path 已含舊 cmp」向量
+- [x] unit `summarize.test.ts`：prefix-stable payload「path 已含舊 cmp」向量
       （= `[system, 舊summary, 新訊息, instruction]`）
-- [ ] 回歸：`npm run check` + 既有 5 支 client compaction suite 零改動全綠
+- [x] 回歸：`npm run check` + 既有 5 支 client compaction suite 零改動全綠
 - [ ] 手動驗收（使用者原始場景）：agentic loop 連壓兩次 → 第二次 summary
       請求 = `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑；
       toast / gauge token 數字與 effective context 一致

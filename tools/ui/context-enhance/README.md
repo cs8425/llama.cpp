@@ -5,51 +5,30 @@
 > 並讓 user 能看到「壓縮後實際送出的資料」、允許進階 user 人工介入編輯。
 >
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
-> [06-status.md](./06-status.md)（Phase 0 完成；Phase 1 5.1–5.7 完成並確認、
-> 剩 5.8 手動驗收；**Phase 2 P2.1–P2.6 全部完成並
-> 確認**（client suite 全綠 + `npm run check` 全綠，見 06-status 恢復點 /
-> §2p–§2r）。剩：5.8 手動驗收 + Phase 3 可選後續（**N1 ✅ 完成並確認**；
-> **N2 ✅ 完成並確認**（threshold 預設 80→70 + `contextKeepTargetPercent`，
-> 見 06-status §3.14）；**N3 ✅ 完成並確認**（手動壓縮 [Stop] 鍵，見
-> 06-status §3.15）；**N4 ✅ 完成並確認**（prefix-stable summary 模式設為
-> default，附件原樣送 + reasoning 跟隨主送出開關，見 06-status §3.18）；
-> **N5 ✅ 完成並確認**（新設定 `contextSummaryMode`：summary 的 prompt
-> 模式開放給 user 選，見 06-status §3.19））。
-> **目前停點**：**N8 第二次壓縮：plan 改在 effective path（bug 修正）—
-> N8.1–N8.3 已實做、N8.4 待編譯確認 + 手動驗收**（2026-10-18；第二次（及之後）
-> 壓縮的 plan 在 raw DB path
-> 上算 → summary 呼叫重送舊 cmp 已 drop 的原始歷史 → context overflow、
+> [06-status.md](./06-status.md)。
+>
+> **目前停點（2026-10-18）**：**N8 第二次壓縮：plan 改在 effective path
+> （bug 修正）✅ 完成 + 回歸確認**（第二次（及之後）
+> 壓縮的 plan 在 raw DB path 上算 → summary 呼叫重送舊 cmp 已 drop 的原始歷史 → context overflow、
 > summary 無法產生、agentic loop 卡死；修正 = 新 `effectiveCompactionPath()`
-> + 兩個 planning 呼叫點餵它；見 06-status §3.27 / 05-N8）。此前：**N7 壓縮
-> 進行中（queue + in-chat 指標列 + Stop）✅ 完成並確認**
-> （2026-11-04；四輪 client 跑測 8 支失敗全在測試檔已修、來源碼零改動，使用者
-> 重跑 `chat-message-compaction` 11/11 + `npm run check` + 4 回歸檔全綠、
-> 05-N7 清單已勾；明細見 06-status 檔首恢復點 / §2u / §3.26）。此前：**v4 真實 token 計數 ✅ 完成並確認**
-> （2026-10-17；`npm run check` + unit 3 支 + client 5 支全綠，見 06-status
-> 檔首恢復點 / §3.25）。
-> v4 = 計數/觸發/成功判定/
-> Inspector 全用真實
-> token（`deriveRealMessageTokens`：assistant=predicted_n、段真實總和歸該段
-> 最後一則非-assistant）、觸發 = 真實 `contextUsed`（gauge 同源）、無資料
-> 例外（system / 尚未送出尾端）才 `bytes/4` 估算；設定數字不變、現為
-> token 尺度（見 02-§3.4）。此前：**雙 mode（共用 + A + B）✅ 完成並確認**
-> （2026-10-17；完整指令全綠，見 06-status §3.23/§4）——規格：同時保留
-> 兩種作法、user 選 mode、**default = A（recent-window / pi reference）**：
-> A = 至少留最近 `keepRecentTokens` 原樣 + 觸發 `window − keep`（window =
-> min(n_ctx, `contextMaxContextOverride`）；B = v3 + N6（kept ≤
-> （threshold−keepTarget）%、成功判定 summary ≤ keepTarget%（v4:head 不計）、允許空
-> kept）。超標 → 重試（`contextSummaryMaxAttempts`）→ user gate（使用/重壓/跳過）。
-> 設計見 06-status §3.22/§3.24、實做明細見 §3.23/§3.25。此前皆完成並確認：
-> N6（split 切允許空 kept，2026-10-17）；N1–N5（2026-07-22：summary 上限
-> n_ctx × % / keep target 設定 / Stop 鍵 / prefix-stable default /
-> `contextSummaryMode` 設定）。
-> **剩**：**N8.4 編譯確認 + 手動驗收（未做、最優先；05-N8 清單）** +
-> **其他手動驗收（未做、可一併驗）**：N7 5 項（05-§3 #8–#12）+ Phase 1 5.8
-> （見 06-status §4 清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）+ Phase 3
-> 可選後續（兩段式 summary / per-conversation
-> 覆蓋 / 合併重摘要提示 / summary 獨立 model / endpoint / gauge savings
-> 顯示，見 05-§1；
-> token 校準已被 v3/v4 取代）。
+> + 兩個 planning 呼叫點餵它；`npm run check` + unit 3 支 + client 5 支
+> compaction suite 全綠；明細見 06-status §3.27 / 05-N8）。
+>
+> **剩（依序）**：
+> 1. **手動驗收（未做、可一併驗）**：N8（agentic loop 連壓兩次：第二次 summary
+>    請求 = `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑）+ N7 5 項
+>    （05-§3 #8–#12）+ Phase 1 5.8（06-status §4 清單；A/B mode 行為 + v4 真實
+>    token 顯示可一併驗）。
+> 2. Phase 3 可選後續（兩段式 summary / per-conversation 覆蓋 / 合併重摘要
+>    提示 / summary 獨立 model / endpoint / gauge savings 顯示，見 05-§1；
+>    token 校準已被 v3/v4 取代）。
+>
+> **已完成並確認**（明細與決策見 06-status.md）：N8（第二次壓縮：plan 改在
+> effective path）→ N7（壓縮進行中：queue +
+> in-chat 指標列 + Stop）→ v4 真實 token 計數 → 雙 mode（共用 + A + B，
+> default A）→ N6（split 切允許空 kept）→ N1–N5（summary 上限 n_ctx × % /
+> keep target 設定 / Stop 鍵 / prefix-stable default / `contextSummaryMode`）
+> → Phase 2 P2.1–P2.6 → Phase 1 5.1–5.7 → Phase 0。
 
 ## 目錄
 

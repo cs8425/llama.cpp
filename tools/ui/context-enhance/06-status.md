@@ -3,9 +3,10 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新；N8 **已實做**（N8.1–N8.3 代碼完成；N8.4 第一輪 unit 跑測 2
-> 失敗全在測試檔已修（N8 向量期望值 `toSummarize` 漏 `'u1'` 筆誤、來源碼零
-> 改動，見 §3.27 狀態）、待使用者重跑編譯確認 + 手動驗收）——第二次（及之後）
+> **恢復點（最新；N8 **完成 + 回歸確認**（N8.1–N8.3 代碼完成；
+> N8.4 第一輪 unit 跑測 2 失敗全在測試檔已修（N8 向量期望值
+> `toSummarize` 漏 `'u1'` 筆誤、來源碼零改動，見 §3.27 狀態）；使用者重跑 `npm run check`
+> + 3 支 unit 檔 + 5 支 client compaction suite 全綠，見 §4）——第二次（及之後）
 > 自動壓縮的 plan 是在 raw DB path 上算的 → `toSummarize` 含舊 cmp 已 drop
 > 的原始訊息 → prefix-stable summary 呼叫把整段原始歷史重送 → context
 > overflow、summary 無法產生（fail-open、不建 cmp）→ agentic loop 卡在超標
@@ -15,15 +16,13 @@
 > 05-N8 / §5d）**：
 >
 > **剩（依序）**：
-> 1. **N8.4 編譯確認（使用者執行）**：`npm run check` + 3 支 unit 檔
->    （`context-builder` / `compaction-policy` / `summarize`）+ 既有 5 支
->    client compaction suite 零改動全綠。
-> 2. **N8.4 手動驗收**（= 使用者原始場景：agentic loop 連壓兩次）+
->    **其他手動驗收（未做、可一併驗）**：N7 5 項（05-§3 #8–#12）+ Phase 1 5.8
+> 1. **手動驗收（未做、可一併驗）**：N8（使用者原始場景：agentic loop 連壓兩次，
+>    第二次 summary 請求 = `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑）
+>    + N7 5 項（05-§3 #8–#12）+ Phase 1 5.8
 >    （§4 清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）。
-> 3. Phase 3 可選後續（05-§1）。
+> 2. Phase 3 可選後續（05-§1）。
 >
-> **此前里程碑（皆完成並確認）**：N7（2026-11-04，§2u/§3.26）→ v4 真實
+> **此前里程碑（皆完成並確認）**：N8（2026-10-18，§3.27/§4）→ N7（2026-11-04，§2u/§3.26）→ v4 真實
 > token 計數（2026-10-17，
 > §3.24/§3.25）→ 雙 mode 共用+A+B（2026-10-17，§3.22/§3.23）→
 > N6 空 kept（2026-10-17，§3.21）→ N1–N5（2026-07-22，§3.13–§3.19）→
@@ -39,7 +38,7 @@
 | Phase 3 — 可選後續 | ⬜ |
 | v4 — 真實 token 計數（§3.24/§3.25） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` 82/82 / `context-builder` / `summarize` + client `context-inspector` / `chat-message-compaction` / `context-gauge-compaction` / `compaction-decision-card` / `settings-registry-invariants` 全綠；第一輪 9 失敗已修、3 根因全在測試檔，見 §3.25 / 檔首恢復點；05-v4 清單已全勾） |
 | N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（§3.26/§2u） | ✅ **完成並確認**（2026-11-04：四輪跑測 8 支失敗全在測試檔已修、來源碼零改動；使用者重跑 `chat-message-compaction` 11/11 + check + 4 回歸檔全綠；queue 不 block + 指標列 + per-conv `compactingConvId` + sendMessage guard + finalizer 自動送 + client 11 支；手動驗收 #8–#12 未做） |
-| N8 — 第二次壓縮：plan 改在 effective path（bug 修正；§3.27） | 🚧 N8.1–N8.3 已實做（3 來源檔 + 3 unit 檔；N8.4 待使用者編譯確認 + 手動驗收；執行清單 05-N8 / §5d） |
+| N8 — 第二次壓縮：plan 改在 effective path（bug 修正；§3.27） | ✅ **完成並確認**（2026-10-18：N8.1–N8.3（3 來源檔 + 3 unit 檔）；第一輪 2 失敗全在測試檔已修（期望值筆誤、來源碼零改動）；使用者重跑 `npm run check` + unit 3 支 + client 5 支 compaction suite 全綠；手動驗收未做（§4 清單）；執行清單 05-N8 / §5d） |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
@@ -1469,7 +1468,7 @@ request body(已確認 chat.service.ts:1142-1162 / 883-897)。
 - 設計補充兩點（§2u「設計補充」）：finalizer 的 conv 已切走例外（pending 留
   queue 不送）+ 三個既有 `compacting` 消費者改 per-conv。
 
-### 3.27 N8：第二次壓縮 plan 在 raw path（bug）— 根因 + 修正計畫（分析 + 規劃 2026-10-18；**未實做**）
+### 3.27 N8：第二次壓縮 plan 在 raw path（bug）— 根因 + 修正（分析 + 規劃 2026-10-18；N8.1–N8.3 已實做、N8.4 第一輪測試修正後待重跑確認）
 
 > 觸發：使用者實測 agentic loop——第一次自動壓縮 OK；loop 續跑、第二次觸發時
 > summary 呼叫實際送出 `[system, user_prompt, 001..199（全量原始歷史）,
@@ -1594,22 +1593,19 @@ summary 呼叫 = [system, cmp_1 (user), 101..cut, instruction]   ← 放得下 c
 
 #### 狀態
 
-- 🚧 **N8.1–N8.3 已實做**（N8.1 `resolveCompactionWindow` + `CompactionWindow`
-  + `effectiveCompactionPath` export + barrel；N8.2 兩呼叫點餵 `planPath`、
-  下游零改動；N8.3 三 unit 檔新增 10 用例：context-builder 7 /
-  compaction-policy 2 / summarize 1）；N8.4 待使用者編譯確認 + 手動驗收。
-- **N8.4 第一輪 unit 跑測（2026-10-18）：2 失敗全在測試檔已修、來源碼零
-  改動。** `compaction-policy.test.ts` N8「第二次壓縮」向量兩筆期望值
-  `toSummarize = ['cmp1', 'a1']` 筆誤：測試自己的 fixture（`cmp1.
+- ✅ **N8 完成（代碼 + 回歸，2026-10-18）**：N8.1 `resolveCompactionWindow`
+  + `CompactionWindow` + `effectiveCompactionPath` export + barrel；N8.2 兩呼叫點
+  餵 `planPath`、下游零改動；N8.3 三 unit 檔新增 10 用例（context-builder 7 /
+  compaction-policy 2 / summarize 1）；N8.4 回歸全綠（`npm run check` + 3 unit
+  檔 + 5 client compaction suite）。剩手動驗收（使用者原始場景：agentic loop
+  連壓兩次）。
+- **第一輪 2 失敗全在測試檔已修、來源碼零改動（根因索引）**：
+  `compaction-policy.test.ts` N8「第二次壓縮」向量兩筆期望值
+  `toSummarize = ['cmp1', 'a1']` 筆誤——測試自己的 fixture（`cmp1.
   firstKeptMessageId = 'u1'`）把 u1 放在 effective path 內、自己又斷言切點
-  在 u2（`firstKeptMessageId = 'u2'`、`kept = [u2, a2]`）→ plan 的連續分割
-  契約下 `toSummarize` 必然是 `[cmp1, u1, a1]`（u0/a0 才是不重摘要的已 drop
-  區）；原期望讓 u1 憑空消失、任何實作都不可達。其餘斷言（keptTokens
-  600 / before 6600 / after 600 / isSplitTurn false / systemHead）全部吻合
-  實作（已模擬驗證兩 mode 切點皆落 u2）。修正 = 兩筆期望陣列補 `'u1'`
-  + 兩筆註解（含「cmp1 = first segment」誤標——v4 規則第一段總和歸段內
-  最後非-assistant = u1、cmp1 計 0）。待使用者重跑確認。
-- N8.4 通過後更新檔首恢復點 / §1 / §4 並勾 05-N8。
+  在 u2 → plan 的連續分割契約下 `toSummarize` 必然是 `[cmp1, u1, a1]`、原期望
+  不可達。修正 = 兩筆期望陣列補 `'u1'` + 兩筆註解（含「cmp1 = first
+  segment」誤標——v4 規則第一段總和歸段內最後非-assistant = u1、cmp1 計 0）。
 
 ## 4. 驗證狀態
 
@@ -1669,6 +1665,13 @@ summary 呼叫 = [system, cmp_1 (user), 101..cut, instruction]   ← 放得下 c
   使用者重跑 `chat-message-compaction` 11/11 + `npm run check` + 回歸
   `chat-message-compacting` / `context-gauge-compaction` / `context-inspector` /
   `compaction-decision-card` 全綠；05-N7 清單已勾（手動驗收 #8–#12 未做）。
+- **N8 ✅（完成並確認，2026-10-18）**：N8.1–N8.3（3 來源檔 + 3 unit 檔）；
+  第一輪 2 失敗全在測試檔（N8 向量期望值筆誤，見 §3.27 狀態）、已修、來源碼
+  零改動；使用者重跑 `npm run check` + unit `compaction-policy` /
+  `context-builder` / `summarize` + client 5 支 compaction suite
+  （`chat-message-compaction` / `context-inspector` /
+  `context-gauge-compaction` / `compaction-decision-card` /
+  `chat-message-compacting`）全綠；05-N8 清單已勾（手動驗收未做）。
 - **Phase 1 5.8 手動驗收（未做；可與 v4 一併驗）**：
   1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
   2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。
@@ -2040,7 +2043,7 @@ static async createCompactionMessage(params: {
       `[system, 舊summary, 新訊息, instruction]`）
 
 ### N8.4 回歸 + 驗收
-- [ ] `npm run check` + 既有 5 支 client compaction suite 零改動全綠
+- [x] `npm run check` + 既有 5 支 client compaction suite 零改動全綠
       （`chat-message-compaction` / `context-inspector` /
       `context-gauge-compaction` / `compaction-decision-card` /
       `chat-message-compacting`）
