@@ -8,34 +8,18 @@
 > [06-status.md](./06-status.md)。
 >
 > **目前停點（2026-10-18）**：**N11 compact request 前綴一致性——N11.1 + N11.2 source + N11.3 測試完成、未確認**
-> （① P0 bug（N11.1）——tool result 附件（MCP screenshot base64）在
-> DB→API 轉換被丟 → compact request 前綴在第一張 screenshot 分岔 → KV cache 失效
-> （同根因另波及 post-compaction 下一 turn / F5 後第一 turn / preEncode / inspector
-> WYSIWYG）——**source 修完**：轉換的 `extra → parts` 區塊抽成
-> `ChatService.buildExtraContentParts`（固定序、images 一律 cap、無 gating）、
-> tool+extra 不再 early-return 丟附件、in-flow 調同一 builder（順手修不 cap、
-> 順序改 user input 路徑）、`toAgenticMessages` TOOL 分支直通、序列化對齊
-> （assistant + tool_calls + 空 content → 省略 content 欄位）；② **A4 定案 + 實做
-> （N11.2，使用者 2026-10-18）**——summary 用**整個 effective path**
-> 產生：compact request = `buildLlmContext(effectivePath).messages` + instruction
-> （复用原 chat UI code path、不自組裝 → 前綴 = 完整最後送出 payload、最大 cache
-> 亲和性）；切點 / cmp 嫁接 / post-compaction 形狀不變（kept 尾段 append 到
-> summary 後、與 summary 刻意重複確保精確度）；scope = 所有 compaction；prompt /
-> max_tokens 不變、無新 meta 欄位 / 無新設定 / 無 fallback；③ **D1 定案 + 實做
-> （使用者 2026-10-18）**——tool result DB 重建與 in-flow 走 **user input 同路徑**：
-> **不新增 model 參數 / 不新增 gating**（model gating 由下游既有 `sendMessage`
-> vision filter 處理；原規劃「參數 thread」整段刪除、所有簽名不變）；④ **N11.3 測試
-> （2026-10-18）**——`tests/unit/summarize.test.ts` 依決定 B 修好（補 `planPath` +
-> mock `convertDbMessageToApiChatMessageData` + payload assertions =
-> `buildLlmContext(planPath).messages` + instruction）+ 新
-> `tests/unit/chat-conversion.test.ts`（轉換矩陣 / byte-identity / 空 content 三態 /
-> 合成 fixture compact request = 最後 payload byte-prefix + instruction；兩份抓包只作
-> 根因文檔證據、不適用當 oracle）。
+> （N11.1 P0：tool result 附件（MCP screenshot base64）在 DB→API 轉換被丟 →
+> compact request 前綴在第一張 screenshot 分岔 → KV cache 失效；N11.2 = A4：
+> summary 用**整個 effective path**產生（compact request =
+> `buildLlmContext(effectivePath).messages` + instruction）；D1：tool result DB
+> 重建與 in-flow 走 user input 同路徑（無 model 參數 / 無新 gating）；N11.3 測試：
+> `summarize.test.ts` 依決定 B 修好 + 新 `tests/unit/chat-conversion.test.ts`
+> （轉換矩陣 / byte-identity / 空 content 三態 / compact request = 最後 payload
+> byte-prefix + instruction 合成 fixture）。明細見 06-status §3.30 / §5g。）
 > **待辦（依序）**：使用者 `npm run check` + unit 確認 → 手動驗收（MCP
 > screenshot → 連壓兩次 + F5 → `cache_n` 高命中）。
 > 本目錄兩份抓包 `before-trigger.json` / `compact-requset.json` 只作根因文檔證據（修後 wire 形狀刻意
-> 改變、不適用當 byte-prefix oracle；回歸測試用合成 fixture）；
-> 明細見 06-status §3.30 / §5g）。
+> 改變、不適用當 byte-prefix oracle；回歸測試用合成 fixture）。
 >
 > **已完成並確認（2026-10-18）**：**N10 in-loop cmp sibling 系統性 bug ✅**
 > （N10.1 根因修：`onCompaction` callback + `lastCreatedInFlow` 推進；N10.2 已損樹修復：
