@@ -102,7 +102,7 @@ function buildLlmContext(path):
 | I3 | `firstKeptMessageId` **有 id 但找不到** → 忽略該 cmp,全量送出(fail-open);**id 缺**(刻意的空 kept)→ kept = cmp 之後的訊息 | 分支/刪除後 id 可能失效;安全方向是「變長」不是「變短」 |
 | I4 | 斷點只允許切在 **user 或 assistant 訊息之前**,絕不切在 tool result | 切在 assistant 之前:kept 區以 `ass(tool_calls) → tool…` 開頭,配對完整;切在 tool 之前會產生孤兒 tool result(API 拒收) |
 | I5 | user 邊界切:kept 區至少 N 則 user 訊息(可設,預設 4);split 切:kept 區**可為空**(`contextKeepMinMessages`,預設 0)——預算放不下時切點落在**最後一則訊息之後**,所有訊息都送進 summary(payload = `[system, summary]`);把值設回 ≥1 即恢復下限 | 避免把幾乎全部對話都 summarize 掉;split 切時該 span 的 user 訊息必然進 summary,由 summary 負責保留其內容(空 kept 時連最近的 tool 交換也進 summary,split prompt 變體已要求保留 tool results) |
-| I6 | cmp 必須是路徑上的節點(由建立流程保證:parent = 當時的 leaf,currNode 指向它) | 路徑外的節點不影響送出 |
+| I6 | cmp 必須是路徑上的節點（由建立流程保證:parent = 當時的 leaf,currNode 指向它）——⚠️ **in-loop flow 實做違反**：flow 用 `lastCreatedInFlow` closure 變數建下一則訊息,不被 compaction 推進 → cmp 成 sibling（N10,06-§3.29;N10.1 修復後恢復） | 路徑外的節點不影響送出 |
 | I7 | 壓縮只在「沒有 stream 在跑」時進行(flow 之間、agentic turn 之間) | 避免改動 in-flight 的 `sessionMessages` 底層 |
 
 > 註:Pi 規範中「把 kept 邊界推進 context-invisible suffix(被 context_edit
@@ -285,6 +285,7 @@ mode B 切點原本「byte 對 token budget」的錯配順手修好。
 | split 切空 kept(全部壓縮) | payload = `[system, summary]`;cmp 之後追加的新訊息成為 kept;inspector 斷點選擇器顯示「無保留訊息」、只能前移(選一則訊息);Re-summarize 的 region = cmp 之前的所有訊息(排除 cmp 節點本身) | I5/§3.3 |
 | agentic flow 進行中(context 逼近上限) | turn 之間(非 streaming 中)觸發:建 cmp(parent=最後一則)→ 重建 in-memory `sessionMessages` → 續跑;flow 中斷時 cmp 已落 DB,狀態一致 | §6 |
 | F5 / 頁面重刷(in-loop compaction 期間) | 三個時機:(a) summary 呼叫中 / gate 等待中 → 不建 cmp(fail-open),reload 後全量 context、下個 flow-complete 自動再觸發(≤n_ctx 自愈);(b) **`createCompactionMessage` 與 `updateCurrentNode` 之間**(兩寫非原子)→ cmp orphan(在 DB、不在 path、不可見)→ reload 後全量送出 → overflow;(c) currNode commit 後 → cmp 在 path、狀態一致。修復規格(原子 commit + 載入收編 orphan + 可選送出前 guard)= N9,見 06-§3.28 | N9(06-§3.28) |
+| in-loop compaction 後 flow 繼續追加 turns(**N10 系統性 bug**) | 未修前:cmp 與下一則 flow 訊息成 sibling(`lastCreatedInFlow` 不被推進)→ cmp 不在 root→currNode 路徑 → F5 / 匯出匯入後所有 summary 消失、inspector 全量、session 無法繼續;in-memory 平陣列遮住分岔。修復 = compaction 後推進 flow 接掛點(N10.1)+ 已損樹 migration(N10.2),見 06-§3.29 | N10(06-§3.29) |
 | split 切後 flow 繼續追加 turns | 新訊息接在 cmp 之後;下次壓縮照「最後一筆 cmp 生效」(I2)涵蓋它 | I2 |
 | 該 span 的 user 訊息被 summarize 後,user 又編輯了它 | 編輯落在 summarize 區:不影響送出(不在 kept 區);summary 文字不自動更新,可手動「重新摘要」 | — |
 | 第二次壓縮(已有一筆 cmp) | plan 在 **effective path**(builder 觀點,N8/06-§3.27)上:新 cmp 的 summarize 區 = effective path 前綴(含舊 cmp 節點,rolling summary);舊 cmp 已 drop 的原始訊息不重送;舊 cmp 被 drop,新 summary 涵蓋它 | I2 |

@@ -377,6 +377,40 @@ payload = `[system, summary, kept]`、不 overflow；DB 無 orphan cmp（或有�
 server-side stream 可能經 `discoverActiveStream` 接回完成目前 turn、但 tool 執行不
 復原——既有）；N7 in-memory queue（pending messages）F5 即失（既有、輕微）。
 
+### N10 — in-loop compaction 的 cmp 被接成 sibling（系統性 bug；最高優先；規格定稿 2026-10-18；未實做；明細見 06-status §3.29）
+
+> 背景（使用者回報 + 已對 code 驗證，2026-10-18）：agentic loop 連壓兩次正常停下
+> 後，UI 看得到 summary；但 F5 或匯出→匯入後**所有 summary 消失**、inspector 顯示
+> 全量、session 無法繼續（overflow）。根因：flow 的下一則訊息用 closure 變數
+> `lastCreatedInFlow`（`chat/index.svelte.ts:1596/1675/1711`）當 parent，compaction
+> 從不推進它 → `101.parent = 099 = cmp1.parent`（sibling）→ cmp 不在 root→currNode
+> 路徑上；in-memory 平陣列（`addMessageToActive`）遮住分岔，任何從樹重建的路徑
+> （load / export / import）都丟 cmp。post-flow 壓縮無此問題（下一則 user 訊息走
+> `addMessage('-1')` → live 陣列尾端 = cmp）。
+
+- [ ] agentic flow callback 型別新增 `onCompaction?(cmp: DatabaseMessage)`
+- [ ] `streamChatCompletion` 接線：`onCompaction: (cmp) => { lastCreatedInFlow =
+      cmp.id; }`
+- [ ] `compactBetweenTurns`：callbacks 傳入；cmp 建立 + currNode 更新成功後呼叫
+      `callbacks.onCompaction?.(cmp)`
+- [ ] 純函式 `findCompactionGraftFixes(allMessages, currNodeId) →
+      { cmpId, reattachId }[]` + unit 5 向量
+- [ ] 已損樹修復（單一 IDB transaction：`c2.parent = c.id`、`p.children` 移除
+      `c2.id`、`c.children` 加入 `c2.id`）+ app 啟動一次性 migration +
+      `loadConversation` 防禦層
+- [ ] 核心回歸：in-loop compaction 後下一則 assistant 訊息 `parent === cmp.id`
+- [ ] 回歸：`npm run check` + 既有 5 支 client compaction suite 零改動全綠
+- [ ] 手動驗收（使用者原始場景）：agentic loop 連壓兩次正常停下 → F5 → summary
+      都在、inspector = 壓縮後 context；匯出 → 匯入 → 同；session 可繼續
+- [ ] 既有已損對話：啟動 migration 後開啟 → summary 回到路徑上、可繼續
+
+✅ 驗收：in-loop compaction 後 DB 樹 == in-memory 陣列（cmp 在 root→currNode 路徑
+上）；F5 / 匯出匯入後 summary 節點保留、inspector 顯示壓縮後 context、session 可
+繼續；既有已損對話經 migration 恢復。
+
+**與 N9 的關係**（06-§3.29）：N9.1（原子 commit）/ N9.2（收編 currNode 的 child）
+仍需要、與 N10 互補；N10.2 偵測簽名不同（sibling of path node vs child of leaf）。
+
 ### Phase 3 —(可選,後續)
 
 > **下一輪(規劃已定;N1–N5 ✅ 全部完成並確認,明細見 06-status §3.13–§3.19,依序 N1→N5)**:
