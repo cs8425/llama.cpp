@@ -337,6 +337,14 @@ mode B 切點原本「byte 對 token budget」的錯配順手修好。
     > F5 後 / preEncode / inspector）前綴在第一張圖分岔 → KV cache 失效。修正（已實做）=
     > 轉換與 in-flow 送出路徑共用 `ChatService.buildExtraContentParts`
     > （同序 / 無 gating（下游 `sendMessage` vision filter 處理）/ 同 cap）→ byte-identical。
+    > **session 欄位層（N11.4，06-§3.31；方案定案 2026-10-19、未實做）**：上述「前綴 =
+    > 完整最後送出 payload」只在 **messages 陣列層**成立（N11）。body 的 session 層
+    > wire 欄位——具體是 `tools`（tool definitions，chat template 把它們渲染進 prompt
+    > 開頭）與有設定時的 `enableThinking` / `reasoningEffort`
+    > （`chat_template_kwargs`）——compact request 未帶 → 渲染 prompt 從 token 0
+    > 分岔 → KV cache 完全失效。修正 = 把與最後一筆 live payload 相同的 session
+    > 欄位 thread 進壓縮路徑（in-loop 直接用 loop 的 `tools`；chat store 決定性重算）
+    > + `preEncode` 同類修（`chat:697` / `chat:1834` 預熱點）。
   - **transcript**(v1 fallback):
     ```
     [ { role: 'system', content: 壓縮指令 },

@@ -515,6 +515,44 @@ cmp 韌性仍需要。
 （`computeSummaryMaxTokens`）；over-target check / retry / gate；無新設定、無
 fallback / overhead 邏輯。
 
+### N11.4 — compact request session 欄位一致性：`tools` / thinking kwargs 未帶（問題確認 + 方案定案 2026-10-19、未實做；明細見 06-status §3.31 / §5h）
+
+> 背景（使用者回報 + code 驗證 2026-10-19）：N11 修完 messages 陣列層前綴一致性，
+> 但 compact request **body** 缺 agentic 主 payload 每 turn 都帶的 `tools`
+> （`agentic:817`）——llama.cpp 的 chat template 把 tool definitions 渲染進 prompt
+> 開頭 → compact request 渲染 prompt 與最後一筆 live payload 從 token 0 分岔 →
+> KV cache 完全失效（session 最大 request 冷算）。N11 的 byte-identity 保證與
+> 測試只覆蓋 `messages` 陣列；session 層 wire 欄位從未 thread 進壓縮路徑。
+> 次級分岔 = `enableThinking` / `reasoningEffort`（有設定時 agentic turn 帶
+> `chat_template_kwargs`、compact request 永不帶）；`preEncode`
+> （`chat.service.ts:924–969`）同根因（`chat:697` / `chat:1834` 預熱點與下一
+> agentic turn 不符）。
+
+- [ ] `summarize.ts`：`SummarizeOptions` 加 `tools?` / `enableThinking?` /
+      `reasoningEffort?`；`summarizeMessages` 的 `sendMessage` options 補上三者
+      （prefix-stable only；transcript 不變）
+- [ ] `agentic/index.svelte.ts`：`compactBetweenTurns` 加 `tools`（直接用 loop 自己的
+      `tools`、100% 精確）+ 從 `options` 取 thinking kwargs → `summarizeWithRetry`；
+      `executeAgenticLoop:1202` 呼叫點傳 `tools`
+- [ ] `tools.svelte.ts`（或 agentic store）：`resolveEnabledToolsForConversation(convId)`
+      helper（mirror `agentic:372–388`）
+- [ ] `chat/index.svelte.ts`：`runCompactionSummary`（compact / recompact / 邊界後移
+      共用）解析並傳 session 欄位；`triggerPreEncode` + `chat:697` / `chat:1834`
+      兩呼叫點
+- [ ] `chat.service.ts`：`preEncode` 簽名加 `tools`（+ thinking kwargs）、進 body
+      （決定性：conversation 有 enabled tools 即每 turn 皆 agentic、無預熱歧義）
+- [ ] unit：`summarize.test.ts`（tools deep-equal pass-through / 不傳則 absent /
+      thinking kwargs）+ `chat-conversion.test.ts`（合成 fixture 回歸升級到 request
+      body 層 + thinking-effort fixture）
+- [ ] `npm run check` + unit + 既有 5 支 client compaction suite 全綠
+- [ ] 手動驗收（併入 N11 驗收、N11.4 必須先完成）：compact request `cache_n` ≈
+      `prompt_n` + 壓縮後下一 turn `cache_n` 高命中 + 無 tools 對話行為不變
+
+✅ 驗收：compact request 的**渲染 prompt** = 最後一筆 live payload 的渲染 prompt +
+尾端 instruction（messages + `tools` + `model` + `chat_template_kwargs` 全一致）→
+compact request `cache_n` 高命中；post-compaction preEncode 與下一 agentic turn 一致；
+無 tools 對話與現行完全一致。
+
 ### Phase 3 —(可選,後續)
 
 > **下一輪(N1–N5)✅ 全部完成並確認**——明細見 06-status §3.13–§3.19 / §5c

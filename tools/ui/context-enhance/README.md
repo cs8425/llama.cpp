@@ -7,19 +7,20 @@
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
 > [06-status.md](./06-status.md)。
 >
-> **目前停點（2026-10-18）**：**N11 compact request 前綴一致性——N11.1 + N11.2 source + N11.3 測試完成並確認**
-> （`npm run check` 0 錯 + unit `summarize` 28/28 / `chat-conversion` / `context-builder` 全綠；
-> 第一輪 4 type + 6 runtime 全在 `summarize.test.ts` 測試檔 2 處 desync、已修、來源碼零改動）
-> （N11.1 P0：tool result 附件（MCP screenshot base64）在 DB→API 轉換被丟 →
-> compact request 前綴在第一張 screenshot 分岔 → KV cache 失效；N11.2 = A4：
-> summary 用**整個 effective path**產生（compact request =
-> `buildLlmContext(effectivePath).messages` + instruction）；D1：tool result DB
-> 重建與 in-flow 走 user input 同路徑（無 model 參數 / 無新 gating）；N11.3 測試：
-> `summarize.test.ts` 依決定 B 修好 + 新 `tests/unit/chat-conversion.test.ts`
-> （轉換矩陣 / byte-identity / 空 content 三態 / compact request = 最後 payload
-> byte-prefix + instruction 合成 fixture）。明細見 06-status §3.30 / §5g。）
-> **待辦（依序）**：N11 手動驗收（MCP screenshot → 連壓兩次 + F5 →
-> `cache_n` 高命中；可與 N10/N8/N7/5.8 一併驗）→ N9（規格定稿、未實做）。
+> **目前停點（2026-10-19）**：**N11.4 compact request session 欄位一致性——問題確認 + 修正方案定案、未實做**
+> （N11 修完 messages 陣列層前綴一致性後，compact request **body** 仍缺 agentic 主
+> payload 每 turn 都帶的 `tools`（tool definitions）——chat template 把 tool
+> definitions 渲染進 prompt 開頭 → compact request 渲染 prompt 與最後一筆 live
+> payload 從 token 0 分岔 → KV cache 完全失效；`preEncode` 同根因缺漏；
+> 明細 + 修正規劃：06-status §3.31 / §5h）
+> （N11 已完成 2026-10-18：N11.1 P0 tool result 附件（MCP screenshot base64）+
+> N11.2 = A4 full-path summary（compact request =
+> `buildLlmContext(effectivePath).messages` + instruction）+ N11.3 測試全綠，
+> 明細見 06-status §3.30 / §5g）
+> **待辦（依序）**：N11.4 source + 測試（規劃完成）→ N11（+N11.4）手動驗收
+> （MCP screenshot → 連壓兩次 + F5 → compact request 與後續 turns 的 `cache_n`
+> 皆高命中；⚠️ N11.4 必須先完成、否則驗收會看到 cache 全失效而誤判；可與
+> N10/N8/N7/5.8 一併驗）→ N9（規格定稿、未實做）。
 > 本目錄兩份抓包 `before-trigger.json` / `compact-requset.json` 只作根因文檔證據（修後 wire 形狀刻意
 > 改變、不適用當 byte-prefix oracle；回歸測試用合成 fixture）。
 >
@@ -38,12 +39,13 @@
 >   overflow guard，見 06-status §3.28 / 05-N9。
 >
 > **剩（依序）**：
-> 1. **N11 compact request 前綴一致性**（06-status §3.30 / §5g）：N11.1 + N11.2
->    source + N11.3 測試 ✅ 完成並確認 → 只剩手動驗收（併入 #3）+ 重跑既有 5 支
->    client compaction suite。
+> 1. **N11.4 compact request session 欄位一致性**（06-status §3.31 / §5h）：問題確認 +
+>    方案定案 2026-10-19、未實做——`tools` / thinking kwargs thread 進壓縮路徑 +
+>    `preEncode` 同類修（5 檔案、加性參數、無新設定）。
 > 2. **N9 F5 / refresh 韌性**（06-status §3.28 / 05-N9 / §5e）。
-> 3. **手動驗收（未做、可一併驗）**：N11（MCP screenshot → 連壓兩次 + F5 →
->    `cache_n` 高命中）
+> 3. **手動驗收（未做、可一併驗）**：N11 + N11.4（MCP screenshot →
+>    連壓兩次 + F5 → compact request 與後續 turns 的 `cache_n`
+>    皆高命中；⚠️ N11.4 必須先完成）
 >    + N10（agentic loop 連壓兩次後 F5 → summary 都在、
 >    匯出匯入同、既有已損對話 migration 後恢復）
 >    + N8（agentic loop 連壓兩次：第二次 summary
@@ -55,7 +57,8 @@
 >    token 校準已被 v3/v4 取代）。
 >
 > **已完成並確認**（明細與決策見 06-status.md）：N11（compact request 前綴
-> 一致性：tool result 附件與 user input 同路徑 + full-path summary A4）→ N10（in-loop cmp sibling 系統性
+> 一致性：tool result 附件與 user input 同路徑 + full-path summary A4；
+> messages 陣列層——session 欄位層 `tools` / thinking kwargs 為 N11.4 待做）→ N10（in-loop cmp sibling 系統性
 > bug：`onCompaction` 推進 flow 接掛點 + 已損樹 migration）→ N8（第二次壓縮：plan 改在
 > effective path）→ N7（壓縮進行中：queue +
 > in-chat 指標列 + Stop）→ v4 真實 token 計數 → 雙 mode（共用 + A + B，
@@ -113,7 +116,8 @@
    可編輯 summary、可移動保留斷點(含 mid-turn 斷點)、可手動 compact / expand(還原)。
    入口放在 context gauge popup 裡 + 聊天表單 action + 鍵盤快捷鍵。
 7. **`preEncode` 必須走同一個 builder**:否則 KV cache 預熱的是「未壓縮」的 prompt,
-   下一輪反而全量 re-prompt,比不預熱還糟。
+   下一輪反而全量 re-prompt,比不預熱還糟。（N11.4：`preEncode` 也必須帶上
+   session 的 `tools` / thinking kwargs，06-§3.31。）
 
 ## 與題述圖案的對應
 
