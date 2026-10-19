@@ -7,19 +7,11 @@
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
 > [06-status.md](./06-status.md)。
 >
-> **目前停點（2026-10-19）**：**N12 Context Inspector 凍結——source + 測試已實做、待編譯確認**
-> （問題：打開 Context Inspector 卡在 `Building payload…` 無限轉圈 + console
-> `Uncaught TypeError: t.content is not iterable`：`convertDbMessageToApiChatMessageData`
-> 的 `omitEmptyContent` 對「tool_calls + 無文字」assistant turn **刻意**輸出
-> `content: undefined`（與 in-flow push byte-identical、N11 要求）→
-> `apiMessageBytes`（bundle `aqt`）`for...of undefined` 炸 → dialog `payloadRows`
-> derived 在 render pass 內炸 → uncaught、DOM 卡 spinner；同形狀還有
-> `contentText` / `sanitizePayload`（列展開 / Copy JSON）。修正（已實做）=
-> 三個 display 消費端對 `content === undefined` total function（視為空 / 0 bytes）
-> + `ApiChatMessageData.content` JSDoc，**wire shape 不動**；unit 1 向量 +
-> client 1 回歸（tool-call-only assistant 落送出 payload、4 斷言）已加；
-> **待**：`npm run check` + unit `compaction-policy` + client `context-inspector`
-> 全綠 + N12.3 手動驗收；明細 + 執行清單：06-status §3.32 / §5i）
+> **目前停點（2026-10-19）**：**N12 Context Inspector 凍結 ✅（source + 測試 + `npm run check` + unit + client 全綠）；下一步 = 手動驗收批（N12.3 + N11/N11.4 + N10 + N8 + N7 + 5.8，可一併）→ N9（規格定稿、未實做）**
+> （N12：打開 inspector 卡 `Building payload…` = 三個 display 消費端對
+> tool-call-only assistant 的 `content === undefined`（刻意 wire shape、N11
+> byte-identical 要求）未容忍；修 = total function（視為空 / 0 bytes）+ JSDoc，
+> **wire shape 不動**；明細 + 執行清單：06-status §3.32 / §5i）
 > （N11.4 已完成 2026-10-19：compact request session 欄位 `tools` / thinking
 > kwargs + `preEncode` 同類修；source + 測試 + `npm run check` + unit 全綠，
 > 明細見 06-status §3.31 / §5h；手動驗收未做、見待辦）
@@ -27,11 +19,8 @@
 > N11.2 = A4 full-path summary（compact request =
 > `buildLlmContext(effectivePath).messages` + instruction）+ N11.3 測試全綠，
 > 明細見 06-status §3.30 / §5g）
-> **待辦（依序）**：N12 編譯確認 + 手動驗收（source + 測試已實做；
-> agentic 對話開 inspector 不卡 + 展開 / Copy JSON 不炸 + 普通對話無回歸）
-> → N11（+N11.4）手動驗收
-> （MCP screenshot → 連壓兩次 + F5 → compact request 與後續 turns 的 `cache_n`
-> 皆高命中；N11.4 已完成、驗收應看到高命中；可與 N10/N8/N7/5.8 一併驗）→ N9（規格定稿、未實做）。
+> **待辦（依序）**：手動驗收批（N12.3 + N11/N11.4 + N10 + N8 + N7 + 5.8，
+> 可一併；N11.4 已先完成、驗收應看到高 `cache_n`）→ N9（規格定稿、未實做）。
 > 本目錄兩份抓包 `before-trigger.json` / `compact-requset.json` 只作根因文檔證據（修後 wire 形狀刻意
 > 改變、不適用當 byte-prefix oracle；回歸測試用合成 fixture）。
 >
@@ -50,23 +39,26 @@
 >   overflow guard，見 06-status §3.28 / 05-N9。
 >
 > **剩（依序）**：
-> 1. **N12 Context Inspector 凍結**（06-status §3.32 / §5i；source + 測試已實做 2026-10-19；
->    待 `npm run check` + 兩測試檔 + 手動驗收）。
-> 2. **手動驗收（未做、可一併驗）**：N11 + N11.4（MCP screenshot →
+> 1. **手動驗收（未做、可一併驗）**：N12.3（agentic 對話開 inspector 不卡
+>    `Building payload` + 展開 tool-call-only 列 / Copy JSON 不炸 + 普通對話無
+>    回歸；06-status §5i）
+>    + N11 + N11.4（MCP screenshot →
 >    連壓兩次 + F5 → compact request 與後續 turns 的 `cache_n`
->    皆高命中；N11.4 已先完成）
+>    皆高命中；N11.4 已先完成、驗收應看到高命中）
 >    + N10（agentic loop 連壓兩次後 F5 → summary 都在、
 >    匯出匯入同、既有已損對話 migration 後恢復）
 >    + N8（agentic loop 連壓兩次：第二次 summary
 >    請求 = `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑）+ N7 5 項
 >    （05-§3 #8–#12）+ Phase 1 5.8（06-status §4 清單；A/B mode 行為 + v4 真實
 >    token 顯示可一併驗）。
-> 3. **N9 F5 / refresh 韌性**（06-status §3.28 / 05-N9 / §5e；規格定稿、未實做）。
-> 4. Phase 3 可選後續（兩段式 summary / per-conversation 覆蓋 / 合併重摘要
+> 2. **N9 F5 / refresh 韌性**（06-status §3.28 / 05-N9 / §5e；規格定稿、未實做）。
+> 3. Phase 3 可選後續（兩段式 summary / per-conversation 覆蓋 / 合併重摘要
 >    提示 / summary 獨立 model / endpoint / gauge savings 顯示，見 05-§1；
 >    token 校準已被 v3/v4 取代）。
 >
-> **已完成並確認**（明細與決策見 06-status.md）：N11.4（compact request session
+> **已完成並確認**（明細與決策見 06-status.md）：N12（Context Inspector 凍結修：
+> 三 display 消費端對 `content === undefined` total function + JSDoc、wire shape
+> 零改動；check + unit + client 全綠 2026-10-19；手動驗收未做）→ N11.4（compact request session
 > 欄位一致性：`tools` / thinking kwargs thread 進壓縮路徑 + `preEncode` 同類修；
 > check + unit 全綠 2026-10-19）→ N11（compact request 前綴一致性：tool result
 > 附件與 user input 同路徑 + full-path summary A4；messages 陣列層）→ N10（in-loop cmp sibling 系統性
