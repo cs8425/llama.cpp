@@ -12,11 +12,11 @@ import type { DatabaseMessage } from '$lib/types/database';
 /**
  * Compaction mode (`contextCompactionMode` setting, 2026-10-17 dual-mode spec,
  * context-enhance/02 §3.3):
- * - `recent-window` (A, **default**): keep the most recent messages verbatim
+ * - `recent-window` (A): keep the most recent messages verbatim
  *   (at least `contextKeepRecentTokens` of byte count, walked back from the
  *   last message) and summarize the rest; triggers at `window − keep`, where
  *   window = min(n_ctx, `contextMaxContextOverride`);
- * - `threshold-target` (B = v3 + N6): kept suffix ≤ (threshold − keepTarget)%
+ * - `threshold-target` (B = v3 + N6, **default**): kept suffix ≤ (threshold − keepTarget)%
  *   × n_ctx; success = head + summary ≤ keepTarget% × n_ctx.
  *
  * The mode only shapes the cut-point decision (trigger / planner / success

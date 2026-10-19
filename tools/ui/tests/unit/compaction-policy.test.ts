@@ -727,10 +727,10 @@ describe('toCompactionMode', () => {
 		expect(toCompactionMode('threshold-target')).toBe('threshold-target');
 	});
 
-	it('falls back to recent-window (A) for unknown / corrupted values', () => {
-		expect(toCompactionMode(undefined)).toBe('recent-window');
-		expect(toCompactionMode('')).toBe('recent-window');
-		expect(toCompactionMode('bogus')).toBe('recent-window');
+	it('falls back to threshold-target (B) for unknown / corrupted values', () => {
+		expect(toCompactionMode(undefined)).toBe('threshold-target');
+		expect(toCompactionMode('')).toBe('threshold-target');
+		expect(toCompactionMode('bogus')).toBe('threshold-target');
 	});
 });
 

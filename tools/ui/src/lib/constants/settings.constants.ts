@@ -211,14 +211,14 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 				type: SettingsFieldType.CHECKBOX
 			},
 			{
-				defaultValue: 'recent-window',
+				defaultValue: 'threshold-target',
 				dependsOn: SETTINGS_KEYS.CONTEXT_AUTO_COMPACTION,
 				help: 'How automatic compaction decides what to keep. Recent-window keeps the most recent messages verbatim (at least the keep-recent budget) and compacts the rest; threshold-target caps the kept suffix at (threshold − keep target)% of n_ctx.',
 				key: SETTINGS_KEYS.CONTEXT_COMPACTION_MODE,
 				label: 'Compaction mode',
 				options: [
-					{ icon: Clock, label: 'Recent window (default)', value: 'recent-window' },
-					{ icon: Gauge, label: 'Threshold target', value: 'threshold-target' }
+					{ icon: Clock, label: 'Recent window', value: 'recent-window' },
+					{ icon: Gauge, label: 'Threshold target (default)', value: 'threshold-target' }
 				],
 				type: SettingsFieldType.SELECT
 			},

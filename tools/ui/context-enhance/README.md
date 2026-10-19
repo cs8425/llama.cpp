@@ -65,7 +65,7 @@
 > bug：`onCompaction` 推進 flow 接掛點 + 已損樹 migration）→ N8（第二次壓縮：plan 改在
 > effective path）→ N7（壓縮進行中：queue +
 > in-chat 指標列 + Stop）→ v4 真實 token 計數 → 雙 mode（共用 + A + B，
-> default A）→ N6（split 切允許空 kept）→ N1–N5（summary 上限 n_ctx × % /
+> default B）→ N6（split 切允許空 kept）→ N1–N5（summary 上限 n_ctx × % /
 > keep target 設定 / Stop 鍵 / prefix-stable default / `contextSummaryMode`）
 > → Phase 2 P2.1–P2.6 → Phase 1 5.1–5.7 → Phase 0。
 
@@ -107,7 +107,7 @@
 5. **自動觸發**:flow 之間與 **agentic 迴圈 turn 之間**（「兩次 user 訊息之間」的 context 爆炸
    發生在迴圈內,只在 flow 結束後檢查來不及;觸發點皆非 streaming 中）。觸發值 = 真實
    `contextUsed`（gauge 同源,v4）。
-   **雙 mode(2026-10-17 定稿,預設 A)**:A = recent-window(pi reference):
+   **雙 mode(2026-10-17 定稿,預設 B)**:A = recent-window(pi reference):
    觸發 `window − keepRecentTokens`(window = min(n_ctx, maxContextOverride))、
    切點 = 從最後往回加真實 token 數(02-§3.4;無資料例外 bytes/4)到 ≥ keep(尾端 tool 跨越留其前 ass)、成功判定
    `summary + kept ≤ window − keep`(v4:system head 不計);B = threshold-target(v3 + N6):

@@ -478,10 +478,10 @@ export function planCompaction(
 /**
  * Coerces a raw settings value (the `contextCompactionMode` config) into a
  * valid {@link CompactionMode}; unknown or corrupted values fall back to the
- * default `recent-window` (A).
+ * default `threshold-target` (B).
  */
 export function toCompactionMode(value: unknown): CompactionMode {
-	return value === 'threshold-target' ? 'threshold-target' : 'recent-window';
+	return value === 'recent-window' ? 'recent-window' : 'threshold-target';
 }
 
 /**
