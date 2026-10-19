@@ -515,7 +515,7 @@ cmp 韌性仍需要。
 （`computeSummaryMaxTokens`）；over-target check / retry / gate；無新設定、無
 fallback / overhead 邏輯。
 
-### N11.4 — compact request session 欄位一致性：`tools` / thinking kwargs 未帶（問題確認 + 方案定案 2026-10-19、未實做；明細見 06-status §3.31 / §5h）
+### N11.4 — compact request session 欄位一致性：`tools` / thinking kwargs 未帶（問題確認 + 方案定案 + 實做 2026-10-19、✅ check + unit 全綠；剩手動驗收；明細見 06-status §3.31 / §5h）
 
 > 背景（使用者回報 + code 驗證 2026-10-19）：N11 修完 messages 陣列層前綴一致性，
 > 但 compact request **body** 缺 agentic 主 payload 每 turn 都帶的 `tools`
@@ -528,24 +528,24 @@ fallback / overhead 邏輯。
 > （`chat.service.ts:924–969`）同根因（`chat:697` / `chat:1834` 預熱點與下一
 > agentic turn 不符）。
 
-- [ ] `summarize.ts`：`SummarizeOptions` 加 `tools?` / `enableThinking?` /
+- [x] `summarize.ts`：`SummarizeOptions` 加 `tools?` / `enableThinking?` /
       `reasoningEffort?`；`summarizeMessages` 的 `sendMessage` options 補上三者
       （prefix-stable only；transcript 不變）
-- [ ] `agentic/index.svelte.ts`：`compactBetweenTurns` 加 `tools`（直接用 loop 自己的
+- [x] `agentic/index.svelte.ts`：`compactBetweenTurns` 加 `tools`（直接用 loop 自己的
       `tools`、100% 精確）+ 從 `options` 取 thinking kwargs → `summarizeWithRetry`；
       `executeAgenticLoop:1202` 呼叫點傳 `tools`
-- [ ] `tools.svelte.ts`（或 agentic store）：`resolveEnabledToolsForConversation(convId)`
+- [x] `tools.svelte.ts`（或 agentic store）：`resolveEnabledToolsForConversation(convId)`
       helper（mirror `agentic:372–388`）
-- [ ] `chat/index.svelte.ts`：`runCompactionSummary`（compact / recompact / 邊界後移
+- [x] `chat/index.svelte.ts`：`runCompactionSummary`（compact / recompact / 邊界後移
       共用）解析並傳 session 欄位；`triggerPreEncode` + `chat:697` / `chat:1834`
       兩呼叫點
-- [ ] `chat.service.ts`：`preEncode` 簽名加 `tools`（+ thinking kwargs）、進 body
+- [x] `chat.service.ts`：`preEncode` 簽名加 `tools`（+ thinking kwargs）、進 body
       （決定性：conversation 有 enabled tools 即每 turn 皆 agentic、無預熱歧義）
-- [ ] unit：`summarize.test.ts`（tools deep-equal pass-through / 不傳則 absent /
+- [x] unit：`summarize.test.ts`（tools deep-equal pass-through / 不傳則 absent /
       thinking kwargs）+ `chat-conversion.test.ts`（合成 fixture 回歸升級到 request
       body 層 + thinking-effort fixture）
-- [ ] `npm run check` + unit + 既有 5 支 client compaction suite 全綠
-- [ ] 手動驗收（併入 N11 驗收、N11.4 必須先完成）：compact request `cache_n` ≈
+- [x] `npm run check` + unit + 既有 5 支 client compaction suite 全綠
+- [ ] 手動驗收（併入 N11 驗收、N11.4 已先完成）：compact request `cache_n` ≈
       `prompt_n` + 壓縮後下一 turn `cache_n` 高命中 + 無 tools 對話行為不變
 
 ✅ 驗收：compact request 的**渲染 prompt** = 最後一筆 live payload 的渲染 prompt +

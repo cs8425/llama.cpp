@@ -7,7 +7,7 @@
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
 > [06-status.md](./06-status.md)。
 >
-> **目前停點（2026-10-19）**：**N11.4 compact request session 欄位一致性——source + 測試完成、待使用者 `npm run check` + unit 驗證**
+> **目前停點（2026-10-19）**：**N11.4 compact request session 欄位一致性——source + 測試 + `npm run check` + unit 全綠 ✅；下一步 = 手動驗收（N11 + N11.4）→ N9（未實做）**
 > （N11 修完 messages 陣列層前綴一致性後，compact request **body** 仍缺 agentic 主
 > payload 每 turn 都帶的 `tools`（tool definitions）——chat template 把 tool
 > definitions 渲染進 prompt 開頭 → compact request 渲染 prompt 與最後一筆 live
@@ -18,10 +18,9 @@
 > N11.2 = A4 full-path summary（compact request =
 > `buildLlmContext(effectivePath).messages` + instruction）+ N11.3 測試全綠，
 > 明細見 06-status §3.30 / §5g）
-> **待辦（依序）**：N11.4 使用者 check + 測試驗證（source + 測試已完成，規劃完成）→ N11（+N11.4）手動驗收
+> **待辦（依序）**：N11（+N11.4）手動驗收
 > （MCP screenshot → 連壓兩次 + F5 → compact request 與後續 turns 的 `cache_n`
-> 皆高命中；⚠️ N11.4 必須先完成、否則驗收會看到 cache 全失效而誤判；可與
-> N10/N8/N7/5.8 一併驗）→ N9（規格定稿、未實做）。
+> 皆高命中；⚠️ N11.4 已先完成、驗收應看到高命中；可與 N10/N8/N7/5.8 一併驗）→ N9（規格定稿、未實做）。
 > 本目錄兩份抓包 `before-trigger.json` / `compact-requset.json` 只作根因文檔證據（修後 wire 形狀刻意
 > 改變、不適用當 byte-prefix oracle；回歸測試用合成 fixture）。
 >
@@ -40,27 +39,24 @@
 >   overflow guard，見 06-status §3.28 / 05-N9。
 >
 > **剩（依序）**：
-> 1. **N11.4 compact request session 欄位一致性**（06-status §3.31 / §5h）：source +
->    測試完成 2026-10-19、待使用者 check + 測試驗證——`tools` / thinking kwargs
->    thread 進壓縮路徑 + `preEncode` 同類修（5 source + 2 test 檔、加性參數、
->    無新設定）。
-> 2. **N9 F5 / refresh 韌性**（06-status §3.28 / 05-N9 / §5e）。
-> 3. **手動驗收（未做、可一併驗）**：N11 + N11.4（MCP screenshot →
+> 1. **手動驗收（未做、可一併驗）**：N11 + N11.4（MCP screenshot →
 >    連壓兩次 + F5 → compact request 與後續 turns 的 `cache_n`
->    皆高命中；⚠️ N11.4 必須先完成）
+>    皆高命中；N11.4 已先完成）
 >    + N10（agentic loop 連壓兩次後 F5 → summary 都在、
 >    匯出匯入同、既有已損對話 migration 後恢復）
 >    + N8（agentic loop 連壓兩次：第二次 summary
 >    請求 = `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑）+ N7 5 項
 >    （05-§3 #8–#12）+ Phase 1 5.8（06-status §4 清單；A/B mode 行為 + v4 真實
 >    token 顯示可一併驗）。
-> 4. Phase 3 可選後續（兩段式 summary / per-conversation 覆蓋 / 合併重摘要
+> 2. **N9 F5 / refresh 韌性**（06-status §3.28 / 05-N9 / §5e；規格定稿、未實做）。
+> 3. Phase 3 可選後續（兩段式 summary / per-conversation 覆蓋 / 合併重摘要
 >    提示 / summary 獨立 model / endpoint / gauge savings 顯示，見 05-§1；
 >    token 校準已被 v3/v4 取代）。
 >
-> **已完成並確認**（明細與決策見 06-status.md）：N11（compact request 前綴
-> 一致性：tool result 附件與 user input 同路徑 + full-path summary A4；
-> messages 陣列層——session 欄位層 `tools` / thinking kwargs 為 N11.4 待做）→ N10（in-loop cmp sibling 系統性
+> **已完成並確認**（明細與決策見 06-status.md）：N11.4（compact request session
+> 欄位一致性：`tools` / thinking kwargs thread 進壓縮路徑 + `preEncode` 同類修；
+> check + unit 全綠 2026-10-19）→ N11（compact request 前綴一致性：tool result
+> 附件與 user input 同路徑 + full-path summary A4；messages 陣列層）→ N10（in-loop cmp sibling 系統性
 > bug：`onCompaction` 推進 flow 接掛點 + 已損樹 migration）→ N8（第二次壓縮：plan 改在
 > effective path）→ N7（壓縮進行中：queue +
 > in-chat 指標列 + Stop）→ v4 真實 token 計數 → 雙 mode（共用 + A + B，
