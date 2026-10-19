@@ -318,12 +318,12 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 			},
 			{
 				defaultValue: 'prefix-stable',
-				help: 'How the summary payload is built. Prefix-stable sends the original messages (roles, tool calls, attachments intact) so repeated summaries of the same region reuse the KV-cache prefix; transcript (v1) sends a flat text transcript. Pick transcript if your server rejects the prefix-stable payload.',
+				help: 'How the summary payload is built. Prefix-stable sends the original messages (roles, tool calls, attachments intact) so repeated summaries of the same region reuse the KV-cache prefix; transcript sends a flat text transcript. Pick transcript if your server rejects the prefix-stable payload.',
 				key: SETTINGS_KEYS.CONTEXT_SUMMARY_MODE,
 				label: 'Summary mode',
 				options: [
 					{ icon: Layers, label: 'Prefix-stable (default)', value: 'prefix-stable' },
-					{ icon: FileText, label: 'Transcript (v1)', value: 'transcript' }
+					{ icon: FileText, label: 'Transcript', value: 'transcript' }
 				],
 				type: SettingsFieldType.SELECT
 			},
