@@ -87,13 +87,20 @@ function estimateAttachmentBytes(extra: DatabaseMessageExtra): number {
  * parts directly: text as UTF-8 bytes, one image part = 1000, audio/video
  * parts = 3000, tool calls by serialized bytes — the same heuristics as
  * {@link messageBytes}. Display material only (v4).
+ *
+ * A tool-call-only assistant turn legitimately carries no content at all:
+ * the converter omits the empty field to stay byte-identical with the
+ * in-flow push (the wire JSON has no content key), so
+ * `content === undefined` is a total case here — it prices as 0 and the
+ * row's bytes are the tool_calls JSON (+ reasoning) only. Display only; the
+ * wire shape is never altered by this.
  */
 export function apiMessageBytes(message: ApiChatMessageData): number {
 	let bytes = 0;
 
 	if (typeof message.content === 'string') {
 		bytes += byteLength(message.content);
-	} else {
+	} else if (Array.isArray(message.content)) {
 		for (const part of message.content) {
 			bytes += estimateContentPartBytes(part);
 		}

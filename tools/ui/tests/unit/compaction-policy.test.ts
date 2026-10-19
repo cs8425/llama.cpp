@@ -223,6 +223,19 @@ describe('apiMessageBytes (display-only byte count)', () => {
 		expect(apiMessageBytes(withExtras)).toBe(480);
 	});
 
+	it('prices a tool-call-only assistant (content omitted at runtime) as tool_calls bytes only', () => {
+		// The converter omits the empty content field for a tool-call-only
+		// assistant turn (byte-identical wire shape, N11); the declared type
+		// has no undefined, so the cast documents the type/runtime gap.
+		const toolCallOnly = {
+			role: MessageRole.ASSISTANT,
+			tool_calls: [{ function: { arguments: '{}', name: 'read_file' }, id: 'c1', type: 'function' }]
+		} as ApiChatMessageData;
+
+		// 80 (tool_calls JSON) — the withExtras vector minus content and reasoning
+		expect(apiMessageBytes(toolCallOnly)).toBe(80);
+	});
+
 	it('prices content parts: text by bytes, image flat 1000, audio/video flat 3000', () => {
 		const text: ApiChatMessageData = {
 			content: [{ text: T100, type: ContentPartType.TEXT }],

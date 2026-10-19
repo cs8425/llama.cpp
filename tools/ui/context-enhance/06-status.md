@@ -3,7 +3,14 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新，2026-10-19）**：**N12 Context Inspector 凍結——問題確認 + 修正方案定案、未實做；下一步 = 實做 N12（§5i）→ N11（+N11.4）手動驗收 → N9（未實做）**
+> **恢復點（最新，2026-10-19）**：**N12 Context Inspector 凍結——N12.1 source（3 檔 + 1 doc）+ N12.2 測試（unit 1 向量 + client 1 回歸）已實做；下一步 = 使用者跑 `npm run check` + unit `compaction-policy` + client `context-inspector` → N12.3 手動驗收 → N11（+N11.4）手動驗收 → N9（未實做）**
+> （N12 實做：`apiMessageBytes` 加 `undefined` 分支（0 bytes）+ doc comment；`contentText` 加
+> nullish 守衛；`sanitizePayload` 加 `content == null` pass-through；`ApiChatMessageData.content`
+> 加 JSDoc（runtime 可省略）；unit 新向量（tool-call-only assistant、`content: undefined` cast →
+> 80 bytes = tool_calls JSON only）；client 新「未 compact」fixture（tool-call-only assistant 落
+> **送出** payload）+ 4 斷言（5 列全 render / preview `(tool_calls: read_file)` / 可展開 / Copy JSON
+> 無 content key）。**wire shape 零改動**（`undefined`→`''` 會把 JSON 從「無 content key」變
+> `"content": ""` → KV cache prefix 斷）；明細 + 執行清單：§3.32 / §5i）。
 > （症狀：打開 Context Inspector 卡在 `Building payload…` 無限轉圈 + console
 > `Uncaught TypeError: t.content is not iterable`（= `apiMessageBytes`，bundle
 > `aqt`）。根因：`convertDbMessageToApiChatMessageData` 的 `omitEmptyContent`
@@ -22,10 +29,10 @@
 > 手動驗收未做，明細 §3.31 / §5h）。
 >
 > **待辦（依序）**：
-> 1. **N12 — Context Inspector 凍結（問題確認 + 方案定案 2026-10-19、未實做；§3.32 / §5i）**：
+> 1. **N12 — Context Inspector 凍結（source + 測試已實做 2026-10-19；待 `npm run check` + 測試 + 手動驗收；§3.32 / §5i）**：
 >    `apiMessageBytes` / `contentText` / `sanitizePayload` 對 `content === undefined`
 >    total function（視為空 / 0 bytes）+ JSDoc；unit + client 回歸（tool-call-only
->    assistant 在**送出** payload）；wire shape 零改動。
+>    assistant 在**送出** payload）；wire shape 零改動。剩：使用者編譯確認 + N12.3 手動驗收。
 > 2. **N11（+N11.4）手動驗收（未做；N11.4 已先完成、check + unit 全綠）**：MCP screenshot flow →
 >    連壓兩次 + F5 → compact request 與後續 turns 的 `cache_n` 皆高命中（gauge；
 >    N11.4 修後 compact request `cache_n` ≈ `prompt_n` 非 0 + 壓縮後下一 turn 高命中
@@ -66,7 +73,7 @@
 | N10 — in-loop compaction 的 cmp 被接成 sibling（系統性 bug；§3.29） | ✅ **完成並確認**（2026-10-18：N10.1 根因修（`onCompaction` callback + `lastCreatedInFlow` 推進）+ N10.2 已損樹修復（`findCompactionGraftFixes` 純函式 + `applyCompactionGraftFixes` IDB transaction + 啟動 migration `compaction-graft-fix-v1` + `loadConversation` 防禦層）+ N10.3 unit 5 向量（`tests/unit/branching.test.ts`）；`npm run check` + unit + 既有 5 支 client compaction suite 全綠；剩手動驗收（§4 清單）；執行清單 05-N10 / §5f） |
 | N11 — compact request 前綴一致性：tool result 附件被丟（N11.1）+ full-path summary（N11.2 = A4，§3.30） | ✅ **完成並確認**（2026-10-18：N11.1——轉換的 `extra → parts` 抽成 `ChatService.buildExtraContentParts`（固定序 / images 一律 cap / 無 gating）、tool+extra 不再 early-return 丟附件、in-flow 調同一 builder（順手修不 cap + 順序改 user input 路徑）、`toAgenticMessages` TOOL 分支直通、序列化對齊（assistant + tool_calls + 空 content → 省略 content 欄位）、清理 5 個 unused imports；`normalizeMessagesForApi` / `resolveOutgoingMessages` / `buildLlmContext` / `preEncode` / `sendMessage` / vision filter 全未動（D1：無 model 參數、無新 gating）；N11.2（A4）——`summarizeMessages` / `summarizeWithRetry` 收 `planPath`、prefix-stable payload = `buildLlmContext(planPath).messages` + instruction（刪自組裝）、transcript = `toSummarize + kept`、兩呼叫點傳 `planPath`（re-summarize = `effectiveCompactionPath(path)`）+ `summarizedCount = toSummarize + kept`（`chat:871` 不改）；N11.3——`tests/unit/summarize.test.ts` 依決定 B 修好（補 `planPath` + mock `convertDbMessageToApiChatMessageData` + payload assertions = `buildLlmContext(planPath).messages` + instruction）+ 新 `tests/unit/chat-conversion.test.ts`（真 ChatService、stores / cap mock：`buildExtraContentParts` 固定序 + cap / 轉換矩陣 / 空 content 三態 / in-flow ≡ DB rebuild byte-identity / 合成 fixture compact request = 最後 payload byte-prefix + instruction）；`npm run check` 0 錯 + unit `summarize` 28/28 / `chat-conversion` / `context-builder` 全綠（第一輪 4 type + 6 runtime 全在 `summarize.test.ts` 測試檔 2 處 desync、已修、來源碼零改動）；手動驗收未做（MCP screenshot → 連壓兩次 + F5 → `cache_n` 高命中，§4 清單）；執行清單 §5g） |
 | N11.4 — compact request session 欄位一致性：`tools` / thinking kwargs 未帶 → cache 完全失效（N11 後續；§3.31） | ✅ **完成並確認**（2026-10-19：compact request body 缺 agentic 主 payload 每 turn 都帶的 `tools`（`agentic:817`）→ chat template 把 tool definitions 渲染進 prompt 開頭 → 渲染 prompt 從 token 0 分岔 → KV cache 100% miss（session 最大 request 冷算）。N11 只保證 messages 陣列層一致性、session 欄位從未 thread 進壓縮路徑；次級分岔 = `enableThinking` / `reasoningEffort`（有設定時 agentic turn 帶 `chat_template_kwargs`、compact request 永不帶）；`preEncode`（`chat.service.ts:924–969`）同根因（`chat:697` / `chat:1834` 預熱與下一 agentic turn 不符）。實做：`SummarizeOptions` thread `tools` + thinking kwargs（prefix-stable only；in-loop 直接用 loop 的 `tools` 100% 精確；chat store `resolveSessionFields` 決定性重算、mirror `agentic:372–388` / `getApiOptions:422–428`）+ `preEncode` 加參（決定性：有 enabled tools 即每 turn 皆 agentic、無預熱歧義）+ 新 `agenticStore.resolveEnabledToolsForConversation`（放 agentic store 避免 tools store 循環 import）；5 source + 2 test 檔（summarize 3 新向量 + chat-conversion fixture 升級到 request body 層 3 用例）、加性參數、無新設定 / 無新 meta；`npm run check` + unit `summarize`（28→31）/ `chat-conversion`（fixture 升級 request body 層 +3 用例）/ `context-builder` / `compaction-policy` + 既有 5 支 client compaction suite 全綠（第一輪 7 型別錯 + 1 執行失敗全在測試端 / helper 型別標註、已修、來源邏輯零改動，見 §3.31 狀態）；**N11 手動驗收已可進行**（N11.4 已先完成）；執行清單 §5h） |
-| N12 — Context Inspector 凍結：`content: undefined`（tool-call-only assistant）display/estimation 未容忍（bug；§3.32） | ⬜ **問題確認 + 方案定案、未實做**（2026-10-19：`convertDbMessageToApiChatMessageData` 的 `omitEmptyContent`（`chat.service.ts:347–358`）對「tool_calls + 無文字」assistant turn 刻意輸出 `content: undefined`（mirror in-flow push `agentic:942`、byte-identical 要求 N11）→ `apiMessageBytes`（`compaction-policy.ts:91–109`，bundle `aqt`）`for...of undefined` 炸 → dialog `payloadRows` derived（`result.messages.map`）在 **render pass 內**炸 → uncaught（promise `.catch` 抓不到 render-time 錯誤）、DOM 卡 `Building payload…` spinner；同形狀：`contentText`（dialog:437，列 preview / 展開）+ `sanitizePayload`（dialog:538，Copy JSON）；觸發 = 送出 kept 區有 tool-call-only assistant 的任何 agentic 對話（既有 client 測試未抓到：fixture 的 tool-call-only assistant 落 dropped 區、走 DB-form preview）。修正 = 三消費端 total function（`undefined` = 空 content / 0 bytes）+ `ApiChatMessageData.content` JSDoc；**wire shape 不動**（`undefined`→`''` 會把 JSON 從「無 content key」變 `"content": ""` → KV cache prefix 斷）；3 source 檔 + 1 doc + 2 test 檔、皆加性守衛、零 wire 行為改變、無新設定；執行清單 §5i） |
+| N12 — Context Inspector 凍結：`content: undefined`（tool-call-only assistant）display/estimation 未容忍（bug；§3.32） | 🚧 **N12.1 + N12.2（source + 測試）已實做 2026-10-19、待使用者編譯確認**（`apiMessageBytes` 加 `undefined` 分支（0 bytes）+ doc comment；`contentText` 加 nullish 守衛；`sanitizePayload` 加 `content == null` pass-through；`ApiChatMessageData.content` JSDoc；unit `compaction-policy` 新向量（`content: undefined` cast → 80 bytes）；client `context-inspector` 新「未 compact」fixture + 4 斷言（5 列 render / preview / 展開 / Copy JSON 無 content key）；**wire shape 零改動**；`npm run check` + 兩測試檔 + N12.3 手動驗收未做；執行清單 §5i） |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
@@ -2407,6 +2414,11 @@ in-flow push（`agentic:942`）/ `buildLlmContext` / `normalizeMessagesForApi`
 
 - 2026-10-19：問題確認（根因鏈對 code 驗證 + sandbox 重現同錯訊息）+ 修正
   方案定案；**未實做**。執行清單 §5i。
+- 2026-10-19（下午）：N12.1 source（`compaction-policy.ts` / `DialogContextInspector.svelte`
+  / `api.d.ts`，3 檔 + 1 doc、皆加性守衛、wire shape 零改動）+ N12.2 測試（unit
+  `compaction-policy` 新向量 80 bytes + client `context-inspector` 新「未 compact」
+  fixture 5 列 + 4 斷言）已實做；**待使用者**：`npm run check` 0 錯 + unit
+  `compaction-policy` + client `context-inspector` 全綠 → N12.3 手動驗收。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -2966,28 +2978,29 @@ static async createCompactionMessage(params: {
 > 無新設定、無 API 變更。
 
 ### N12.1 source（3 檔 + 1 doc）
-- [ ] `compaction-policy.ts`：`apiMessageBytes` 加 `undefined` 分支（0 bytes）
+- [x] `compaction-policy.ts`：`apiMessageBytes` 加 `undefined` 分支（0 bytes）
       + doc comment（wire shape 說明）
-- [ ] `DialogContextInspector.svelte`：`contentText` 加 nullish 守衛；
+- [x] `DialogContextInspector.svelte`：`contentText` 加 nullish 守衛；
       `sanitizePayload` 加 `content == null` pass-through
-- [ ] `api.d.ts`：`ApiChatMessageData.content` 加 JSDoc（runtime 可省略）
-- [ ] **明確不改**：`convertDbMessageToApiChatMessageData` / `omitEmptyContent` /
+- [x] `api.d.ts`：`ApiChatMessageData.content` 加 JSDoc（runtime 可省略）
+- [x] **明確不改**：`convertDbMessageToApiChatMessageData` / `omitEmptyContent` /
       in-flow push（`agentic:942`）/ `buildLlmContext` / `normalizeMessagesForApi`
       / `resolveOutgoingMessages` / 切點 / budget / 雙 mode / 無新設定（全 wire
       shape）
 
 ### N12.2 測試
-- [ ] unit `compaction-policy.test.ts` → `apiMessageBytes` suite 新向量：
+- [x] unit `compaction-policy.test.ts` → `apiMessageBytes` suite 新向量：
       tool-call-only assistant、`content: undefined`（需 cast——cast 本身文件化
-      型別 / runtime 落差）→ 期望 bytes = tool_calls JSON bytes only
-- [ ] client `context-inspector.svelte.test.ts`：加「未 compact」fixture，讓
+      型別 / runtime 落差）→ 期望 bytes = tool_calls JSON bytes only（80）
+- [x] client `context-inspector.svelte.test.ts`：加「未 compact」fixture，讓
       tool-call-only assistant 落**送出的 payload**（system, user,
       assistant(tool_calls, `content: ''`), tool, finalAssistant）→ 斷言：
       ① 5 列全 render（spinner 消失、直接對症「卡住」）② 該列 preview =
       `(tool_calls: read_file)` ③ 該列可展開（覆蓋 `fullText`）④ Copy JSON
       輸出該訊息**無** `content` key（覆蓋 `sanitizePayload`）
+      （`openInspector` 參數化 `expectedRows`，預設 4 不變）
 - [ ] `npm run check` 0 錯 + unit `compaction-policy` + client
-      `context-inspector` 全綠
+      `context-inspector` 全綠（**使用者跑**）
 
 ### N12.3 驗收（使用者做）
 - [ ] agentic 對話（含 tool calls）→ 開 inspector → 列正常顯示（不卡

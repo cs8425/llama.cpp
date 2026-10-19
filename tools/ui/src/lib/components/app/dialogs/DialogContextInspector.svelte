@@ -435,6 +435,12 @@
 	}
 
 	function contentText(content: ApiChatMessageData['content']): string {
+		// A tool-call-only assistant turn carries no content at all (the
+		// converter omits the empty field to stay byte-identical with the
+		// wire): treat null/undefined as empty text — the row preview then
+		// falls back to (tool_calls: …) via apiPreviewText.
+		if (content == null) return '';
+
 		if (typeof content === 'string') return content;
 
 		return content
@@ -537,7 +543,10 @@
 	// placeholders in the copied JSON (the on-screen rows already do the same).
 	function sanitizePayload(messages: ApiChatMessageData[]): ApiChatMessageData[] {
 		return messages.map((message) => {
-			if (typeof message.content === 'string') return message;
+			// A tool-call-only assistant turn has no content key at all (the
+			// converter omits it to stay byte-identical with the wire) — pass
+			// it through untouched so JSON.stringify keeps the key absent.
+			if (typeof message.content === 'string' || message.content == null) return message;
 
 			return {
 				...message,

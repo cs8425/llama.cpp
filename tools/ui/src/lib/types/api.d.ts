@@ -56,6 +56,14 @@ export interface ApiErrorResponse {
 
 export interface ApiChatMessageData {
 	role: ChatRole;
+	/**
+	 * May be ABSENT at runtime: a tool-call-only assistant turn omits the
+	 * empty content field (the converter's `omitEmptyContent` mirrors the
+	 * in-flow push, so the wire JSON has no content key). Consumers that
+	 * read `content` must tolerate `undefined` (treat it as empty) — and
+	 * display/estimation code must never coerce it to `''` on a wire path,
+	 * which would add a `"content": ""` key and break the KV cache prefix.
+	 */
 	content: string | ApiChatMessageContentPart[];
 	reasoning_content?: string;
 	tool_calls?: ApiChatCompletionToolCall[];

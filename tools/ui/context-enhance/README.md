@@ -7,16 +7,19 @@
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
 > [06-status.md](./06-status.md)。
 >
-> **目前停點（2026-10-19）**：**N12 Context Inspector 凍結——問題確認 + 修正方案定案、未實做**
-> （打開 Context Inspector 卡在 `Building payload…` 無限轉圈 + console `Uncaught
-> TypeError: t.content is not iterable`：`convertDbMessageToApiChatMessageData`
+> **目前停點（2026-10-19）**：**N12 Context Inspector 凍結——source + 測試已實做、待編譯確認**
+> （問題：打開 Context Inspector 卡在 `Building payload…` 無限轉圈 + console
+> `Uncaught TypeError: t.content is not iterable`：`convertDbMessageToApiChatMessageData`
 > 的 `omitEmptyContent` 對「tool_calls + 無文字」assistant turn **刻意**輸出
 > `content: undefined`（與 in-flow push byte-identical、N11 要求）→
 > `apiMessageBytes`（bundle `aqt`）`for...of undefined` 炸 → dialog `payloadRows`
 > derived 在 render pass 內炸 → uncaught、DOM 卡 spinner；同形狀還有
-> `contentText` / `sanitizePayload`（列展開 / Copy JSON）。修正 = 三個 display
-> 消費端對 `content === undefined` total function（視為空 / 0 bytes），
-> **wire shape 不動**；明細 + 修正規劃：06-status §3.32 / §5i）
+> `contentText` / `sanitizePayload`（列展開 / Copy JSON）。修正（已實做）=
+> 三個 display 消費端對 `content === undefined` total function（視為空 / 0 bytes）
+> + `ApiChatMessageData.content` JSDoc，**wire shape 不動**；unit 1 向量 +
+> client 1 回歸（tool-call-only assistant 落送出 payload、4 斷言）已加；
+> **待**：`npm run check` + unit `compaction-policy` + client `context-inspector`
+> 全綠 + N12.3 手動驗收；明細 + 執行清單：06-status §3.32 / §5i）
 > （N11.4 已完成 2026-10-19：compact request session 欄位 `tools` / thinking
 > kwargs + `preEncode` 同類修；source + 測試 + `npm run check` + unit 全綠，
 > 明細見 06-status §3.31 / §5h；手動驗收未做、見待辦）
@@ -24,7 +27,9 @@
 > N11.2 = A4 full-path summary（compact request =
 > `buildLlmContext(effectivePath).messages` + instruction）+ N11.3 測試全綠，
 > 明細見 06-status §3.30 / §5g）
-> **待辦（依序）**：N12 source + 測試（規劃完成）→ N11（+N11.4）手動驗收
+> **待辦（依序）**：N12 編譯確認 + 手動驗收（source + 測試已實做；
+> agentic 對話開 inspector 不卡 + 展開 / Copy JSON 不炸 + 普通對話無回歸）
+> → N11（+N11.4）手動驗收
 > （MCP screenshot → 連壓兩次 + F5 → compact request 與後續 turns 的 `cache_n`
 > 皆高命中；N11.4 已完成、驗收應看到高命中；可與 N10/N8/N7/5.8 一併驗）→ N9（規格定稿、未實做）。
 > 本目錄兩份抓包 `before-trigger.json` / `compact-requset.json` 只作根因文檔證據（修後 wire 形狀刻意
@@ -45,7 +50,8 @@
 >   overflow guard，見 06-status §3.28 / 05-N9。
 >
 > **剩（依序）**：
-> 1. **N12 Context Inspector 凍結**（06-status §3.32 / §5i；問題確認 + 方案定案、未實做）。
+> 1. **N12 Context Inspector 凍結**（06-status §3.32 / §5i；source + 測試已實做 2026-10-19；
+>    待 `npm run check` + 兩測試檔 + 手動驗收）。
 > 2. **手動驗收（未做、可一併驗）**：N11 + N11.4（MCP screenshot →
 >    連壓兩次 + F5 → compact request 與後續 turns 的 `cache_n`
 >    皆高命中；N11.4 已先完成）

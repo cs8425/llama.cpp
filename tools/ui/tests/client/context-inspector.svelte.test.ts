@@ -109,6 +109,33 @@ function buildCompactedFixture(): {
 	return { assistant, cmp, kept, user };
 }
 
+/**
+ * Uncompacted path: system, user, assistant(tool_calls, no text) → tool,
+ * final assistant. The tool-call-only assistant lands in the SENT payload
+ * (API form with `content` omitted at runtime by the converter) — the N12
+ * regression case that used to freeze the dialog on "Building payload…".
+ */
+function buildUncompactedFixture(): { assistant: DatabaseMessage } {
+	const system = makeMessage({ content: 'You are helpful.', role: MessageRole.SYSTEM, type: MessageType.SYSTEM });
+	const user = makeMessage({ content: 'help me fix the bug' });
+	const assistant = makeMessage({
+		role: MessageRole.ASSISTANT,
+		toolCalls: JSON.stringify([
+			{
+				function: { arguments: '{}', name: 'read_file' },
+				id: 'call_1',
+				type: 'function'
+			}
+		])
+	});
+	const tool = makeMessage({ content: 'file contents', role: MessageRole.TOOL, toolCallId: 'call_1' });
+	const finalAssistant = makeMessage({ content: 'you are welcome', role: MessageRole.ASSISTANT });
+
+	conversationsStore.activeMessages = [system, user, assistant, tool, finalAssistant];
+
+	return { assistant };
+}
+
 // --- helpers ---------------------------------------------------------------
 
 async function waitFor<T extends Node>(find: () => T | null, timeoutMs = 5000): Promise<T> {
@@ -169,10 +196,10 @@ function setActiveConversation() {
 	} as unknown as DatabaseConversation;
 }
 
-async function openInspector() {
+async function openInspector(expectedRows = 4) {
 	const { unmount } = render(DialogContextInspector, { open: true });
 
-	await waitFor(() => (payloadRowButtons().length === 4 ? document.querySelector('[role="dialog"]') : null));
+	await waitFor(() => (payloadRowButtons().length === expectedRows ? document.querySelector('[role="dialog"]') : null));
 
 	return { unmount };
 }
@@ -314,6 +341,41 @@ describe('DialogContextInspector (read-only, Phase 1)', () => {
 
 		// feedback swaps the label
 		expect(dialogText()).toContain('Copied');
+
+		unmount();
+	});
+
+	it('renders an uncompacted payload with a tool-call-only assistant (N12)', async () => {
+		buildUncompactedFixture();
+		const { unmount } = await openInspector(5);
+
+		// ① all five rows render — the dialog does not freeze on
+		//    "Building payload…" (the N12 symptom)
+		expect(payloadRowButtons()).toHaveLength(5);
+		expect(dialogText()).not.toContain('Building payload');
+
+		// ② the tool-call-only assistant row previews its tool call
+		const assistantRow = payloadRowButtons()[2];
+		expect(assistantRow.textContent).toContain('(tool_calls: read_file)');
+
+		// ③ the row expands to the full text (tool_calls JSON, no content)
+		await userEvent.click(assistantRow);
+		const pre = await waitFor(() => document.querySelector('[role="dialog"] pre'));
+		expect(pre.textContent).toContain('read_file');
+
+		// ④ Copy JSON keeps the content key ABSENT for that message
+		//    (wire shape: no content key, not "content": "")
+		const { writeText } = mockClipboard();
+		const copyButton = findDialogButton('Copy JSON');
+		await userEvent.click(copyButton!);
+		await waitFor(() => findDialogButton('Copied'));
+
+		expect(writeText).toHaveBeenCalledTimes(1);
+		const payload = JSON.parse(writeText.mock.calls[0][0] as string) as Array<Record<string, unknown>>;
+		expect(payload).toHaveLength(5);
+		expect(payload[2].role).toBe('assistant');
+		expect(payload[2]).not.toHaveProperty('content');
+		expect(payload[2]).toHaveProperty('tool_calls');
 
 		unmount();
 	});
