@@ -495,11 +495,50 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 		settings: [
 			{
 				defaultValue: 10,
-				help: 'Maximum number of tool execution cycles before stopping (prevents infinite loops).',
+				help: 'Maximum number of tool execution cycles before stopping (prevents infinite loops). 0 or a negative number = unlimited.',
 				isPositiveInteger: true,
 				key: SETTINGS_KEYS.AGENTIC_MAX_TURNS,
 				label: 'Agentic turns',
+				min: 0,
 				type: SettingsFieldType.INPUT
+			},
+			{
+				defaultValue: 0,
+				help: 'Soft wall-time limit for an agentic flow. When reached, the flow pauses after the current turn (LLM + tools) completes and asks whether to continue. 0 = unlimited.',
+				key: SETTINGS_KEYS.AGENTIC_SOFT_TIME_LIMIT,
+				label: 'Agentic soft time limit',
+				type: SettingsFieldType.INPUT
+			},
+			{
+				defaultValue: 'm',
+				help: 'Unit for the agentic soft time limit.',
+				key: SETTINGS_KEYS.AGENTIC_SOFT_TIME_LIMIT_UNIT,
+				label: 'Soft time limit unit',
+				options: [
+					{ label: 'Seconds (s)', value: 's' },
+					{ label: 'Minutes (m)', value: 'm' },
+					{ label: 'Hours (h)', value: 'h' }
+				],
+				type: SettingsFieldType.SELECT
+			},
+			{
+				defaultValue: 0,
+				help: 'Hard wall-time limit for an agentic flow. When reached mid-turn, the in-flight LLM call is aborted immediately (same as pressing Stop). 0 = unlimited.',
+				key: SETTINGS_KEYS.AGENTIC_HARD_TIME_LIMIT,
+				label: 'Agentic hard time limit',
+				type: SettingsFieldType.INPUT
+			},
+			{
+				defaultValue: 'm',
+				help: 'Unit for the agentic hard time limit.',
+				key: SETTINGS_KEYS.AGENTIC_HARD_TIME_LIMIT_UNIT,
+				label: 'Hard time limit unit',
+				options: [
+					{ label: 'Seconds (s)', value: 's' },
+					{ label: 'Minutes (m)', value: 'm' },
+					{ label: 'Hours (h)', value: 'h' }
+				],
+				type: SettingsFieldType.SELECT
 			},
 			{
 				defaultValue: DEFAULT_MCP_CONFIG.requestTimeoutSeconds,

@@ -94,7 +94,9 @@ import {
 	executeGetDatetimeTool,
 	filterByLeafNodeId,
 	getConversationModel,
-	isAbortError
+	isAbortError,
+	parseAgenticTimeLimitMs,
+	parseAgenticTurnLimit
 } from '$lib/utils';
 import { SvelteMap } from 'svelte/reactivity';
 import { toast } from 'svelte-sonner';
@@ -219,7 +221,18 @@ class AgenticStore {
 	}
 
 	getConfig(settings: SettingsConfigType): AgenticConfig {
-		const maxTurns = Number(settings.agenticMaxTurns) || DEFAULT_AGENTIC_CONFIG.maxTurns;
+		const maxTurns = parseAgenticTurnLimit(
+			settings.agenticMaxTurns,
+			DEFAULT_AGENTIC_CONFIG.maxTurns
+		);
+		const softTimeLimitMs = parseAgenticTimeLimitMs(
+			settings.agenticSoftTimeLimit,
+			settings.agenticSoftTimeLimitUnit
+		);
+		const hardTimeLimitMs = parseAgenticTimeLimitMs(
+			settings.agenticHardTimeLimit,
+			settings.agenticHardTimeLimitUnit
+		);
 		const hasTools =
 			mcpStore.hasEnabledServers() ||
 			toolsStore.serverTools.length > 0 ||
@@ -228,7 +241,9 @@ class AgenticStore {
 
 		return {
 			enabled: hasTools && DEFAULT_AGENTIC_CONFIG.enabled,
-			maxTurns
+			hardTimeLimitMs,
+			maxTurns,
+			softTimeLimitMs
 		};
 	}
 

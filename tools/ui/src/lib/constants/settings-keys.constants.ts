@@ -5,7 +5,11 @@
  * in settings field configurations to ensure consistency.
  */
 export const SETTINGS_KEYS = {
+	AGENTIC_HARD_TIME_LIMIT: 'agenticHardTimeLimit',
+	AGENTIC_HARD_TIME_LIMIT_UNIT: 'agenticHardTimeLimitUnit',
 	AGENTIC_MAX_TURNS: 'agenticMaxTurns',
+	AGENTIC_SOFT_TIME_LIMIT: 'agenticSoftTimeLimit',
+	AGENTIC_SOFT_TIME_LIMIT_UNIT: 'agenticSoftTimeLimitUnit',
 	ALWAYS_SHOW_SIDEBAR_ON_DESKTOP: 'alwaysShowSidebarOnDesktop',
 	ALWAYS_SHOW_TOOL_CALL_CONTENT: 'alwaysShowToolCallContent',
 	API_KEY: 'apiKey',

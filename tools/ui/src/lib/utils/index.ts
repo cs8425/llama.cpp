@@ -274,6 +274,8 @@ export {
 export {
 	deriveAgenticSections,
 	buildAssistantRawOutput,
+	parseAgenticTimeLimitMs,
+	parseAgenticTurnLimit,
 	parseToolResultWithMedia,
 	splitSearchSummaryList,
 	hasAgenticContent,

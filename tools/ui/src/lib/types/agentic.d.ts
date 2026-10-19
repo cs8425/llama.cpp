@@ -23,7 +23,12 @@ import { AgenticSectionType, ContinueIntentKind, ToolCallType } from '$lib/enums
  */
 export interface AgenticConfig {
 	enabled: boolean;
+	/** Turn limit; `Number.POSITIVE_INFINITY` = unlimited. */
 	maxTurns: number;
+	/** Soft wall-time budget in ms; `0` = unlimited (unit folded to ms in getConfig). */
+	softTimeLimitMs: number;
+	/** Hard wall-time budget in ms; `0` = unlimited (unit folded to ms in getConfig). */
+	hardTimeLimitMs: number;
 }
 
 /**
@@ -181,6 +186,12 @@ export interface AgenticFlowParams {
 	callbacks: AgenticFlowCallbacks;
 	signal?: AbortSignal;
 	toolPolicy?: AgenticToolPolicy;
+	/**
+	 * Called when the hard time limit fires during an in-flight LLM call.
+	 * Implementation = the same abort path as a user pressing Stop
+	 * (context-enhance/07 D3), so the hard stop is path-equivalent to a manual stop.
+	 */
+	onHardLimit?: () => void;
 }
 
 /**
