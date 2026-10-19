@@ -50,7 +50,7 @@ import { SandboxService } from '$lib/services/sandbox.service';
 import { ToolsService } from '$lib/services/tools.service';
 // direct imports between stores, not via the barrel, to avoid circular deps
 import { AgenticGates } from '$lib/stores/agentic/gates.svelte';
-import type { CompactionDecisionRequest } from '$lib/stores/agentic/gates.svelte';
+import type { AgenticContinueReason, CompactionDecisionRequest } from '$lib/stores/agentic/gates.svelte';
 import { contextStatsStore } from '$lib/stores/chat/context-stats.svelte';
 import { conversationsStore } from '$lib/stores/conversations/index.svelte';
 import { mcpStore } from '$lib/stores/mcp/index.svelte';
@@ -198,6 +198,8 @@ class AgenticStore {
 		conversationsStore.onConversationsDeleted((convIds) => {
 			for (const convId of convIds) {
 				this.sessions.delete(convId);
+				// also drop pending gate state (incl. the hard-limit notice, 07 §4.5 #5)
+				this.gates.clear(convId);
 			}
 		});
 	}
@@ -269,8 +271,18 @@ class AgenticStore {
 		return this.sessions.get(conversationId)?.liveLlm ?? null;
 	}
 
-	getPendingContinueRequest(conversationId: string): boolean {
+	getPendingContinueRequest(conversationId: string): AgenticContinueReason | null {
 		return this.gates.getPendingContinueRequest(conversationId);
+	}
+
+	/** The hard-limit notice for a conversation, or null when none is shown (07 D8). */
+	getHardLimitNotice(conversationId: string): { at: number } | null {
+		return this.gates.getHardLimitNotice(conversationId);
+	}
+
+	/** Dismiss the hard-limit notice row (07 D8). */
+	clearHardLimitNotice(conversationId: string): void {
+		this.gates.clearHardLimitNotice(conversationId);
 	}
 
 	/** The pending over-target compaction request (the decision card's data), or null. */
@@ -381,6 +393,7 @@ class AgenticStore {
 			conversationId,
 			flowRootMessageId,
 			messages,
+			onHardLimit,
 			options = {},
 			signal,
 			toolPolicy
@@ -455,6 +468,7 @@ class AgenticStore {
 				callbacks,
 				conversationId,
 				messages: normalizedMessages,
+				onHardLimit,
 				options,
 				signal,
 				tools
@@ -723,8 +737,19 @@ class AgenticStore {
 		agenticConfig: AgenticConfig;
 		callbacks: AgenticFlowCallbacks;
 		signal?: AbortSignal;
+		/** Aborts the in-flight LLM call when the hard time limit fires (07 §4.4). */
+		onHardLimit?: () => void;
 	}): Promise<void> {
-		const { agenticConfig, callbacks, conversationId, messages, options, signal, tools } = params;
+		const {
+			agenticConfig,
+			callbacks,
+			conversationId,
+			messages,
+			onHardLimit,
+			options,
+			signal,
+			tools
+		} = params;
 		const {
 			createAssistantMessage,
 			createToolResultMessage,
@@ -754,14 +779,22 @@ class AgenticStore {
 			turns: 0
 		};
 		const maxTurns = agenticConfig.maxTurns;
+		const softTimeLimitMs = agenticConfig.softTimeLimitMs;
+		const hardTimeLimitMs = agenticConfig.hardTimeLimitMs;
 		const effectiveModel = options.model || modelsStore.models[0]?.model || '';
 
 		let turn = 0;
+		// Wall-time budget for the flow (07 D4/D7). `flowStart` is reset on every
+		// Continue (new budget) and on flow start; `hardLimitHit` is set only by
+		// the hard timer to distinguish a hard-limit stop from a manual Stop.
+		let flowStart = Date.now();
+		let hardLimitHit = false;
 
 		while (true) {
+			// 1. Turn-limit gate (07 D1). Continue resets the turn counter AND the
+			//    time budget (D7).
 			if (turn >= maxTurns) {
-				// Turn limit reached - ask user whether to continue
-				const shouldContinue = await this.gates.requestContinue(conversationId, signal);
+				const shouldContinue = await this.gates.requestContinue(conversationId, signal, 'turns');
 
 				// Yield to allow Svelte to flush the UI update
 				await new Promise((r) => setTimeout(r, 0));
@@ -772,8 +805,54 @@ class AgenticStore {
 					return;
 				}
 
-				// User chose to continue - extend the limit
+				// User chose to continue - extend the limit and start a fresh budget
 				turn = 0;
+				flowStart = Date.now();
+			}
+
+			// 2. Soft time-limit gate (07 D5): checked after a full turn, at the
+			//    loop top. The clock keeps running while the user decides.
+			if (softTimeLimitMs > 0 && Date.now() - flowStart >= softTimeLimitMs) {
+				const shouldContinue = await this.gates.requestContinue(
+					conversationId,
+					signal,
+					'softTime'
+				);
+
+				// Yield to allow Svelte to flush the UI update
+				await new Promise((r) => setTimeout(r, 0));
+
+				if (!shouldContinue || signal?.aborted) {
+					onFlowComplete?.(this.buildFinalTimings(capturedTimings, agenticTimings));
+
+					return;
+				}
+
+				// User chose to continue - start a fresh budget (D7)
+				flowStart = Date.now();
+			}
+
+			// 3. Hard time-limit boundary check (07 D6): the limit was reached at a
+			//    clean boundary (no in-flight LLM call). Stop directly, no rerun
+			//    card, only the in-chat notice row.
+			if (hardTimeLimitMs > 0 && Date.now() - flowStart >= hardTimeLimitMs) {
+				this.gates.setHardLimitNotice(conversationId, Date.now());
+				onFlowComplete?.(this.buildFinalTimings(capturedTimings, agenticTimings));
+
+				return;
+			}
+
+			// 4. Arm the hard timer for the in-flight LLM call (07 §4.3). It fires
+			//    mid-call, calls onHardLimit() (the manual-Stop path), and sets
+			//    hardLimitHit so the abort below is recognised as a hard-limit stop.
+			let hardTimer: ReturnType<typeof setTimeout> | undefined;
+			if (hardTimeLimitMs > 0) {
+				const remaining = hardTimeLimitMs - (Date.now() - flowStart);
+
+				hardTimer = setTimeout(() => {
+					hardLimitHit = true;
+					onHardLimit?.();
+				}, Math.max(0, remaining));
 			}
 
 			this.updateSession(conversationId, { currentTurn: turn + 1 });
@@ -890,6 +969,11 @@ class AgenticStore {
 				}
 			} catch (error) {
 				if (signal?.aborted) {
+					// A hard-limit stop (not a manual Stop) surfaces the in-chat notice row (07 D6/D8)
+					if (hardLimitHit) {
+						this.gates.setHardLimitNotice(conversationId, Date.now());
+					}
+
 					// Save whatever we have for this turn before exiting
 					await onAssistantTurnComplete?.(
 						turnContent,
@@ -914,6 +998,9 @@ class AgenticStore {
 				onFlowComplete?.(this.buildFinalTimings(capturedTimings, agenticTimings));
 
 				throw normalizedError;
+			} finally {
+				// Always disarm the hard timer once the in-flight call has settled
+				if (hardTimer) clearTimeout(hardTimer);
 			}
 
 			// If the abort landed while ChatService.sendMessage was still resolving, the
@@ -921,6 +1008,10 @@ class AgenticStore {
 			// and returns normally. Bail out here so a half-received tool_call (truncated
 			// arguments JSON) is not persisted as if it were complete.
 			if (signal?.aborted) {
+				if (hardLimitHit) {
+					this.gates.setHardLimitNotice(conversationId, Date.now());
+				}
+
 				await onAssistantTurnComplete?.(
 					turnContent,
 					turnReasoningContent || undefined,

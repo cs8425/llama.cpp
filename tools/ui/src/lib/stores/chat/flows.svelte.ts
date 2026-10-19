@@ -684,8 +684,12 @@ export class ChatMessageFlows {
 	 * next_turn, meaning the target assistant already has its tool_calls paired
 	 * with trailing tool results and the next thing to generate is a brand new
 	 * turn rather than a token level continuation.
+	 *
+	 * Also the Resume path for a hard time-limit stop (07 §4.6): the caller passes
+	 * the active path's tail index so the loop resumes from the path tail with a
+	 * fresh turn counter and time budget.
 	 */
-	private async continueAsNextAgenticTurn(anchorIndex: number): Promise<void> {
+	async continueAsNextAgenticTurn(anchorIndex: number): Promise<void> {
 		const activeConv = conversationsStore.activeConversation;
 
 		if (!activeConv) return;

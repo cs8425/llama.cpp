@@ -16,6 +16,12 @@ import type { DatabaseMessageExtra, SteeringMessage } from '$lib/types';
 import { SvelteMap } from 'svelte/reactivity';
 
 /**
+ * Reason an agentic loop is pausing for a “continue?” decision (07 D3/D5):
+ * `turns` = the turn-count limit, `softTime` = the soft wall-time limit.
+ */
+export type AgenticContinueReason = 'turns' | 'softTime';
+
+/**
  * The pending over-target compaction request (both modes; the shared gate,
  * 02-data-model §6). The card displays `postSize` vs `target` and the
  * attempts already made; the loop awaits the decision.
@@ -35,8 +41,12 @@ export interface CompactionDecisionRequest {
 export class AgenticGates {
 	/** Resolve functions for pending continue Promises; nothing derives from this map */
 	private continueResolvers = new SvelteMap<string, (shouldContinue: boolean) => void>();
-	/** Dedicated reactive state for pending continue requests (turn limit reached) */
-	private pendingContinueRequests = new SvelteMap<string, boolean>();
+	/**
+	 * Dedicated reactive state for pending continue requests. The value is the
+	 * reason the loop paused (`turns` | `softTime`), or `null` when none is
+	 * pending (07 D3/D5).
+	 */
+	private pendingContinueRequests = new SvelteMap<string, AgenticContinueReason | null>();
 
 	/** Resolve functions for pending compaction-decision Promises; nothing derives from this map */
 	private compactionDecisionResolvers = new SvelteMap<
@@ -58,16 +68,24 @@ export class AgenticGates {
 	private steeringMessages = new SvelteMap<string, SteeringMessage>();
 
 	/**
+	 * In-chat persistent notice set when a hard time limit stops the flow
+	 * (07 D8). `{ at }` is the `Date.now()` timestamp when the limit fired; the
+	 * UI renders the Resume/Dismiss row while this is non-null.
+	 */
+	private hardLimitNotices = new SvelteMap<string, { at: number } | null>();
+
+	/**
 	 * Drop all pending gate state for a conversation, e.g. when a flow exits.
 	 */
 	clear(conversationId: string): void {
 		this.pendingPermissions.set(conversationId, null);
 		this.permissionResolvers.delete(conversationId);
-		this.pendingContinueRequests.set(conversationId, false);
+		this.pendingContinueRequests.set(conversationId, null);
 		this.continueResolvers.delete(conversationId);
 		this.pendingCompactionDecisions.set(conversationId, null);
 		this.compactionDecisionResolvers.delete(conversationId);
 		this.steeringMessages.delete(conversationId);
+		this.hardLimitNotices.set(conversationId, null);
 	}
 
 	/**
@@ -91,8 +109,23 @@ export class AgenticGates {
 		return msg;
 	}
 
-	getPendingContinueRequest(conversationId: string): boolean {
-		return this.pendingContinueRequests.get(conversationId) ?? false;
+	getPendingContinueRequest(conversationId: string): AgenticContinueReason | null {
+		return this.pendingContinueRequests.get(conversationId) ?? null;
+	}
+
+	/** The hard-limit notice for a conversation, or null when none is shown (07 D8). */
+	getHardLimitNotice(conversationId: string): { at: number } | null {
+		return this.hardLimitNotices.get(conversationId) ?? null;
+	}
+
+	/** Set the hard-limit notice (called at the two hard-stop points, 07 §4.3). */
+	setHardLimitNotice(conversationId: string, at: number): void {
+		this.hardLimitNotices.set(conversationId, { at });
+	}
+
+	/** Clear the hard-limit notice (Dismiss / Resume / new flow / deletion). */
+	clearHardLimitNotice(conversationId: string): void {
+		this.hardLimitNotices.set(conversationId, null);
 	}
 
 	/** The pending over-target compaction request (the card's data), or null. */
@@ -130,19 +163,23 @@ export class AgenticGates {
 		this.steeringMessages.set(conversationId, { content, extras });
 	}
 
-	async requestContinue(conversationId: string, signal?: AbortSignal): Promise<boolean> {
-		this.pendingContinueRequests.set(conversationId, true);
+	async requestContinue(
+		conversationId: string,
+		signal?: AbortSignal,
+		reason: AgenticContinueReason = 'turns'
+	): Promise<boolean> {
+		this.pendingContinueRequests.set(conversationId, reason);
 
 		return new Promise<boolean>((resolve) => {
 			if (signal?.aborted) {
-				this.pendingContinueRequests.set(conversationId, false);
+				this.pendingContinueRequests.set(conversationId, null);
 				resolve(false);
 
 				return;
 			}
 
 			this.continueResolvers.set(conversationId, (shouldContinue) => {
-				this.pendingContinueRequests.set(conversationId, false);
+				this.pendingContinueRequests.set(conversationId, null);
 				resolve(shouldContinue);
 			});
 
@@ -153,7 +190,7 @@ export class AgenticGates {
 
 					if (resolver) {
 						this.continueResolvers.delete(conversationId);
-						this.pendingContinueRequests.set(conversationId, false);
+						this.pendingContinueRequests.set(conversationId, null);
 						resolve(false);
 					}
 				},

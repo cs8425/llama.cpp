@@ -1547,6 +1547,8 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 	setChatLoading(convId: string, loading: boolean): void {
 		if (loading) {
 			this.activity.markLocal(convId);
+			// Any new generation supersedes a stale hard-limit notice (07 §4.5 #3)
+			agenticStore.clearHardLimitNotice(convId);
 		} else {
 			this.activity.localEnded(convId);
 			this.setChatReasoning(convId, false);
@@ -1605,6 +1607,29 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		this.clearChatStreaming(convId);
 		this.processing.setState(convId, null);
 		this.clearPendingMessage(convId);
+	}
+
+	/**
+	 * Resume an agentic flow from the active conversation's path tail after a
+	 * hard time-limit stop (07 §4.6 / D9). Opens a fresh assistant turn under the
+	 * tail so `streamChatCompletion` routes through `runAgenticFlow` with a fresh
+	 * turn counter and time budget. The in-chat notice row is cleared first.
+	 */
+	async resumeAgenticFlowFromTail(): Promise<void> {
+		const activeConv = conversationsStore.activeConversation;
+
+		if (!activeConv) return;
+
+		const messages = conversationsStore.activeMessages;
+
+		if (messages.length === 0) return;
+
+		const tailIndex = messages.length - 1;
+
+		// Dismiss the notice before the new flow starts (07 §4.5 #2)
+		agenticStore.clearHardLimitNotice(activeConv.id);
+
+		await this.flows.continueAsNextAgenticTurn(tailIndex);
 	}
 
 	async streamChatCompletion(
@@ -1954,6 +1979,8 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				conversationId: convId,
 				flowRootMessageId: assistantMessage.id,
 				messages: allMessages,
+				// Hard time-limit abort reuses the manual-Stop path (07 §4.4)
+				onHardLimit: () => this.stopGenerationForChat(convId),
 				options: {
 					...this.getApiOptions(),
 					...(effectiveModel ? { model: effectiveModel } : {})
