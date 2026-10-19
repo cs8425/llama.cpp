@@ -31,7 +31,8 @@ import type {
 	DatabaseMessageExtraImageFile
 } from '$lib/types/database';
 import { capImageDataURLSize } from '$lib/utils/cap-img-size';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { OpenAIToolDefinition } from '$lib/types';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('$lib/stores/models/index.svelte', () => ({
 	modelsStore: { props: { modelSupportsVision: vi.fn(() => true) } }
@@ -352,7 +353,7 @@ function screenshotPath(): DatabaseMessage[] {
  * (fetch captured) so the wire shape is the oracle.
  */
 describe('compact request body = last live body + instruction (N11.2 / N11.4)', () => {
-	const tools = [
+	const tools: OpenAIToolDefinition[] = [
 		{
 			function: { description: 'Take a screenshot', name: 'mcp_screenshot', parameters: { type: 'object' } },
 			type: 'function'

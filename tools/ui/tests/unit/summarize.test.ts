@@ -25,7 +25,7 @@ import {
 } from '$lib/services/context/summarize';
 import type { CompactionSummaryGate, SummarizeWithRetryOptions } from '$lib/services/context/summarize';
 import type { CompactionPlan } from '$lib/services/context/types';
-import type { ChatMessageTimings, SettingsChatServiceOptions } from '$lib/types';
+import type { ChatMessageTimings, OpenAIToolDefinition, SettingsChatServiceOptions } from '$lib/types';
 import type { ApiChatMessageData } from '$lib/types/api';
 import type { DatabaseMessage } from '$lib/types/database';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -364,7 +364,7 @@ describe('summarizeMessages (session fields, N11.4)', () => {
 		vi.clearAllMocks();
 	});
 
-	const tools = [
+	const tools: OpenAIToolDefinition[] = [
 		{ function: { name: 'read_file', parameters: { type: 'object' } }, type: 'function' },
 		{ function: { name: 'write_file', parameters: { type: 'object' } }, type: 'function' }
 	];

@@ -346,8 +346,10 @@ class AgenticStore {
 	 */
 	resolveEnabledToolsForConversation(convId: string | null): OpenAIToolDefinition[] {
 		const conv = convId ? conversationsStore.conversations.find((c) => c.id === convId) : undefined;
-		const disabledTools = new Set(conv ? (conv.disabledTools ?? []) : [...toolsStore.disabledTools]);
-		const disabledToolCategories = new Set(
+		const disabledTools = new Set<string>(
+			conv ? (conv.disabledTools ?? []) : [...toolsStore.disabledTools]
+		);
+		const disabledToolCategories = new Set<ToolSource>(
 			conv ? (conv.disabledToolCategories ?? []) : [...toolsStore.disabledToolCategories]
 		);
 
