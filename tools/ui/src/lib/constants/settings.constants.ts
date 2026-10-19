@@ -4,6 +4,7 @@ import { SETTINGS_KEYS } from './settings-keys.constants';
 import { TITLE_GENERATION } from './title-generation.constants';
 import { FILE_GLOB_SEARCH_PICKERS } from './working-directory.constants';
 import {
+	CalendarClock,
 	Code,
 	Clock,
 	Database,
@@ -16,7 +17,8 @@ import {
 	Moon,
 	PencilRuler,
 	SlidersVertical,
-	Sun
+	Sun,
+	Timer
 } from '@lucide/svelte';
 import { SyncableParameterType } from '$lib/enums';
 import { SettingsFieldType } from '$lib/enums/settings.enums';
@@ -515,9 +517,9 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 				key: SETTINGS_KEYS.AGENTIC_SOFT_TIME_LIMIT_UNIT,
 				label: 'Soft time limit unit',
 				options: [
-					{ label: 'Seconds (s)', value: 's' },
-					{ label: 'Minutes (m)', value: 'm' },
-					{ label: 'Hours (h)', value: 'h' }
+					{ icon: Timer, label: 'Seconds (s)', value: 's' },
+					{ icon: Clock, label: 'Minutes (m)', value: 'm' },
+					{ icon: CalendarClock, label: 'Hours (h)', value: 'h' }
 				],
 				type: SettingsFieldType.SELECT
 			},
@@ -534,9 +536,9 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 				key: SETTINGS_KEYS.AGENTIC_HARD_TIME_LIMIT_UNIT,
 				label: 'Hard time limit unit',
 				options: [
-					{ label: 'Seconds (s)', value: 's' },
-					{ label: 'Minutes (m)', value: 'm' },
-					{ label: 'Hours (h)', value: 'h' }
+					{ icon: Timer, label: 'Seconds (s)', value: 's' },
+					{ icon: Clock, label: 'Minutes (m)', value: 'm' },
+					{ icon: CalendarClock, label: 'Hours (h)', value: 'h' }
 				],
 				type: SettingsFieldType.SELECT
 			},
