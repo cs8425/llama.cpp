@@ -1,6 +1,11 @@
 <script lang="ts">
 	import LazyChatMessage from './LazyChatMessage.svelte';
-	import { ChatCompactionDecisionCard, ChatMessageCompacting, ChatMessageUserPending } from '$lib/components/app';
+	import {
+		ChatCompactionDecisionCard,
+		ChatMessageAgenticLimitNotice,
+		ChatMessageCompacting,
+		ChatMessageUserPending
+	} from '$lib/components/app';
 	import { MessageRole, MessageType } from '$lib/enums';
 	import type { CompactionDecision } from '$lib/services/context';
 	import { agenticStore, chatStore, conversationsStore, settingsStore } from '$lib/stores';
@@ -291,6 +296,9 @@
 			{:else}
 				<ChatMessageCompacting class="mx-auto mt-12 w-full max-w-3xl" />
 			{/if}
+
+			<!-- Hard time-limit notice row (07 D8): persistent, no toast; self-hides when no notice -->
+			<ChatMessageAgenticLimitNotice class="mx-auto mt-12 w-full max-w-3xl" />
 		{/if}
 
 		{#if conversationsStore.activeConversation && agenticStore.getPendingSteeringMessageContent(conversationsStore.activeConversation!.id)}

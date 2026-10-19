@@ -70,7 +70,7 @@
 	const pendingContinue = $derived(
 		isStreaming && isLastAssistantMessage
 			? agenticStore.getPendingContinueRequest(message.convId)
-			: false
+			: null
 	);
 
 	let continueDismissed = $state(false);
@@ -265,7 +265,7 @@
 	{/if}
 
 	{#if showContinue}
-		<ChatMessageActionCardContinueRequest onDecision={handleContinue} />
+		<ChatMessageActionCardContinueRequest onDecision={handleContinue} reason={pendingContinue ?? 'turns'} />
 	{/if}
 
 	{#if visibleCompaction}

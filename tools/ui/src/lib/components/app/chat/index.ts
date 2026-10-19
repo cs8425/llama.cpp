@@ -582,6 +582,14 @@ export { default as ChatMessageCompaction } from './ChatMessages/ChatMessage/Cha
 export { default as ChatMessageCompacting } from './ChatMessages/ChatMessageCompacting.svelte';
 
 /**
+ * In-chat persistent notice row shown when an agentic flow is stopped by the
+ * hard time limit (07 D8). Offers Resume (continue from the path tail) and
+ * Dismiss. Rendered as an independent row at the end of the message list, the
+ * same anchor as the compaction indicator.
+ */
+export { default as ChatMessageAgenticLimitNotice } from './ChatMessages/ChatMessageAgenticLimitNotice.svelte';
+
+/**
  * Generic wrapper for UI-generated (synthetic) messages. Routes the
  * working-directory change to ChatMessageCwdChange and renders a muted
  * fallback for any other synthetic text, so no synthetic message ever
