@@ -79,6 +79,7 @@
 | [04-ui.md](./04-ui.md) | UI 改動:compaction entry 渲染、「LLM 實際看到什麼」inspector、人工介入(編輯/移動斷點/手動壓縮)、context gauge、settings |
 | [05-implementation-plan.md](./05-implementation-plan.md) | 分階段實施計畫、檔案清單(新增/修改)、測試計畫、風險與取捨、驗收標準 |
 | [06-status.md](./06-status.md) | **實做狀態(continuity doc)**:Phase 0/1/2 交付明細、設計決策、驗證狀態、Phase 1 與 Phase 2 執行清單 |
+| [07-agentic-limits.md](./07-agentic-limits.md) | **相鄰功能(非 compaction 工作流)**:agentic loop guard — `agenticMaxTurns` 0/負數 = 無限制 + wall-time soft/hard limit(soft = turn 邊界 continue 卡片;hard = 直接中斷 in-flight LLM call、等同手動 Stop)+ in-chat 常駐通知列(Resume = 從路徑尾端續跑 loop)。規格定稿 2026-10-19、未實做 |
 
 ## TL;DR — 核心決策
 
