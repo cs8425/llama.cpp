@@ -29,13 +29,18 @@ import {
 	AttachmentType,
 	ContentPartType,
 	MessageRole,
+	ReasoningEffort,
 	ReasoningFormat,
 	StreamConnectionState
 } from '$lib/enums';
 import { buildLlmContext } from '$lib/services/context';
 import { modelsStore } from '$lib/stores/models/index.svelte';
 import { settingsStore } from '$lib/stores/settings/index.svelte';
-import type { DatabaseMessageExtraMcpPrompt, DatabaseMessageExtraMcpResource } from '$lib/types';
+import type {
+	DatabaseMessageExtraMcpPrompt,
+	DatabaseMessageExtraMcpResource,
+	OpenAIToolDefinition
+} from '$lib/types';
 import type {
 	ApiChatCompletionToolCall,
 	ApiChatMessageContentPart,
@@ -920,12 +925,20 @@ export class ChatService {
 	 * Fire-and-forget request to pre-encode the conversation in the server's KV cache.
 	 * Re-submits the full conversation with n_predict=0 so the server processes the prompt
 	 * without generating tokens, warming the cache for the next turn.
+	 *
+	 * N11.4: the session-level wire fields (tools / thinking kwargs) must match
+	 * the next turn's — with enabled tools every turn is agentic and carries
+	 * them, so the warmed prompt stays the next turn's rendered prefix instead
+	 * of diverging at token 0 (a full re-prompt on top of the warming).
 	 */
 	static async preEncode(
 		messages: ApiChatMessageData[] | (DatabaseMessage & { extra?: DatabaseMessageExtra[] })[],
 		model?: string | null,
 		excludeReasoning?: boolean,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		tools?: OpenAIToolDefinition[],
+		enableThinking?: boolean,
+		reasoningEffort?: ReasoningEffort
 	): Promise<void> {
 		const normalizedMessages: ApiChatMessageData[] = await ChatService.resolveOutgoingMessages(
 			messages,
@@ -947,11 +960,28 @@ export class ChatService {
 				return mapped;
 			}),
 			n_predict: 0,
-			stream: false
+			stream: false,
+			tools: tools && tools.length > 0 ? tools : undefined
 		};
 
 		if (model) {
 			requestBody.model = model;
+		}
+
+		// N11.4: the thinking kwargs, the same mapping as sendMessage, so the
+		// warmed prompt matches the next turn's rendered prompt.
+		const reasoningBudgetTokens =
+			enableThinking && reasoningEffort ? (REASONING_EFFORT_TOKENS[reasoningEffort] ?? -1) : -1;
+
+		if (enableThinking !== undefined) {
+			requestBody.chat_template_kwargs = {
+				...(requestBody.chat_template_kwargs ?? {}),
+				enable_thinking: enableThinking
+			};
+		}
+
+		if (reasoningBudgetTokens >= 0) {
+			requestBody.thinking_budget_tokens = reasoningBudgetTokens;
 		}
 
 		try {

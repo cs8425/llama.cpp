@@ -7,17 +7,18 @@
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
 > [06-status.md](./06-status.md)。
 >
-> **目前停點（2026-10-19）**：**N11.4 compact request session 欄位一致性——問題確認 + 修正方案定案、未實做**
+> **目前停點（2026-10-19）**：**N11.4 compact request session 欄位一致性——source + 測試完成、待使用者 `npm run check` + unit 驗證**
 > （N11 修完 messages 陣列層前綴一致性後，compact request **body** 仍缺 agentic 主
 > payload 每 turn 都帶的 `tools`（tool definitions）——chat template 把 tool
 > definitions 渲染進 prompt 開頭 → compact request 渲染 prompt 與最後一筆 live
-> payload 從 token 0 分岔 → KV cache 完全失效；`preEncode` 同根因缺漏；
-> 明細 + 修正規劃：06-status §3.31 / §5h）
+> payload 從 token 0 分岔 → KV cache 完全失效；`preEncode` 同根因缺漏；已實做：
+> `tools` / thinking kwargs thread 進壓縮路徑 + `preEncode` 同類修，明細 + 修正規劃：
+> 06-status §3.31 / §5h）
 > （N11 已完成 2026-10-18：N11.1 P0 tool result 附件（MCP screenshot base64）+
 > N11.2 = A4 full-path summary（compact request =
 > `buildLlmContext(effectivePath).messages` + instruction）+ N11.3 測試全綠，
 > 明細見 06-status §3.30 / §5g）
-> **待辦（依序）**：N11.4 source + 測試（規劃完成）→ N11（+N11.4）手動驗收
+> **待辦（依序）**：N11.4 使用者 check + 測試驗證（source + 測試已完成，規劃完成）→ N11（+N11.4）手動驗收
 > （MCP screenshot → 連壓兩次 + F5 → compact request 與後續 turns 的 `cache_n`
 > 皆高命中；⚠️ N11.4 必須先完成、否則驗收會看到 cache 全失效而誤判；可與
 > N10/N8/N7/5.8 一併驗）→ N9（規格定稿、未實做）。
@@ -39,9 +40,10 @@
 >   overflow guard，見 06-status §3.28 / 05-N9。
 >
 > **剩（依序）**：
-> 1. **N11.4 compact request session 欄位一致性**（06-status §3.31 / §5h）：問題確認 +
->    方案定案 2026-10-19、未實做——`tools` / thinking kwargs thread 進壓縮路徑 +
->    `preEncode` 同類修（5 檔案、加性參數、無新設定）。
+> 1. **N11.4 compact request session 欄位一致性**（06-status §3.31 / §5h）：source +
+>    測試完成 2026-10-19、待使用者 check + 測試驗證——`tools` / thinking kwargs
+>    thread 進壓縮路徑 + `preEncode` 同類修（5 source + 2 test 檔、加性參數、
+>    無新設定）。
 > 2. **N9 F5 / refresh 韌性**（06-status §3.28 / 05-N9 / §5e）。
 > 3. **手動驗收（未做、可一併驗）**：N11 + N11.4（MCP screenshot →
 >    連壓兩次 + F5 → compact request 與後續 turns 的 `cache_n`

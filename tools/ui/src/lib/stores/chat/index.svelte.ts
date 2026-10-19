@@ -37,7 +37,7 @@ import {
 	toCompactionMode,
 	toSummaryMode
 } from '$lib/services/context';
-import type { CompactionMode } from '$lib/services/context';
+import type { CompactionMode, SummarizeWithRetryOptions } from '$lib/services/context';
 import { DatabaseService } from '$lib/services/database.service';
 // direct imports between stores, not via the barrel, to avoid circular deps
 import { agenticStore } from '$lib/stores/agentic/index.svelte';
@@ -693,8 +693,17 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				conversationsStore.updateConversationTimestamp(convId);
 
 				// Warm the KV cache with the NEW prefix so the next turn does not
-				// pay a full re-prompt on top of the summary call.
-				await this.triggerPreEncode(preCompactionPath, cmp, cmp.content, model);
+				// pay a full re-prompt on top of the summary call. N11.4: the
+				// same session fields as the summary call — with enabled tools
+				// the next turn is agentic and carries them, without none do.
+				await this.triggerPreEncode(
+					preCompactionPath,
+					cmp,
+					cmp.content,
+					model,
+					!!settingsStore.config.excludeReasoningFromContext,
+					this.resolveSessionFields(convId)
+				);
 
 				// v4: real tokens — the kept region's plan size plus the summary's
 				// own size (actual completion tokens, byte length when unreported).
@@ -1155,6 +1164,40 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 	}
 
 	/**
+	 * N11.4: the session-level wire fields the compaction requests and the
+	 * post-compaction / post-flow preEncode must carry so their rendered
+	 * prompts match the conversation's live agentic turns (KV-cache prefix
+	 * consistency): the per-conversation enabled tools (the agentic flow's
+	 * own resolution) and the thinking kwargs (the getApiOptions mirror on
+	 * the conversation row's reasoning effort). Deterministic: with enabled
+	 * tools every turn is agentic and carries them, without none do.
+	 */
+	private resolveSessionFields(
+		convId: string
+	): Pick<SummarizeWithRetryOptions, 'enableThinking' | 'reasoningEffort' | 'tools'> {
+		const conv = conversationsStore.conversations.find((c) => c.id === convId);
+		const tools = agenticStore.resolveEnabledToolsForConversation(convId);
+		const effort =
+			conv?.reasoningEffort ??
+			(conv?.thinkingEnabled === false
+				? ReasoningEffort.OFF
+				: conversationsStore.preferences.pendingReasoningEffort);
+		const fields: Pick<SummarizeWithRetryOptions, 'enableThinking' | 'reasoningEffort' | 'tools'> = {
+			tools: tools.length > 0 ? tools : undefined
+		};
+
+		// an explicit reasoning choice overrides the server default, DEFAULT
+		// sends nothing (getApiOptions mirror)
+		if (effort !== ReasoningEffort.DEFAULT) {
+			fields.enableThinking = effort !== ReasoningEffort.OFF;
+
+			if (effort !== ReasoningEffort.OFF) fields.reasoningEffort = effort;
+		}
+
+		return fields;
+	}
+
+	/**
 	 * The shared over-target mechanism for this store's compaction paths
 	 * (compact / recompact / backward boundary move; both modes): summarize →
 	 * mode-specific success check → retry (`contextSummaryMaxAttempts`) → user
@@ -1176,6 +1219,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		signal: AbortSignal
 	): Promise<SummaryResult | null> {
 		return summarizeWithRetry(planPath, plan, model, signal, {
+			...this.resolveSessionFields(convId),
 			checkParams: {
 				contextKeepRecentTokens: config.contextKeepRecentTokens,
 				contextKeepTargetPercent: config.contextKeepTargetPercent,
@@ -1830,13 +1874,16 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				if (serverStore.isRouterMode) modelsStore.fetchRouterModels().catch(console.error);
 
 				// Pre-encode conversation in KV cache for faster next turn
+				// (N11.4: with the session fields — with enabled tools the
+				// next turn is agentic and carries them, without none do)
 				if (settingsStore.config.preEncodeConversation) {
 					this.triggerPreEncode(
 						allMessages,
 						assistantMessage,
 						streamedContent,
 						effectiveModel,
-						!!settingsStore.config.excludeReasoningFromContext
+						!!settingsStore.config.excludeReasoningFromContext,
+						this.resolveSessionFields(convId)
 					);
 				}
 			},
@@ -2188,7 +2235,8 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 		assistantMessage: DatabaseMessage,
 		assistantContent: string,
 		model?: string | null,
-		excludeReasoning?: boolean
+		excludeReasoning?: boolean,
+		sessionFields?: Pick<SummarizeWithRetryOptions, 'enableThinking' | 'reasoningEffort' | 'tools'>
 	): Promise<void> {
 		this.cancelPreEncode();
 		this.preEncodeAbortController = new AbortController();
@@ -2205,7 +2253,15 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				{ ...assistantMessage, content: assistantContent }
 			];
 
-			await ChatService.preEncode(messagesWithAssistant, model, excludeReasoning, signal);
+			await ChatService.preEncode(
+				messagesWithAssistant,
+				model,
+				excludeReasoning,
+				signal,
+				sessionFields?.tools,
+				sessionFields?.enableThinking,
+				sessionFields?.reasoningEffort
+			);
 		} catch (err) {
 			if (!isAbortError(err)) {
 				console.warn('[ChatStore] Pre-encode failed:', err);

@@ -12,7 +12,7 @@
 // mode-specific success check → retry × maxAttempts → user gate
 // (use / retry / skip).
 
-import { AttachmentType, MessageRole, MessageType } from '$lib/enums';
+import { AttachmentType, MessageRole, MessageType, ReasoningEffort } from '$lib/enums';
 import { ChatService } from '$lib/services/chat.service';
 import { buildLlmContext } from '$lib/services/context/context-builder';
 import {
@@ -354,6 +354,67 @@ describe('summarizeMessages (prefix-stable payload, N11.2 / A4)', () => {
 		expect(vi.mocked(ChatService.sendMessage).mock.calls.at(-1)?.[1]).toMatchObject({
 			excludeReasoningFromContext: true
 		});
+	});
+});
+
+// --- summarizeMessages session fields (N11.4: tools / thinking kwargs) ------
+
+describe('summarizeMessages (session fields, N11.4)', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	const tools = [
+		{ function: { name: 'read_file', parameters: { type: 'object' } }, type: 'function' },
+		{ function: { name: 'write_file', parameters: { type: 'object' } }, type: 'function' }
+	];
+
+	it('prefix-stable: passes tools / enableThinking / reasoningEffort to sendMessage', async () => {
+		vi.mocked(ChatService.sendMessage).mockResolvedValue('the summary');
+		const { plan, planPath } = makePlan();
+
+		await summarizeMessages(planPath, plan, null, undefined, {
+			enableThinking: true,
+			reasoningEffort: ReasoningEffort.MEDIUM,
+			tools
+		});
+
+		const options = vi.mocked(ChatService.sendMessage).mock.calls.at(-1)?.[1];
+
+		// deep equal — the same tool definitions ride the compact request
+		expect(options?.tools).toEqual(tools);
+		expect(options?.enableThinking).toBe(true);
+		expect(options?.reasoningEffort).toBe(ReasoningEffort.MEDIUM);
+	});
+
+	it('omits the fields when not passed (no-tools conversation: wire shape unchanged)', async () => {
+		vi.mocked(ChatService.sendMessage).mockResolvedValue('the summary');
+		const { plan, planPath } = makePlan();
+
+		await summarizeMessages(planPath, plan, null);
+
+		const options = vi.mocked(ChatService.sendMessage).mock.calls.at(-1)?.[1];
+
+		expect(options?.tools).toBeUndefined();
+		expect(options?.enableThinking).toBeUndefined();
+		expect(options?.reasoningEffort).toBeUndefined();
+	});
+
+	it('transcript mode: the fields stay off (no cache affinity by design)', async () => {
+		vi.mocked(ChatService.sendMessage).mockResolvedValue('the summary');
+		const { plan, planPath } = makePlan();
+
+		await summarizeMessages(planPath, plan, null, undefined, {
+			enableThinking: true,
+			mode: 'transcript',
+			tools
+		});
+
+		const options = vi.mocked(ChatService.sendMessage).mock.calls.at(-1)?.[1];
+
+		expect(options?.tools).toBeUndefined();
+		expect(options?.enableThinking).toBeUndefined();
+		expect(options?.reasoningEffort).toBeUndefined();
 	});
 });
 

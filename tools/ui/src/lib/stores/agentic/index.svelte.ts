@@ -20,7 +20,7 @@ import {
 	MCP_ATTACHMENT_NAME_PREFIX,
 	MIME_TYPE_PREFIXES
 } from '$lib/constants';
-import { BuiltInTool, ToolPermissionDecision, ToolSource } from '$lib/enums';
+import { BuiltInTool, ReasoningEffort, ToolPermissionDecision, ToolSource } from '$lib/enums';
 import {
 	AttachmentType,
 	MessageRole,
@@ -63,6 +63,7 @@ import type {
 	AgenticFlowResult,
 	AgenticSession,
 	MCPToolCall,
+	OpenAIToolDefinition,
 	SettingsConfigType,
 	ToolExecutionResult
 } from '$lib/types';
@@ -335,6 +336,24 @@ class AgenticStore {
 		return this.gates.requestCompactionDecision(request, signal);
 	}
 
+	/**
+	 * N11.4: the enabled tool definitions for a conversation, resolved the
+	 * same way `runAgenticFlow` does (the per-conversation policy from the
+	 * conversation row, the global store defaults when the row or the field
+	 * is absent). The compaction paths and preEncode use it so their request
+	 * bodies carry the same `tools` as the conversation's live agentic turns
+	 * (KV-cache prefix consistency).
+	 */
+	resolveEnabledToolsForConversation(convId: string | null): OpenAIToolDefinition[] {
+		const conv = convId ? conversationsStore.conversations.find((c) => c.id === convId) : undefined;
+		const disabledTools = new Set(conv ? (conv.disabledTools ?? []) : [...toolsStore.disabledTools]);
+		const disabledToolCategories = new Set(
+			conv ? (conv.disabledToolCategories ?? []) : [...toolsStore.disabledToolCategories]
+		);
+
+		return toolsStore.getEnabledToolsForLLM(disabledTools, disabledToolCategories);
+	}
+
 	resolvePermission(conversationId: string, decision: ToolPermissionDecision): void {
 		this.gates.resolvePermission(conversationId, decision);
 	}
@@ -478,10 +497,21 @@ class AgenticStore {
 		conversationId: string;
 		lastPrompt: number | null;
 		model: string;
+		options: AgenticFlowOptions;
 		sessionMessages: AgenticMessage[];
 		signal?: AbortSignal;
+		tools: OpenAIToolDefinition[];
 	}): Promise<void> {
-		const { callbacks, conversationId, lastPrompt, model, sessionMessages, signal } = params;
+		const {
+			callbacks,
+			conversationId,
+			lastPrompt,
+			model,
+			options,
+			sessionMessages,
+			signal,
+			tools
+		} = params;
 		const config = settingsStore.config;
 
 		// Both switches: the master auto-compaction gate plus the in-loop
@@ -588,6 +618,13 @@ class AgenticStore {
 					nCtx
 				},
 				compactionMode: mode,
+				// N11.4: the session-level wire fields of the loop's live turns
+				// — `tools` is the loop's own array (100% identical to the last
+				// turn), the thinking kwargs ride the flow options (the
+				// getApiOptions mirror the main turn sends) — so the compact
+				// request's rendered prompt stays their prefix (KV-cache
+				// affinity).
+				enableThinking: options.enableThinking as boolean | undefined,
 				excludeReasoning: config.excludeReasoningFromContext === true,
 				gate: {
 					requestDecision: (p) =>
@@ -597,7 +634,9 @@ class AgenticStore {
 				maxTokens: computeSummaryMaxTokens(nCtx, config.contextSummaryMaxTokensPercent),
 				nCtx,
 				mode: toSummaryMode(config.contextSummaryMode),
-				prompt: config.contextSummaryPrompt.trim() || undefined
+				prompt: config.contextSummaryPrompt.trim() || undefined,
+				reasoningEffort: options.reasoningEffort as ReasoningEffort | undefined,
+				tools: tools.length > 0 ? tools : undefined
 			});
 
 			if (!summary) return; // the user skipped at the gate — no cmp
@@ -1204,8 +1243,10 @@ class AgenticStore {
 				conversationId,
 				lastPrompt: turnTimings?.prompt_n ?? null,
 				model: effectiveModel,
+				options,
 				sessionMessages,
-				signal
+				signal,
+				tools
 			});
 
 			turn++;

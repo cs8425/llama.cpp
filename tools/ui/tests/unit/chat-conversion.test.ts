@@ -14,9 +14,11 @@
 // (the fixed wire shape intentionally changed) — these synthetic fixtures are
 // the regression oracle.
 
-import { AttachmentType, ContentPartType, FileTypeAudio, MessageRole, MessageType } from '$lib/enums';
+import { AttachmentType, ContentPartType, FileTypeAudio, MessageRole, MessageType, ReasoningEffort } from '$lib/enums';
 import { ChatService } from '$lib/services/chat.service';
 import { buildLlmContext, effectiveCompactionPath } from '$lib/services/context/context-builder';
+import { summarizeMessages } from '$lib/services/context/summarize';
+import type { CompactionPlan } from '$lib/services/context/types';
 import { settingsStore } from '$lib/stores/settings/index.svelte';
 import type {
 	ApiChatMessageData,
@@ -36,7 +38,12 @@ vi.mock('$lib/stores/models/index.svelte', () => ({
 }));
 
 vi.mock('$lib/stores/settings/index.svelte', () => ({
-	settingsStore: { getConfig: vi.fn(() => 2) }
+	settingsStore: {
+		// config: getJsonHeaders → getAuthHeaders reads settingsStore.config
+		// (the body-level tests run the REAL sendMessage, which builds headers)
+		config: { apiKey: '' },
+		getConfig: vi.fn(() => 2)
+	}
 }));
 
 vi.mock('$lib/utils/cap-img-size', () => ({
@@ -338,27 +345,95 @@ function screenshotPath(): DatabaseMessage[] {
 	return [sys, u1, a1, t1, u2];
 }
 
-describe('compact request = last live payload byte-prefix + instruction (N11.2 / A4)', () => {
-	it('first compaction: the prefix is the full pre-compaction payload', async () => {
+/**
+ * N11.4: the compact request at the REQUEST BODY level — messages + tools +
+ * model (+ thinking kwargs) must equal the last live agentic body, with only
+ * the trailing instruction added. The real ChatService builds both bodies
+ * (fetch captured) so the wire shape is the oracle.
+ */
+describe('compact request body = last live body + instruction (N11.2 / N11.4)', () => {
+	const tools = [
+		{
+			function: { description: 'Take a screenshot', name: 'mcp_screenshot', parameters: { type: 'object' } },
+			type: 'function'
+		},
+		{ function: { description: 'Read a file', name: 'read_file', parameters: { type: 'object' } }, type: 'function' }
+	];
+
+	let capturedBodies: Array<Record<string, unknown>>;
+
+	/** A plan for the path: everything before the last user message summarized. */
+	function makePlanFor(path: DatabaseMessage[]): CompactionPlan {
+		const kept = path[path.length - 1];
+		const headLength = path[0]?.role === MessageRole.SYSTEM ? 1 : 0;
+
+		return {
+			cutIndex: path.length - 1,
+			estimatedTokensAfter: 0,
+			estimatedTokensBefore: 0,
+			firstKeptMessageId: kept.id,
+			isSplitTurn: false,
+			kept: [kept],
+			keptTokens: 0,
+			realMessageTokens: new Map(),
+			systemHead: headLength === 1 ? path[0] : null,
+			toSummarize: path.slice(headLength, path.length - 1)
+		};
+	}
+
+	beforeEach(() => {
+		capturedBodies = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_url: unknown, init?: { body?: string }) => {
+				if (init?.body) capturedBodies.push(JSON.parse(init.body) as Record<string, unknown>);
+
+				return new Response(JSON.stringify({ choices: [{ message: { content: 'summary text' } }] }), {
+					headers: { 'content-type': 'application/json' },
+					status: 200
+				});
+			})
+		);
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it('first compaction: the body is the last live body, plus the trailing instruction', async () => {
 		const path = screenshotPath();
 		const lastPayload = (await buildLlmContext(path)).messages;
 
+		// the last live agentic turn (same choke point, same session fields)
+		await ChatService.sendMessage(lastPayload, { model: 'test-model', stream: false, tools });
+		const liveBody = capturedBodies.at(-1)!;
+
+		// the compact request (N11.4: the same session fields)
+		await summarizeMessages(path, makePlanFor(path), 'test-model', undefined, {
+			prompt: 'INSTRUCTION',
+			tools
+		});
+		const compactBody = capturedBodies.at(-1)!;
+
+		const liveMessages = liveBody.messages as ApiChatMessageData[];
+		const compactMessages = compactBody.messages as ApiChatMessageData[];
+
 		// the P0 regression: the screenshot parts survive the DB rebuild
-		const toolLine = lastPayload.find((m) => m.role === MessageRole.TOOL);
+		const toolLine = compactMessages.find((m) => m.role === MessageRole.TOOL);
 
 		expect(toolLine?.content).toEqual([imagePart(), audioPart(), textPart('screenshot attached')]);
 
-		const compactRequest = [
-			...lastPayload,
-			{ content: 'INSTRUCTION', role: MessageRole.USER }
-		];
+		// messages: the live body's messages verbatim + the trailing instruction
+		expect(compactMessages).toHaveLength(liveMessages.length + 1);
+		expect(compactMessages.slice(0, liveMessages.length)).toEqual(liveMessages);
+		expect(compactMessages.at(-1)).toEqual({ content: 'INSTRUCTION', role: MessageRole.USER });
 
-		expect(JSON.stringify(compactRequest.slice(0, -1))).toBe(JSON.stringify(lastPayload));
+		// session fields: identical
+		expect(compactBody.tools).toEqual(liveBody.tools);
+		expect(compactBody.model).toBe(liveBody.model);
 	});
 
-	it(
-		'second compaction: the prefix is the post-compaction payload [sys, old summary, kept]',
-		async () => {
+	it('second compaction: the body prefix is [sys, old summary, kept], tools intact', async () => {
 		const path = screenshotPath();
 		const u2 = path[path.length - 1];
 		const cmp = message(MessageRole.USER, 'OLD SUMMARY', {
@@ -376,17 +451,55 @@ describe('compact request = last live payload byte-prefix + instruction (N11.2 /
 			MessageRole.USER
 		]);
 
+		await ChatService.sendMessage(lastPayload, { model: 'test-model', stream: false, tools });
+		const liveBody = capturedBodies.at(-1)!;
+
 		// the second compaction's planning input = the effective path
 		const planPath = effectiveCompactionPath(pathAfterFirst);
 
 		expect(planPath.map((m) => m.id)).toEqual([path[0].id, cmp.id, u2.id]);
 
-		const compactRequest = [
-			...(await buildLlmContext(planPath)).messages,
-			{ content: 'INSTRUCTION', role: MessageRole.USER }
-		];
+		await summarizeMessages(planPath, makePlanFor(planPath), 'test-model', undefined, {
+			prompt: 'INSTRUCTION',
+			tools
+		});
+		const compactBody = capturedBodies.at(-1)!;
+
+		const liveMessages = liveBody.messages as ApiChatMessageData[];
+		const compactMessages = compactBody.messages as ApiChatMessageData[];
 
 		// the KV cache built by the last payload survives the compact request
-		expect(JSON.stringify(compactRequest.slice(0, -1))).toBe(JSON.stringify(lastPayload));
+		expect(compactMessages.slice(0, liveMessages.length)).toEqual(liveMessages);
+		expect(compactMessages.at(-1)).toEqual({ content: 'INSTRUCTION', role: MessageRole.USER });
+		expect(compactBody.tools).toEqual(liveBody.tools);
+		expect(compactBody.model).toBe(liveBody.model);
+	});
+
+	it('thinking effort set: chat_template_kwargs / thinking_budget_tokens match the live body', async () => {
+		const path = screenshotPath();
+		const lastPayload = (await buildLlmContext(path)).messages;
+
+		await ChatService.sendMessage(lastPayload, {
+			enableThinking: true,
+			model: 'test-model',
+			reasoningEffort: ReasoningEffort.MEDIUM,
+			stream: false,
+			tools
+		});
+		const liveBody = capturedBodies.at(-1)!;
+
+		await summarizeMessages(path, makePlanFor(path), 'test-model', undefined, {
+			enableThinking: true,
+			prompt: 'INSTRUCTION',
+			reasoningEffort: ReasoningEffort.MEDIUM,
+			tools
+		});
+		const compactBody = capturedBodies.at(-1)!;
+
+		expect(compactBody.chat_template_kwargs).toEqual(liveBody.chat_template_kwargs);
+		expect(compactBody.thinking_budget_tokens).toBe(liveBody.thinking_budget_tokens);
+		// the kwarg actually rides the wire (not just equal-by-omission)
+		expect(compactBody.chat_template_kwargs).toEqual({ enable_thinking: true });
+		expect(compactBody.thinking_budget_tokens).toBeGreaterThanOrEqual(0);
 	});
 });

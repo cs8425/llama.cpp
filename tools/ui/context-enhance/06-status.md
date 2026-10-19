@@ -3,19 +3,29 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新，2026-10-19）**：**N11.4 compact request session 欄位一致性（tools / thinking kwargs）——問題確認 + 修正方案定案、未實做**
+> **恢復點（最新，2026-10-19）**：**N11.4 compact request session 欄位一致性（tools / thinking kwargs）——source + 測試完成、待使用者 `npm run check` + unit 驗證**
 > （根因：compact request **body** 缺 agentic session 主 payload 每 turn 都帶的 `tools`
 > （及有設定時的 `enableThinking` / `reasoningEffort` → `chat_template_kwargs`）→ chat template
 > 把 tool definitions 渲染進 prompt 開頭 → compact request 的渲染 prompt 與最後一筆 live
 > payload 從 token 0 分岔 → KV cache 完全失效。N11 只保證 **messages 陣列層級**一致性；
-> session 層 wire 欄位從未 thread 進壓縮路徑；`preEncode`（KV 預熱）同根因缺漏。明細 + 修正規劃：§3.31 / §5h）。
+> session 層 wire 欄位從未 thread 進壓縮路徑；`preEncode`（KV 預熱）同根因缺漏。實做：
+> `SummarizeOptions` thread `tools` / `enableThinking` / `reasoningEffort`（prefix-stable only）→
+> in-loop 直接用 loop 的 `tools`（100% 精確）+ flow options 的 thinking kwargs；chat store
+> `resolveSessionFields`（conversation row 的 tool policy + reasoning effort，mirror
+> `agentic:372–388` / `getApiOptions:422–428`）→ `runCompactionSummary` + `triggerPreEncode`
+> 兩預熱點；`preEncode` 簽名 + body 帶三欄；新 `agenticStore.resolveEnabledToolsForConversation`
+> （放 agentic store 避免 tools store 循環 import）。5 source + 2 test 檔，皆加性參數、
+> 無新設定 / 無新 meta。明細 + 修正規劃：§3.31 / §5h）。
 >
 > **待辦（依序）**：
-> 1. **N11.4 — compact request session 欄位一致性（問題確認 + 方案定案 2026-10-19、未實做；§3.31 / §5h）**：
+> 1. **N11.4 — compact request session 欄位一致性（source + 測試完成 2026-10-19、待使用者 check + 測試驗證；§3.31 / §5h）**：
 >    `tools`（+ thinking kwargs）thread 進 `summarizeMessages` / `summarizeWithRetry`（in-loop 直接用
 >    loop 的 `tools`、100% 精確；chat store 決定性重算、mirror `agentic:372–388`）+ `preEncode` 加 `tools`
->    （`chat:697` / `chat:1834` 兩預熱點）。5 檔案、皆加性參數、無新設定 / 無新 meta。
-> 2. **N11（+N11.4）手動驗收（未做）**：MCP screenshot flow → 連壓兩次 + F5 →
+>    （`chat:697` / `chat:1834` 兩預熱點）+ 新 `agenticStore.resolveEnabledToolsForConversation`。
+>    5 source 檔 + 2 test 檔，皆加性參數、無新設定 / 無新 meta。
+>    **待使用者跑**：`npm run check` + unit `summarize` / `chat-conversion` / `context-builder` /
+>    `compaction-policy` + 既有 5 支 client compaction suite。
+> 2. **N11（+N11.4）手動驗收（未做；N11.4 check + 測試通過後可驗）**：MCP screenshot flow → 連壓兩次 + F5 →
 >    compact request 與後續 turns 的 `cache_n` 皆高命中（gauge）；另重跑既有 5 支 client
 >    compaction suite（§5g）。⚠️ **N11.4 必須先完成**：否則驗收會看到 compact request 的
 >    `cache_n` = 0、誤判 N11 未修好。可與 N10/N8/N7/5.8 一併驗。
@@ -53,7 +63,7 @@
 | N9 — F5 / refresh 韌性：in-loop compaction 兩寫非原子（§3.28） | ⬜ **規格定稿、未實做**（2026-10-18：問題已對 code 驗證——`createCompactionMessage`（單一 IDB transaction）與 `updateCurrentNode`（獨立 IDB 寫）非原子 → 兩寫之間 F5 / `updateCurrentNode` 拋錯 → cmp orphan（在 DB、不在 path、不可見）→ reload 後全量送出 → overflow；非永久損毀（無資料遺失、手動 compact 可恢復）。規格 = 原子 commit（N9.1）+ 載入收編 orphan（N9.2）+ 可選送出前 overflow guard（N9.3）+ fail-open 語義入 02-§4（N9.4）；執行清單 05-N9 / §5e） |
 | N10 — in-loop compaction 的 cmp 被接成 sibling（系統性 bug；§3.29） | ✅ **完成並確認**（2026-10-18：N10.1 根因修（`onCompaction` callback + `lastCreatedInFlow` 推進）+ N10.2 已損樹修復（`findCompactionGraftFixes` 純函式 + `applyCompactionGraftFixes` IDB transaction + 啟動 migration `compaction-graft-fix-v1` + `loadConversation` 防禦層）+ N10.3 unit 5 向量（`tests/unit/branching.test.ts`）；`npm run check` + unit + 既有 5 支 client compaction suite 全綠；剩手動驗收（§4 清單）；執行清單 05-N10 / §5f） |
 | N11 — compact request 前綴一致性：tool result 附件被丟（N11.1）+ full-path summary（N11.2 = A4，§3.30） | ✅ **完成並確認**（2026-10-18：N11.1——轉換的 `extra → parts` 抽成 `ChatService.buildExtraContentParts`（固定序 / images 一律 cap / 無 gating）、tool+extra 不再 early-return 丟附件、in-flow 調同一 builder（順手修不 cap + 順序改 user input 路徑）、`toAgenticMessages` TOOL 分支直通、序列化對齊（assistant + tool_calls + 空 content → 省略 content 欄位）、清理 5 個 unused imports；`normalizeMessagesForApi` / `resolveOutgoingMessages` / `buildLlmContext` / `preEncode` / `sendMessage` / vision filter 全未動（D1：無 model 參數、無新 gating）；N11.2（A4）——`summarizeMessages` / `summarizeWithRetry` 收 `planPath`、prefix-stable payload = `buildLlmContext(planPath).messages` + instruction（刪自組裝）、transcript = `toSummarize + kept`、兩呼叫點傳 `planPath`（re-summarize = `effectiveCompactionPath(path)`）+ `summarizedCount = toSummarize + kept`（`chat:871` 不改）；N11.3——`tests/unit/summarize.test.ts` 依決定 B 修好（補 `planPath` + mock `convertDbMessageToApiChatMessageData` + payload assertions = `buildLlmContext(planPath).messages` + instruction）+ 新 `tests/unit/chat-conversion.test.ts`（真 ChatService、stores / cap mock：`buildExtraContentParts` 固定序 + cap / 轉換矩陣 / 空 content 三態 / in-flow ≡ DB rebuild byte-identity / 合成 fixture compact request = 最後 payload byte-prefix + instruction）；`npm run check` 0 錯 + unit `summarize` 28/28 / `chat-conversion` / `context-builder` 全綠（第一輪 4 type + 6 runtime 全在 `summarize.test.ts` 測試檔 2 處 desync、已修、來源碼零改動）；手動驗收未做（MCP screenshot → 連壓兩次 + F5 → `cache_n` 高命中，§4 清單）；執行清單 §5g） |
-| N11.4 — compact request session 欄位一致性：`tools` / thinking kwargs 未帶 → cache 完全失效（N11 後續；§3.31） | ⬜ **問題確認 + 方案定案、未實做**（2026-10-19：compact request body 缺 agentic 主 payload 每 turn 都帶的 `tools`（`agentic:817`）→ chat template 把 tool definitions 渲染進 prompt 開頭 → 渲染 prompt 從 token 0 分岔 → KV cache 100% miss（session 最大 request 冷算）。N11 只保證 messages 陣列層一致性、session 欄位從未 thread 進壓縮路徑；次級分岔 = `enableThinking` / `reasoningEffort`（有設定時 agentic turn 帶 `chat_template_kwargs`、compact request 永不帶）；`preEncode`（`chat.service.ts:924–969`）同根因（`chat:697` / `chat:1834` 預熱與下一 agentic turn 不符）。方案 = `SummarizeOptions` thread `tools` + thinking kwargs（in-loop 直接用 loop 的 `tools` 100% 精確；chat store 決定性重算、mirror `agentic:372–388`）+ `preEncode` 加參（決定性：有 enabled tools 即每 turn 皆 agentic、無預熱歧義）+ 共用 helper `resolveEnabledToolsForConversation`；5 檔案、加性參數、無新設定 / 無新 meta；**N11 手動驗收前必須先完成**（否則驗收看到 `cache_n` = 0 誤判 N11 未修好）；執行清單 §5h） |
+| N11.4 — compact request session 欄位一致性：`tools` / thinking kwargs 未帶 → cache 完全失效（N11 後續；§3.31） | 🚧 **source + 測試完成、待使用者 check + 測試驗證**（2026-10-19：compact request body 缺 agentic 主 payload 每 turn 都帶的 `tools`（`agentic:817`）→ chat template 把 tool definitions 渲染進 prompt 開頭 → 渲染 prompt 從 token 0 分岔 → KV cache 100% miss（session 最大 request 冷算）。N11 只保證 messages 陣列層一致性、session 欄位從未 thread 進壓縮路徑；次級分岔 = `enableThinking` / `reasoningEffort`（有設定時 agentic turn 帶 `chat_template_kwargs`、compact request 永不帶）；`preEncode`（`chat.service.ts:924–969`）同根因（`chat:697` / `chat:1834` 預熱與下一 agentic turn 不符）。實做：`SummarizeOptions` thread `tools` + thinking kwargs（prefix-stable only；in-loop 直接用 loop 的 `tools` 100% 精確；chat store `resolveSessionFields` 決定性重算、mirror `agentic:372–388` / `getApiOptions:422–428`）+ `preEncode` 加參（決定性：有 enabled tools 即每 turn 皆 agentic、無預熱歧義）+ 新 `agenticStore.resolveEnabledToolsForConversation`（放 agentic store 避免 tools store 循環 import）；5 source + 2 test 檔（summarize 3 新向量 + chat-conversion fixture 升級到 request body 層 3 用例）、加性參數、無新設定 / 無新 meta；**N11 手動驗收前必須先完成**（否則驗收看到 `cache_n` = 0 誤判 N11 未修好）；執行清單 §5h） |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
@@ -2171,7 +2181,11 @@ prompt 文字 / over-target 機制 / transcript mode / 無新設定 / 無新 met
 
 ### 狀態
 
-- ⬜ **未實做**（問題確認 + 方案定案 2026-10-19；執行清單 §5h）。
+- 🚧 **source + 測試完成（2026-10-19）、待使用者驗證**（執行清單 §5h；待跑：`npm run check` + unit `summarize`（+3 向量）/ `chat-conversion`（body 層 3 用例）/ `context-builder` / `compaction-policy` + 既有 5 支 client compaction suite）。
+  - **5 source 檔**：`summarize.ts`（`SummarizeOptions` 加 `tools?` / `enableThinking?` / `reasoningEffort?`；`summarizeMessages` 傳進 `sendMessage` options、prefix-stable only）/ `agentic/index.svelte.ts`（新 public `resolveEnabledToolsForConversation(convId)`——mirror `buildDisabledTools` / `agentic:372–388`；`compactBetweenTurns` params 加 `tools` + `options` → `summarizeWithRetry` options；`executeAgenticLoop` 呼叫點傳 loop 的 `tools`）/ `chat/index.svelte.ts`（新 private `resolveSessionFields(convId)`——conversation row 的 tool policy + reasoning effort（mirror `getApiOptions:422–428`）；`runCompactionSummary` spread；`triggerPreEncode` 加 `sessionFields` 參 + `chat:697` / `chat:1834` 兩呼叫點）/ `chat.service.ts`（`preEncode` 簽名加 `tools` / `enableThinking` / `reasoningEffort`、body 加 `tools` / `chat_template_kwargs` / `thinking_budget_tokens`（與 `sendMessage` 同映射））。
+  - **2 test 檔**：`summarize.test.ts`（3 新向量：傳 `tools` → sendMessage options 同組 deep equal + `enableThinking` / `reasoningEffort` pass-through；不傳 → 三欄皆 undefined；transcript mode → 三欄皆 off）+ `chat-conversion.test.ts`（N11.3 合成 fixture 升級到 **request body 層**：真 `sendMessage` + fetch capture；首壓 body = 最後 live body（messages + `tools` + `model` 全等）+ 尾端 instruction；二次壓 body prefix = [sys, 舊summary, kept] + tools intact；thinking-effort fixture：`chat_template_kwargs` / `thinking_budget_tokens` 與 live body 一致且實際進 wire）。
+  - **實做抉擇（規劃留的選項內）**：helper 放 **agentic store**（規劃「`tools.svelte.ts`（或 agentic store）」二選一；tools store 刻意不 import conversationsStore 避免循環，agentic store 已 import 兩者）；chat store 的 policy 從 **conversation row** 解析（規劃文字寫 `preferences.*`，但那綁定 active conv，而 `compactConversation` 支援非 active conv；row 解析 = `buildDisabledTools` / `getReasoningEffort` 的 per-conv 邏輯，與 helper 簽名 `resolveEnabledToolsForConversation(convId)` 一致）。
+  - 明確不改（已遵守）：`buildLlmContext` / `resolveOutgoingMessages` / `normalizeMessagesForApi` / `planCompaction` / 切點 / budget / 雙 mode / cmp 嫁接 / `max_tokens` / temperature / prompt / over-target 機制 / transcript mode / 無新設定 / 無新 meta。
 
 ## 4. 驗證狀態
 
@@ -2245,6 +2259,14 @@ prompt 文字 / over-target 機制 / transcript mode / 無新設定 / 無新 met
   `chat-message-compacting`）零改動全綠；05-N10 / §5f 清單已勾（手動驗收未做：
   agentic loop 連壓兩次 → F5 / 匯出匯入 summary 都在 + 既有已損對話 migration
   後恢復）。
+- **N11.4 🚧（source + 測試完成 2026-10-19、待使用者驗證）**：待使用者跑
+  `npm run check` + unit `summarize`（28→31）/ `chat-conversion`（fixture 升級
+  request body 層、+3 用例）/ `context-builder` / `compaction-policy` + 既有 5 支
+  client compaction suite（`chat-message-compaction` / `context-inspector` /
+  `context-gauge-compaction` / `compaction-decision-card` /
+  `chat-message-compacting`）；手動驗收併入 N11（MCP screenshot → 連壓兩次 +
+  F5 → compact request `cache_n` ≈ `prompt_n` 高命中 + 壓縮後下一 turn 高命中
+  （post-compaction preEncode 修後生效）+ 無 tools 對話壓縮行為回歸）。
 - **Phase 1 5.8 手動驗收（未做；可與 v4 一併驗）**：
   1. 有 cmp 的對話：送出 payload = inspector 顯示 = devtools 抓包（附件佔位符除外逐欄位一致）。
   2. 手動「Compact now」可產生 cmp（聊天列出現 entry；下一輪 payload 含 summary）。
@@ -2764,6 +2786,10 @@ static async createCompactionMessage(params: {
 
 > compact request session 欄位一致性（規格 §3.31）：`tools` / thinking kwargs
 > thread 進壓縮路徑 + `preEncode` 同類修。皆加性參數、無新設定、無新 meta。
+>
+> **進度（2026-10-19）**：N11.4.1 source（5 檔）+ N11.4.2 測試（2 檔）已完成、
+> 待使用者 `npm run check` + unit `summarize` / `chat-conversion` + 5 支 client
+> compaction suite 驗證；通過後勾項。
 
 ### N11.4.1 source（5 檔）
 - [ ] `summarize.ts`：`SummarizeOptions` 加 `tools?` / `enableThinking?` /

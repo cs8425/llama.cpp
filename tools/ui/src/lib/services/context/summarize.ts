@@ -23,8 +23,9 @@
  *   attachments become placeholders, tool calls reduce to names.
  */
 
-import { AttachmentType, MessageRole } from '$lib/enums';
+import { AttachmentType, MessageRole, ReasoningEffort } from '$lib/enums';
 import { ChatService } from '$lib/services/chat.service';
+import type { OpenAIToolDefinition, SettingsChatServiceOptions } from '$lib/types';
 import type { ApiChatMessageData } from '$lib/types/api';
 import type { ChatMessageTimings } from '$lib/types/chat';
 import type { DatabaseMessage, DatabaseMessageExtra } from '$lib/types/database';
@@ -96,6 +97,13 @@ export function toSummaryMode(value: unknown): SummaryMode {
 
 /** Options for {@link summarizeMessages}. */
 export interface SummarizeOptions {
+	/**
+	 * Session-level thinking switch (N11.4): mirrors the conversation's live
+	 * agentic turns (`enableThinking` → `chat_template_kwargs`) so the compact
+	 * request's rendered prompt stays their prefix (KV-cache affinity).
+	 * prefix-stable mode only.
+	 */
+	enableThinking?: boolean;
 	/** Max tokens for the summary (default 1024). */
 	maxTokens?: number;
 	/** Sampling temperature (default 0.2 — dense, low-creativity). */
@@ -114,6 +122,18 @@ export interface SummarizeOptions {
 	 * prefix in both settings.
 	 */
 	excludeReasoning?: boolean;
+	/**
+	 * Session-level reasoning effort (N11.4): mirrors the live turns'
+	 * `reasoningEffort` (→ `thinking_budget_tokens`). prefix-stable mode only.
+	 */
+	reasoningEffort?: ReasoningEffort;
+	/**
+	 * Session-level tool definitions (N11.4): mirrors the live turns'
+	 * `tools` — the chat template renders the definitions into the prompt, so
+	 * without them the compact request diverges from the live payload at
+	 * token 0 (KV cache 100% miss). prefix-stable mode only.
+	 */
+	tools?: OpenAIToolDefinition[];
 }
 
 /**
@@ -205,7 +225,8 @@ function summarizeToolCalls(toolCallsJson: string): string {
  *   stop-compaction controller for manual actions). An aborted signal throws
  *   an `AbortError` so callers can distinguish "stopped" from "failed".
  * @param options - maxTokens / temperature / custom prompt / mode /
- *   excludeReasoning (see {@link SummarizeOptions}).
+ *   excludeReasoning / session fields (tools + thinking kwargs, N11.4; see
+ *   {@link SummarizeOptions}).
  * @returns The summary text (trimmed) plus the actual completion tokens when
  *   the server reported them (null otherwise). Throws on any failure — the
  *   caller must treat that as "do not compact".
@@ -244,9 +265,23 @@ export async function summarizeMessages(
 	// compaction success check (02-data-model §3.4).
 	let responseTimings: ChatMessageTimings | undefined;
 
+	// N11.4: the session-level wire fields (tools / thinking kwargs) must
+	// match the conversation's live agentic turns so the compact request's
+	// rendered prompt is their prefix (KV-cache affinity). Transcript mode
+	// is a different shape by design (no cache affinity) — the fields stay
+	// off there.
+	const sessionOptions: SettingsChatServiceOptions =
+		options.mode === 'transcript'
+			? {}
+			: {
+					enableThinking: options.enableThinking,
+					reasoningEffort: options.reasoningEffort,
+					tools: options.tools
+				};
 	const response = await ChatService.sendMessage(
 		messages,
 		{
+			...sessionOptions,
 			onComplete: (_content: string, _reasoningContent: string | undefined, timings: ChatMessageTimings | undefined) => {
 				responseTimings = timings;
 			},
