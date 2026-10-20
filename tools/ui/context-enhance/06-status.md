@@ -54,6 +54,7 @@
 | N11 — compact request 前綴一致性：tool result 附件被丟（N11.1）+ full-path summary（N11.2 = A4，§3.30） | ✅ **完成並確認**（2026-10-18：N11.1——轉換的 `extra → parts` 抽成 `ChatService.buildExtraContentParts`（固定序 / images 一律 cap / 無 gating）、tool+extra 不再 early-return 丟附件、in-flow 調同一 builder（順手修不 cap + 順序改 user input 路徑）、`toAgenticMessages` TOOL 分支直通、序列化對齊（assistant + tool_calls + 空 content → 省略 content 欄位）、清理 5 個 unused imports；`normalizeMessagesForApi` / `resolveOutgoingMessages` / `buildLlmContext` / `preEncode` / `sendMessage` / vision filter 全未動（D1：無 model 參數、無新 gating）；N11.2（A4）——`summarizeMessages` / `summarizeWithRetry` 收 `planPath`、prefix-stable payload = `buildLlmContext(planPath).messages` + instruction（刪自組裝）、transcript = `toSummarize + kept`、兩呼叫點傳 `planPath`（re-summarize = `effectiveCompactionPath(path)`）+ `summarizedCount = toSummarize + kept`（`chat:871` 不改）；N11.3——`tests/unit/summarize.test.ts` 依決定 B 修好（補 `planPath` + mock `convertDbMessageToApiChatMessageData` + payload assertions = `buildLlmContext(planPath).messages` + instruction）+ 新 `tests/unit/chat-conversion.test.ts`（真 ChatService、stores / cap mock：`buildExtraContentParts` 固定序 + cap / 轉換矩陣 / 空 content 三態 / in-flow ≡ DB rebuild byte-identity / 合成 fixture compact request = 最後 payload byte-prefix + instruction）；`npm run check` 0 錯 + unit `summarize` 28/28 / `chat-conversion` / `context-builder` 全綠（第一輪 4 type + 6 runtime 全在 `summarize.test.ts` 測試檔 2 處 desync、已修、來源碼零改動）；手動驗收未做（MCP screenshot → 連壓兩次 + F5 → `cache_n` 高命中，§4 清單）；執行清單 §5g） |
 | N11.4 — compact request session 欄位一致性：`tools` / thinking kwargs 未帶 → cache 完全失效（N11 後續；§3.31） | ✅ **完成並確認**（2026-10-19：compact request body 缺 agentic 主 payload 每 turn 都帶的 `tools`（`agentic:817`）→ chat template 把 tool definitions 渲染進 prompt 開頭 → 渲染 prompt 從 token 0 分岔 → KV cache 100% miss（session 最大 request 冷算）。N11 只保證 messages 陣列層一致性、session 欄位從未 thread 進壓縮路徑；次級分岔 = `enableThinking` / `reasoningEffort`（有設定時 agentic turn 帶 `chat_template_kwargs`、compact request 永不帶）；`preEncode`（`chat.service.ts:924–969`）同根因（`chat:697` / `chat:1834` 預熱與下一 agentic turn 不符）。實做：`SummarizeOptions` thread `tools` + thinking kwargs（prefix-stable only；in-loop 直接用 loop 的 `tools` 100% 精確；chat store `resolveSessionFields` 決定性重算、mirror `agentic:372–388` / `getApiOptions:422–428`）+ `preEncode` 加參（決定性：有 enabled tools 即每 turn 皆 agentic、無預熱歧義）+ 新 `agenticStore.resolveEnabledToolsForConversation`（放 agentic store 避免 tools store 循環 import）；5 source + 2 test 檔（summarize 3 新向量 + chat-conversion fixture 升級到 request body 層 3 用例）、加性參數、無新設定 / 無新 meta；`npm run check` + unit `summarize`（28→31）/ `chat-conversion`（fixture 升級 request body 層 +3 用例）/ `context-builder` / `compaction-policy` + 既有 5 支 client compaction suite 全綠（第一輪 7 型別錯 + 1 執行失敗全在測試端 / helper 型別標註、已修、來源邏輯零改動，見 §3.31 狀態）；**N11 手動驗收已可進行**（N11.4 已先完成）；執行清單 §5h） |
 | N12 — Context Inspector 凍結：`content: undefined`（tool-call-only assistant）display/estimation 未容忍（bug；§3.32） | ✅ **完成並確認**（2026-10-19：`apiMessageBytes` 加 `undefined` 分支（0 bytes）+ doc comment；`contentText` 加 nullish 守衛；`sanitizePayload` 加 `content == null` pass-through；`ApiChatMessageData.content` JSDoc（runtime 可省略）；unit `compaction-policy` 新向量（`content: undefined` cast → 80 bytes = tool_calls JSON only）+ client `context-inspector` 新「未 compact」fixture（5 列）+ 4 斷言（render / preview / 展開 / Copy JSON 無 content key）；**wire shape 零改動**（`undefined`→`''` 會加 `"content": ""` key → KV cache prefix 斷）；使用者跑 `npm run check` 0 錯 + unit `compaction-policy` + client `context-inspector` 全綠；剩 N12.3 手動驗收（§4 清單）；執行清單 §5i） |
+| 07 — Agentic Loop Guard：turns 無限制語義 + wall-time soft/hard limit（§3.33） | 🚧 **Phase A/B/C 完成並確認；Phase D 待確認**（2026-10-19：獨立於 01–06 compaction，07 單獨成文。Phase A settings/types/解析（4 key + `parseAgenticTurnLimit`/`parseAgenticTimeLimitMs` + `getConfig` 走 helper）+ Phase B 行為（`gates` continue reason `turns`/`softTime` + `hardLimitNotices` + loop 3 順序邊界 gate + hard `setTimeout` 包 LLM call + 兩處 hard-stop 設 notice + `resumeAgenticFlowFromTail` + `continueAsNextAgenticTurn` 公開）+ Phase C UI（continue 卡片 2 文案 D10 + 新 `ChatMessageAgenticLimitNotice` 常駐通知列、Resume/Dismiss、loading 時 Resume disabled）皆經使用者逐段 `npm run check` 確認；Phase D：unit `agentic-limits`/`agentic-gates` + client `agentic-limits` + 本檔 §3.33/§5j 已加，**待使用者跑 check + unit + client 確認**；手動驗收清單 07 §5 / §5j） |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
 | 設計修正 — threshold 觸發語義解耦（§3.12） | ✅ 完成並確認（使用者 check + unit 26/26 全綠） |
@@ -2408,6 +2409,53 @@ in-flow push（`agentic:942`）/ `buildLlmContext` / `normalizeMessagesForApi`
 - 2026-10-19（晚）：使用者跑 `npm run check` 0 錯 + unit `compaction-policy` +
   client `context-inspector` 全綠；**N12 完成**（剩 N12.3 手動驗收，§5i）。
 
+## 3.33 07 Agentic Loop Guard：turns 無限制語義 + wall-time soft/hard limit（07 規格定稿 2026-10-19；Phase A/B/C 完成並確認、Phase D 待確認）
+
+> 獨立於 01–06 context compaction（07 單獨成文，見 `07-agentic-limits.md`）；
+> 決策 D1–D11 全文在 07 §3。本節只記錄 07 的實做明細 + 對 07 規格的差異 +
+> 測試 + 狀態。
+
+### 實做明細（檔案級，依 07 §5 Phase A–D）
+
+**Phase A — settings / types / 解析（無行為改變）**
+- `constants/settings-keys.constants.ts`：+4 key（`AGENTIC_SOFT_TIME_LIMIT[_UNIT]`、`AGENTIC_HARD_TIME_LIMIT[_UNIT]`）
+- `constants/settings.constants.ts`：`agenticMaxTurns` 加 `min: 0` + help「0 或負數 = 無限制」；+4 entry（soft/hard time limit INPUT + unit SELECT `s`/`m`/`h`、icon Timer/Clock/CalendarClock）
+- `constants/agentic.constants.ts`：`DEFAULT_AGENTIC_CONFIG` + `softTimeLimitMs: 0` / `hardTimeLimitMs: 0`
+- `types/agentic.d.ts`：`AgenticConfig` + `softTimeLimitMs` / `hardTimeLimitMs`；`AgenticFlowParams` + `onHardLimit?`
+- `utils/agentic.ts`：`parseAgenticTurnLimit` / `parseAgenticTimeLimitMs`（純函式、可單測）
+- `stores/agentic/index.svelte.ts`：`getConfig` 改走兩 helper
+
+**Phase B — 行為**
+- `stores/agentic/gates.svelte.ts`：`AgenticContinueReason = 'turns' | 'softTime'`；`pendingContinueRequests` → `SvelteMap<…, reason | null>`；`requestContinue(convId, signal, reason = 'turns')`；`hardLimitNotices` SvelteMap + `get/set/clearHardLimitNotice`；`clear()` 一併清 notice
+- `stores/agentic/index.svelte.ts`：`runAgenticFlow` 透傳 `onHardLimit`；`executeAgenticLoop` 加 `flowStart` / `hardLimitHit`、3 順序邊界 gate（turns → soft → hard）、hard `setTimeout` 包 LLM call（`finally clearTimeout`）、兩處 hard-stop 才設 notice；Continue 重設 `turn = 0` + `flowStart`；facade `get/clearHardLimitNotice`；`onConversationsDeleted` 加 `gates.clear(convId)`
+- `stores/chat/index.svelte.ts`：`runAgenticFlow` 傳 `onHardLimit: () => this.stopGenerationForChat(convId)`；`setChatLoading(convId, true)` 清 notice；新 public `resumeAgenticFlowFromTail()`
+- `stores/chat/flows.svelte.ts`：`continueAsNextAgenticTurn` 改 public
+
+**Phase C — UI**
+- 新 `ChatMessageAgenticLimitNotice.svelte`（in-chat 常駐通知列；`role="status"`；Resume → `resumeAgenticFlowFromTail`、Resume 在 `chatStore.isLoading` 時 disabled；Dismiss → `clearHardLimitNotice`；只對 active conv 顯示）
+- `ChatMessageAgenticContent.svelte`：`pendingContinue` 改讀 reason 並傳給卡片
+- `ChatMessageActionCardContinueRequest.svelte`：`reason` prop → 2 種文案（turns 現文案 / softTime D10）
+- `ChatMessages.svelte`：compaction anchor 旁掛通知列；barrel 補 export
+
+### 對 07 規格的差異
+
+- **07 §4.5 facade 只列 `get/clearHardLimitNotice`**：`setHardLimitNotice` 仍是 gates 內部動作（兩處 hard-stop 呼叫）；**未**加進 public facade（保持 spec 原樣）。測試端以型別 cast 取 `agenticStore.gates` 設定 notice。
+- 其餘依 07 規格無差異。
+
+### 測試規劃
+
+1. **unit `tests/unit/agentic-limits.test.ts`（新）**：`parseAgenticTurnLimit`（NaN → fallback；≤0 → Infinity；>0 → round；numeric string）+ `parseAgenticTimeLimitMs`（NaN/≤0 → 0；s/m/h 倍率；小數；invalid/missing unit → m；case-insensitive；numeric string）。
+2. **unit `tests/unit/agentic-gates.test.ts`（新，加碼）**：`AgenticGates` 直接實例化（mock `toolsStore` / `permissionsStore` 避開 store 依賴鏈）：hard-limit notice set/get/clear + `clear()` 清 notice；continue reason pending → resolve → clear + abort → false。
+3. **client `tests/client/agentic-limits.svelte.test.ts`（新）**：continue 卡片 2 種文案（turns / softTime）+ Continue/Stop 回傳；通知列只對 active conv 顯示 / Dismiss 清除 / Resume 呼叫 `resumeAgenticFlowFromTail`（mock）/ loading 時 Resume disabled。
+4. **`settings-registry-invariants`（既有、generic）**：新 4 key 自動收編、無新測試。
+5. `npm run check` 0 錯 + unit（agentic-limits / agentic-gates）+ client（agentic-limits）全綠。
+
+### 狀態
+
+- 2026-10-19：07 規格定稿（D1–D11）。
+- Phase A/B/C：已實做並經使用者逐段確認（`npm run check` 全綠）。
+- Phase D（本節）：unit + client 測試 + 文檔已加；**待使用者跑 `npm run check` + unit + client 確認**。手動驗收清單見 07 §5 / §5j。
+
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
 > 原則：store 層不感知 compaction（除了觸發+建節點的協調邏輯）；
@@ -2995,6 +3043,51 @@ static async createCompactionMessage(params: {
       Building payload）
 - [ ] 展開 tool-call-only 列 + Copy JSON → 不炸
 - [ ] 普通（無 tools）對話 inspector → 無回歸
+
+## 5j. 07 Agentic Loop Guard 執行清單（依序做；每完成一項可請使用者編譯確認）
+
+> 07 規格（D1–D11，`07-agentic-limits.md`）：turns 無限制語義 + wall-time
+> soft/hard limit。獨立於 01–06 compaction。Phase A–D。
+
+### A. settings / types / 解析
+- [x] `settings-keys.constants.ts` +4 key
+- [x] `settings.constants.ts`：`agenticMaxTurns` `min: 0` + help；+4 entry（INPUT + unit SELECT `s`/`m`/`h`）
+- [x] `agentic.constants.ts`：`DEFAULT_AGENTIC_CONFIG` + `softTimeLimitMs: 0` / `hardTimeLimitMs: 0`
+- [x] `types/agentic.d.ts`：`AgenticConfig` +2、`AgenticFlowParams` + `onHardLimit`
+- [x] `utils/agentic.ts`：`parseAgenticTurnLimit` / `parseAgenticTimeLimitMs`
+- [x] `stores/agentic/index.svelte.ts`：`getConfig` 改走 helper
+
+### B. 行為
+- [x] `gates.svelte.ts`：continue reason `turns`/`softTime` + `hardLimitNotices` + 清除路徑
+- [x] `stores/agentic/index.svelte.ts`：loop 3 邊界 gate + hard timer + 設 notice + facade + `onConversationsDeleted` 清
+- [x] `stores/chat/index.svelte.ts`：傳 `onHardLimit` + `setChatLoading(true)` 清 notice + `resumeAgenticFlowFromTail`
+- [x] `stores/chat/flows.svelte.ts`：`continueAsNextAgenticTurn` 公開
+
+### C. UI
+- [x] `ChatMessageActionCardContinueRequest.svelte`：`reason` prop → 2 文案（turns / softTime D10）
+- [x] `ChatMessageAgenticContent.svelte`：`pendingContinue` 讀 reason 傳卡片
+- [x] `ChatMessageAgenticLimitNotice.svelte`（新）：Resume / Dismiss（loading 時 Resume disabled）
+- [x] `ChatMessages.svelte`：尾端掛通知列 + barrel export
+
+### D. 測試 + 文檔
+- [x] unit `tests/unit/agentic-limits.test.ts`（新）
+- [x] unit `tests/unit/agentic-gates.test.ts`（新、加碼）
+- [x] client `tests/client/agentic-limits.svelte.test.ts`（新）
+- [x] `settings-registry-invariants` 自動收編 4 key（無新測試）
+- [x] `06-status.md` §3.33 + §5j（本節）
+- [ ] `npm run check` + unit（agentic-limits / agentic-gates）+ client（agentic-limits）全綠（**使用者跑**）
+
+### 手動驗收（使用者做；07 §5 清單）
+- [ ] `maxTurns = 0` → 跑超過 10 turns 不彈卡片
+- [ ] soft = `0.5`（m）→ turn 完成後彈 soft 卡片（D10 文案）；Continue 後計時重設、再 0.5m 再彈
+- [ ] hard = `10`（s）→ in-flight streaming 被中斷（**server 端也停**）、partial 存檔、flow 結束、該對話尾端出現通知列（含時間戳）
+- [ ] hard 在長 tool 執行中已超時 → 邊界直接停 + 通知列，不啟動新 LLM call
+- [ ] 通知列 **Resume**（in-flight 中斷後）→ 新 assistant 接在 partial 之後、context 含 partial、完整 agentic loop（帶 tools）、新計時；**邊界停止後** → 新 assistant 接在最後 tool result（或 cmp entry）之後
+- [ ] 通知列 **Dismiss** → 消失；該對話再發新訊息（任何 generation）→ notice 清除
+- [ ] 小數 + 三單位：`0.5 m` / `90 s` / `0.5 h` 皆生效
+- [ ] 三者皆 0 → 無限行為（回歸）
+- [ ] soft 卡片顯示期間按 Stop 按鈕 → 照舊中止（gate abort → false）
+- [ ] 非 active 對話觸發 hard limit → 打開該對話後通知列在
 
 ## 6. 專案慣例 / 陷阱（Phase 1 寫碼前速讀）
 

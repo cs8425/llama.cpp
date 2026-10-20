@@ -20,6 +20,9 @@
 		return agenticStore.getHardLimitNotice(conv.id);
 	});
 
+	// Resume is unavailable while a generation is in flight (07 §4.5).
+	let resumeDisabled = $derived(chatStore.isLoading);
+
 	// Resume: continue the loop from the active path tail with a fresh turn
 	// counter and time budget (07 §4.6 / D9).
 	function handleResume() {
@@ -47,7 +50,12 @@
 				<span class="text-foreground/80 font-medium">Agentic hard time limit reached.</span>
 
 				<div class="ml-auto flex shrink-0 items-center gap-1">
-					<Button class="h-7 gap-1 px-2 text-xs" onclick={handleResume} variant="default">
+					<Button
+						class="h-7 gap-1 px-2 text-xs"
+						disabled={resumeDisabled}
+						onclick={handleResume}
+						variant="default"
+					>
 						<Play class="h-3.5 w-3.5" />
 
 						Resume
