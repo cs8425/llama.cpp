@@ -210,14 +210,19 @@ onFlowComplete(且 !isChatLoading && !agenticStore.isRunning)
       → DatabaseService.createCompactionMessage({
             convId, parentId: 路徑最後一則.id,
             content: summary,
-            compactionMeta: { firstKeptMessageId(可缺 = 空 kept), summarizedCount,
-                              model, estimatedTokensBefore }
+            compactionMeta: { firstKeptMessageId(可缺 = 空 kept), summarizedCount(drop 數),
+                              model, estimatedTokensBefore(真實 contextUsed), summaryTokens }
         })
       → conversationsStore.addMessageToActive(cmp)
       → conversationsStore.updateCurrentNode(cmp.id)
       → (選)triggerPreEncode —— 用「新」context 預熱,下一輪直接命中
       → toast「Context compacted: ~X → ~Y tokens」
 ```
+
+> **toast 數字語義（N13 D1，06-§3.34）**：X = `meta.estimatedTokensBefore`
+> （plan 時點**真實 contextUsed**、D2）；**Y = kept + summary（壓縮後整體
+> context）— 刻意與 cmp 列的 Y（`meta.summaryTokens`、summary 本身）不同量**；
+> toast 是「總 context」視角、cmp 列是「summary」視角（RC1）。
 
 ### 4.3 Inspector 人工介入
 

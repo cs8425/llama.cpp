@@ -21,14 +21,22 @@ export interface CompactionMeta {
   /** kept 區的第一則訊息 id(送出窗口的起點;user 或 assistant 訊息)。
    *  **缺欄位 = 空 kept**:所有訊息都被壓縮(payload = [system, summary]) */
   firstKeptMessageId?: string;
-  /** 被 summarize 掉的訊息數(不含 system prompt),供 UI 顯示 */
+  /** 被 summary 取代的訊息數(= plan.toSummarize.length,不含 system prompt),
+   *  供 UI 顯示("Summarized N messages" 的 N)。取代 A4/N11.2 的顯示數
+   *  (整路徑 = toSummarize + kept);06-§3.34 N13 D1、使用者確認 2026-10-23 */
   summarizedCount: number;
   /** true = split user-message span(切點落在單一 span 內的 assistant 訊息) */
   isSplitTurn?: boolean;
   /** 產生 summary 用的模型(可選,供 UI 顯示) */
   model?: string;
-  /** 產生 summary 時的 prompt 大小估計(token),供 UI 顯示「省了多少」 */
+  /** 壓縮前的真實 context 大小(token;N13 D2:plan 時點的真實 contextUsed、
+   *  gauge 同源),供 UI 顯示「省了多少」。即 cmp 列 "Summarized N messages
+   *  (~AAA → B tokens)" 的 AAA(含 system head + kept、「~」近似;精確區域大小
+   *  server 端測不到)。非 derived 整路徑總和(clamped-segment 膨脹,見 §3.4 已知限制) */
   estimatedTokensBefore?: number;
+  /** 建立時 summary 本身的大小(token;N13 D3:真實 completion tokens,
+   *  未回報 = bytes/4),即 cmp 列「變成 B tokens」的 B;供 cmp 列 / inspector 主欄顯示 */
+  summaryTokens?: number;
 }
 ```
 
@@ -284,6 +292,19 @@ server 只回「每 request／assistant turn 層級」的 token 數(存於 assis
 `MIN_SUMMARIZE_TOKENS`(預設 2000)現為 **token 尺度**(原本 byte);
 mode B 切點原本「byte 對 token budget」的錯配順手修好。
 
+> **已知限制(N13,2026-10-23;06-§3.34)**:
+> 1. **clamped-segment 膨脹**:整路徑 derived total(telescoping sum)=
+>    **最後一 request 的 prompt + Σ 每個被 clamp 的負段 + 尾端 bytes/4**。in-loop
+>    compaction 後,舊 cmp 右側的段 raw 值為負(prompt 縮水)→ clamp 0 → total
+>    恰好多出先前那次壓縮的縮水量(每次 in-loop 壓縮累加)。受影響消費端:plan
+>    切點 walk(相對大小仍有意義)、`estimateCompactionSavings`、顯示。規格:
+>    顯示「before」與 gauge saved 改用**真實 `contextUsed`**(N13 D2),derived
+>    total 只留給切點 walk。
+> 2. **clamped 0 = 無資料**:clamp 後的 0 **不得寫進 per-message map 當真實值**
+>    (N13 D5:owner 缺欄,而非 0)——顯示落回估算(bytes/4),任何表面不得顯示
+>    假 `0`(in-loop 下一 turn 後 cmp 會成 clamp 段 owner,舊行為直接顯示 `~0`)。
+>    plan 數學不變(`messageSize` 非尾端無真實值 = 0,與 clamped 0 同值)。
+
 ## 4. 邊界情境行為表
 
 | 情境 | 行為 | 依據 |
@@ -308,7 +329,7 @@ mode B 切點原本「byte 對 token budget」的錯配順手修好。
 | 新對話第一則訊息 | 不可能觸發(可 summarize 區不足 minSummarizeTokens) | policy |
 | compact 結果超標（summary > keepTarget% × n_ctx;v4:head 不計） | 重發同一 request（`contextSummaryMaxAttempts`，預設 3 次總計；1 = 一次；≤0 = 無限）→ 仍超 → gate 問 user：[使用這次壓完 / 重壓 / 這次不壓]；use it = 建 cmp（接受超標 summary）；retry = 嘗試次數重新計算後重跑；skip = 不建 cmp、維持全量 context | §6（v3） |
 | gate 等待期間 abort（flow stop / Stop 鍵） | 等同 skip（fail-open），不建 cmp | §6（v3） |
-| server 沒回 summary 的 token 數 | 成功判定改用 `byteLen(summary content)` 代入（E：無 API 數 → byte 數） | §3.4/§6（v3） |
+| server 沒回 summary 的 token 數 | 成功判定改用 `round(byteLen(summary content) / 4)`（N13 D4：v4 估算單位統一 bytes/4；舊「byte 數」為 v3 殘留、≈ 4× token 數） | §3.4/§6（v4、N13） |
 
 ## 5. Summary 產生(簡單版)
 

@@ -3,7 +3,7 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新，2026-10-19）**：**N12 Context Inspector 凍結 ✅ 完成並確認（source + 測試 + `npm run check` + unit + client 全綠）；下一步 = 手動驗收批（N12.3 + N11/N11.4 + N10 + N8 + N7 + 5.8，可一併）→ N9（規格定稿、未實做）**
+> **恢復點（最新，2026-10-23）**：**N13 compaction token 顯示（toast / cmp 列 / `~0`）根因確認 + 規格 D1–D5 定稿 + label 格式使用者確認（N = drop 數 / AAA = 壓縮前真實 contextUsed / B = summaryTokens；未實做；§3.34 / §5k）**；此前 = N12 Context Inspector 凍結 ✅ 完成並確認（source + 測試 + `npm run check` + unit + client 全綠）；下一步 = N13 實做（§5k）→ 手動驗收批（N12.3 + N11/N11.4 + N10 + N8 + N7 + 5.8，可一併）→ N9（規格定稿、未實做）
 > （N12：三 display 消費端對 tool-call-only assistant 的 `content === undefined`
 > （刻意 wire shape、N11 byte-identical 要求）total function（視為空 / 0 bytes）+
 > `ApiChatMessageData.content` JSDoc；**wire shape 零改動**；unit 1 向量 + client
@@ -30,7 +30,18 @@
 >    reload 後全量送出 → overflow；非永久損毀（無資料遺失、可恢復）。規格 =
 >    原子 commit（N9.1）+ 載入收編 orphan（N9.2）+ 可選送出前 overflow guard
 >    （N9.3）+ fail-open 語義入 02-§4（N9.4）。
-> 3. Phase 3 可選後續（05-§1）。
+> 3. **N13 — compaction token 顯示（規格定稿 2026-10-23、未實做；§3.34 / §5k）**：
+>    toast / cmp 列 / inspector / gauge 的 token 數字互不相干、且對不上 server 真實值：
+>    RC1 toast after（kept+summary）≠ 列 after（summary only）；RC2 clamped-segment
+>    膨脹 → 「before」≈ 2× 實際 prompt；RC3 clamped 0 入 map → in-loop 下一 turn 後
+>    cmp 列 / inspector 顯示假 `0`；RC4 `resolveSummarySize` fallback = raw bytes
+>    （v3 殘留、違反 v4 bytes/4 單位，潛伏）；RC5 `summarizedCount` = 整路徑（A4）
+>    但文案 / 型別 doc 讀成「被 summarize 的數」。規格 D1–D5（顯示語義統一 +
+>    新 meta 欄 `summaryTokens` + before 改真實 `contextUsed` + fallback bytes/4 +
+>    clamped 0 = 無資料、不入 map）；label 格式使用者確認 2026-10-23
+ >    （`Summarized N messages (~AAA → B tokens)`：N = drop 數、取代 A4 顯示數；
+ >    AAA = 壓縮前真實 contextUsed；B = summaryTokens）。
+> 4. Phase 3 可選後續（05-§1）。
 >
 > **此前里程碑（皆完成並確認）**：N12（2026-10-19，§3.32/§5i，inspector 凍結修：三 display 消費端 total function + JSDoc、wire shape 零改動；check + unit + client 全綠；手動驗收未做）→ N11.4（2026-10-19，§3.31/§4，session 欄位層 `tools` / thinking kwargs + preEncode；check + unit 全綠）→ N11（2026-10-18，§3.30/§4，messages 陣列層；手動驗收未做）→ N10（2026-10-18，§3.29/§4）→ N8（2026-10-18，§3.27/§4）→ N7（2026-10-04，§2u/§3.26）→ v4 真實
 > token 計數（2026-10-17，
@@ -53,6 +64,7 @@
 | N10 — in-loop compaction 的 cmp 被接成 sibling（系統性 bug；§3.29） | ✅ **完成並確認**（2026-10-18：N10.1 根因修（`onCompaction` callback + `lastCreatedInFlow` 推進）+ N10.2 已損樹修復（`findCompactionGraftFixes` 純函式 + `applyCompactionGraftFixes` IDB transaction + 啟動 migration `compaction-graft-fix-v1` + `loadConversation` 防禦層）+ N10.3 unit 5 向量（`tests/unit/branching.test.ts`）；`npm run check` + unit + 既有 5 支 client compaction suite 全綠；剩手動驗收（§4 清單）；執行清單 05-N10 / §5f） |
 | N11 — compact request 前綴一致性：tool result 附件被丟（N11.1）+ full-path summary（N11.2 = A4，§3.30） | ✅ **完成並確認**（2026-10-18：N11.1——轉換的 `extra → parts` 抽成 `ChatService.buildExtraContentParts`（固定序 / images 一律 cap / 無 gating）、tool+extra 不再 early-return 丟附件、in-flow 調同一 builder（順手修不 cap + 順序改 user input 路徑）、`toAgenticMessages` TOOL 分支直通、序列化對齊（assistant + tool_calls + 空 content → 省略 content 欄位）、清理 5 個 unused imports；`normalizeMessagesForApi` / `resolveOutgoingMessages` / `buildLlmContext` / `preEncode` / `sendMessage` / vision filter 全未動（D1：無 model 參數、無新 gating）；N11.2（A4）——`summarizeMessages` / `summarizeWithRetry` 收 `planPath`、prefix-stable payload = `buildLlmContext(planPath).messages` + instruction（刪自組裝）、transcript = `toSummarize + kept`、兩呼叫點傳 `planPath`（re-summarize = `effectiveCompactionPath(path)`）+ `summarizedCount = toSummarize + kept`（`chat:871` 不改）；N11.3——`tests/unit/summarize.test.ts` 依決定 B 修好（補 `planPath` + mock `convertDbMessageToApiChatMessageData` + payload assertions = `buildLlmContext(planPath).messages` + instruction）+ 新 `tests/unit/chat-conversion.test.ts`（真 ChatService、stores / cap mock：`buildExtraContentParts` 固定序 + cap / 轉換矩陣 / 空 content 三態 / in-flow ≡ DB rebuild byte-identity / 合成 fixture compact request = 最後 payload byte-prefix + instruction）；`npm run check` 0 錯 + unit `summarize` 28/28 / `chat-conversion` / `context-builder` 全綠（第一輪 4 type + 6 runtime 全在 `summarize.test.ts` 測試檔 2 處 desync、已修、來源碼零改動）；手動驗收未做（MCP screenshot → 連壓兩次 + F5 → `cache_n` 高命中，§4 清單）；執行清單 §5g） |
 | N11.4 — compact request session 欄位一致性：`tools` / thinking kwargs 未帶 → cache 完全失效（N11 後續；§3.31） | ✅ **完成並確認**（2026-10-19：compact request body 缺 agentic 主 payload 每 turn 都帶的 `tools`（`agentic:817`）→ chat template 把 tool definitions 渲染進 prompt 開頭 → 渲染 prompt 從 token 0 分岔 → KV cache 100% miss（session 最大 request 冷算）。N11 只保證 messages 陣列層一致性、session 欄位從未 thread 進壓縮路徑；次級分岔 = `enableThinking` / `reasoningEffort`（有設定時 agentic turn 帶 `chat_template_kwargs`、compact request 永不帶）；`preEncode`（`chat.service.ts:924–969`）同根因（`chat:697` / `chat:1834` 預熱與下一 agentic turn 不符）。實做：`SummarizeOptions` thread `tools` + thinking kwargs（prefix-stable only；in-loop 直接用 loop 的 `tools` 100% 精確；chat store `resolveSessionFields` 決定性重算、mirror `agentic:372–388` / `getApiOptions:422–428`）+ `preEncode` 加參（決定性：有 enabled tools 即每 turn 皆 agentic、無預熱歧義）+ 新 `agenticStore.resolveEnabledToolsForConversation`（放 agentic store 避免 tools store 循環 import）；5 source + 2 test 檔（summarize 3 新向量 + chat-conversion fixture 升級到 request body 層 3 用例）、加性參數、無新設定 / 無新 meta；`npm run check` + unit `summarize`（28→31）/ `chat-conversion`（fixture 升級 request body 層 +3 用例）/ `context-builder` / `compaction-policy` + 既有 5 支 client compaction suite 全綠（第一輪 7 型別錯 + 1 執行失敗全在測試端 / helper 型別標註、已修、來源邏輯零改動，見 §3.31 狀態）；**N11 手動驗收已可進行**（N11.4 已先完成）；執行清單 §5h） |
+| N13 — compaction token 顯示：toast / cmp 列 / `~0`（根因 + 規格 2026-10-23；未實做） | ⬜ **規格定稿、未實做**（2026-10-23：使用者報案（in-loop agentic、151 則路徑：compact request 實際 prompt 105,094 / completion 7,808，顯示 `~203,171`；toast 的 after ≠ cmp 列的 after；下一 request 後列的 after → `~0`）。五根因全對 code 確認：RC1 toast after（kept+summary）與列 after（summary only）是兩個量（v4 決策、規格未定義）；RC2 `deriveRealMessageTokens` clamped-segment 膨脹 → 整路徑 derived total ≈ 最後 prompt + Σ 先前壓縮縮水（203,171 ≈ 105,094 + ~98k）；RC3 clamped 0 寫進 map 當真實值 → in-loop 下一 turn cmp 成段 owner → 列 / inspector 顯示假 `0`（`??` 不對 0 fallback）；RC4 `resolveSummarySize` fallback = raw byte 數（v3 殘留、違反 v4 bytes/4 單位，潛伏）；RC5 `summarizedCount` = 整路徑（A4）但型別 doc / 文案讀成「被 summarize 的數」。規格 D1–D5：顯示語義統一（列 Y = 新 meta 欄 `summaryTokens`；toast Y = kept+summary、刻意不同）+ before = 真實 `contextUsed`（D2）+ `summaryTokens` 欄（D3）+ fallback bytes/4（D4）+ clamped 0 = 無資料、不入 map（D5）；D1 label 格式使用者確認 2026-10-23（N = drop 數、取代 A4 顯示數 / AAA = 壓縮前真實 contextUsed / B = summaryTokens）；明細 §3.34；執行清單 §5k） |
 | N12 — Context Inspector 凍結：`content: undefined`（tool-call-only assistant）display/estimation 未容忍（bug；§3.32） | ✅ **完成並確認**（2026-10-19：`apiMessageBytes` 加 `undefined` 分支（0 bytes）+ doc comment；`contentText` 加 nullish 守衛；`sanitizePayload` 加 `content == null` pass-through；`ApiChatMessageData.content` JSDoc（runtime 可省略）；unit `compaction-policy` 新向量（`content: undefined` cast → 80 bytes = tool_calls JSON only）+ client `context-inspector` 新「未 compact」fixture（5 列）+ 4 斷言（render / preview / 展開 / Copy JSON 無 content key）；**wire shape 零改動**（`undefined`→`''` 會加 `"content": ""` key → KV cache prefix 斷）；使用者跑 `npm run check` 0 錯 + unit `compaction-policy` + client `context-inspector` 全綠；剩 N12.3 手動驗收（§4 清單）；執行清單 §5i） |
 | 07 — Agentic Loop Guard：turns 無限制語義 + wall-time soft/hard limit（§3.33） | ✅ **完成並確認**（2026-10-19：獨立於 01–06 compaction，07 單獨成文。Phase A settings/types/解析（4 key + `parseAgenticTurnLimit`/`parseAgenticTimeLimitMs` + `getConfig` 走 helper）+ Phase B 行為（`gates` continue reason `turns`/`softTime` + `hardLimitNotices` + loop 3 順序邊界 gate + hard `setTimeout` 包 LLM call + 兩處 hard-stop 設 notice + `resumeAgenticFlowFromTail` + `continueAsNextAgenticTurn` 公開）+ Phase C UI（continue 卡片 2 文案 D10 + 新 `ChatMessageAgenticLimitNotice` 常駐通知列、Resume/Dismiss、loading 時 Resume disabled）+ Phase D 測試（unit `agentic-limits`/`agentic-gates` + client `agentic-limits`）皆經使用者 `npm run check` 0 錯 + unit + client 全綠 + 手動驗收（07 §5 / §5j）通過確認） |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
@@ -2456,6 +2468,161 @@ in-flow push（`agentic:942`）/ `buildLlmContext` / `normalizeMessagesForApi`
 - Phase A/B/C：已實做並經使用者逐段確認（`npm run check` 全綠）。
 - Phase D（本節）：unit + client 測試 + 文檔已加；使用者跑 `npm run check` 0 錯 + unit（agentic-limits 12 / agentic-gates 10）+ client（agentic-limits）全綠 + 手動驗收（07 §5 / §5j）通過確認。**07 全部完成。**
 
+## 3.34 N13: compaction token 顯示對不上 — toast / cmp 列 / `~0`（根因確認 + 規格 2026-10-23；未實做）
+
+> 觸發：使用者報案（2026-10-23，in-loop agentic 真實對話、路徑 151 則）。compact
+> request 回應 `prompt_tokens = 105,094`（`cache_n 104,946 + prompt_n 148`）、
+> `completion_tokens = 7,808`；toast `Context compacted: ~203,171 → ~Y` 與 cmp 列
+> `Summarized 151 messages (~203,171 → ~BBB)` 互不相干、也對不上 server 數字；
+> 下一個 request 回來後列的 `~BBB` 變 `~0`。
+> 本節 = 根因確認（全對 code 驗證）+ 規格決定（D1–D5；label 格式使用者確認 2026-10-23）；
+> **未實做**（執行清單 §5k）。
+
+### 問題（使用者觀察）
+
+1. toast 的兩個數字都對不上（與 cmp 列、與 server compact request 數字皆不合）。
+2. 下一個 request 回來**前**，cmp 列 `~???` 有數字（`bytes/4` fallback）。
+3. `Summarized 151 messages (~203,171 → ~BBB)`：數字不對（203,171 ≈ 2× 實際 105,094）。
+4. 下一個 request 回來**後**：`~203,171 → ~0` — 「after」直接變 0。
+
+### 根因確認（全對 code 驗證）
+
+**RC1 — toast 的「after」與 cmp 列的「after」是兩個量（scope 錯配；v4 決策、規格未定義）**
+
+- toast（`stores/chat/index.svelte.ts:710-712` / `stores/agentic/index.svelte.ts:714-716`）：
+  `after = plan.estimatedTokensAfter + resolveSummarySize(summary.tokens, cmp.content)`
+  = **kept 區 + summary**（壓縮後的整體 context 大小）。
+- cmp 列（`ChatMessageCompaction.svelte:67-71, 241-246`）：
+  `after = summaryTokens = realTokens.get(cmp.id) ?? round(messageBytes(cmp)/4)`
+  = **summary 本身**。
+- 兩表面對同一個 compaction 事件都顯示「~before → ~after tokens」→ 「after」永遠
+  對不上（toast ≈ kept + 7.8k；列 ≈ 7.8k）。
+- 規格自相矛盾：04-ui §1.2 mock「摘要了 3 則訊息（約 1,840 → 420 tokens）」暗示
+  before = summarize 區大小、after = summary 大小；02-§1.1 `estimatedTokensBefore`
+  = 「產生 summary 時的 prompt 大小估計」（≈ 整路徑）。實做跟 02（整路徑；
+  `planCompaction:467` `estimatedTokensBefore = suffixTokens[0]`）→ 列是「整路徑 →
+  summary only」，一行混三個 scope（N 個數 = 整路徑、X = 整路徑、Y = summary only；見 RC5）。
+
+**RC2 —「before」(203,171) ≈ 2× 實際 prompt (105,094)：clamped-segment 膨脹**
+
+- `deriveRealMessageTokens`（`compaction-policy.ts:151-207`）：段總和
+  `segTotal = (p2+c2) − (p1+c1) − predicted1`，**clamp ≥ 0**（`:197-200`）。
+- 整路徑總和（telescoping sum）= **最後一 request 的 prompt** +
+  **Σ 每個被 clamp 的負段** + 尾端 bytes/4。無 clamp 時總和恰等於最後 prompt。
+- in-loop compaction 後，舊 cmp 右側的段 raw 值大幅為負（prompt 縮水）→ clamp 0 →
+  **總和恰好多出先前那次壓縮的縮水量**；每次 in-loop 壓縮累加自己的縮水。
+- 對映使用者數據：203,171 ≈ 105,094（實際最後 prompt）+ ~98k（先前 in-loop
+  壓縮縮水）+ 尾端估算。本案是**第二次壓縮**（151 = 整個 effective path、含舊
+  cmp；06-§3.30 已記「summarizedCount 含舊 cmp 一筆」）。
+- 膨脹總和流進：`meta.estimatedTokensBefore`（列 + toast + gauge saved）、plan
+  `suffixTokens`（mode B 切點）/ mode A walk、`estimateCompactionSavings`。
+  **觸發不受影響**（用真實 `contextUsed`，02-§3.4）。
+- 此 clamp 是有單測明確斷言的既有行為（`compaction-policy.test.ts:350-365`：
+  `real.get('u2')).toBe(0)`）— policy 層「按設計」，但顯示層從未定義「clamp 後的 0」
+  該讀成什麼（見 RC3）。
+
+**RC3 — 下一 request 後 `~0`：clamped 0 被寫進 map 當「真實值」，顯示端 `??` 不 fallback**
+
+- in-loop 壓縮後，下一個 loop turn 沒有新 user 訊息：path =
+  `[..., a (assistant, timings), cmp (user), b (assistant, timings)]`。段 (a, b)
+  內只有 cmp → `lastNonAssistantId`（`:215-230`）把**段總和歸給 cmp**。
+- 該段 raw = 新 prompt − 舊 prompt − predicted < 0 → clamp 0 → `real.set(cmp.id, 0)`。
+- 列：`realTokens.get(id) ?? bytes/4` — `??` 只對 `undefined` fallback；**存進去的
+  0 贏過** → 顯示 `~0 tokens`。
+- inspector 同曝露：`DialogContextInspector.svelte:174-184` summary row 主欄讀同一
+  map → 也顯示 `0`。
+- （between-flows 情境 clamped 0 會落在新 user 訊息上、cmp 保留 bytes/4 — cmp 列
+  的 `~0` 是 in-loop 特有症狀，但根因相同：clamped 0 = 「無資料」被當「真實測量」。）
+- 下一 request 前 cmp 在尾端（之後無 assistant）→ 不在 map → bytes/4（所以「有
+  數字」）；下一 request 回來後 cmp 不再是尾端、且成 clamp 段 owner → `~0`。
+
+**RC4（潛伏）— `resolveSummarySize` fallback 用 raw byte 長、不是 bytes/4（違反 v4 單位）**
+
+- `resolveSummarySize(tokens, content) = tokens ?? byteLength(content)`
+  （`compaction-policy.ts:721-723`）— server 未回 timings 時，成功判定
+  （`evaluateCompactionResult`）與 toast 「after」會代入**字節數**（≈ 4× token 數）。
+- v4 規格（02-§3.4）規定唯一估算單位是 `bytes/4`；02-§4 邊界表「server 沒回
+  summary 的 token 數 → byteLen」是 v3 殘留、與 v4 開頭矛盾。
+- 本案 `summary.tokens = 7,808`（`summarize.ts:311` = `timings.predicted_n`）未觸發；
+  屬潛伏單位 bug。
+
+**RC5（label）— `summarizedCount` = 整路徑，但「Summarized N messages」讀成「被 summarize 的數」**
+
+- A4 決定（N11.2，06-§3.30）：`summarizedCount = plan.toSummarize.length +
+  plan.kept.length`（整個 effective path、「實際被 summary 覆蓋的數」、與
+  `estimatedTokensBefore` 整路徑顯示一致）。（N13 D1 取代 2026-10-23：顯示數
+  改為 drop 數 = `toSummarize.length`；A4 的 full-path payload 結構不變。）
+- 型別 doc（`types/database.d.ts:122-123`）仍寫「number of summarized messages
+  (excluding the system prompt)」— doc 與實做脫鉤。
+- gauge 重用同一 count（「Compacted: N messages · ~X tokens saved」，
+  `ContextGaugePopup.svelte:80,195`）→ 同樣的歧義。
+
+### 數字對照（本案）
+
+| 數字 | 來源 | 值 | server 實際 |
+| ---- | ---- | -- | ---------- |
+| toast / 列「before」 | `plan.estimatedTokensBefore` = 整路徑 derived total | 203,171 | compact request prompt = 105,094（≈ 105k + ~98k clamp 膨脹 + 尾端） |
+| toast「after」 | `plan.estimatedTokensAfter`（kept）+ `resolveSummarySize(7808, …)` | kept + 7,808 | 下一 request 的實際 prompt（system + summary + kept + template）— 要下一 response 才知道；且 toast 不計 system head / tools / template → 系統性偏小 |
+| 列「after」（下一 request 前） | cmp content 的 `bytes/4`（尾端 fallback） | ≈ 6–8k | summary = 7,808 completion tokens（接近） |
+| 列「after」（下一 request 後） | `real.get(cmp.id)` = clamped 0（RC3） | 0 | —（假值） |
+
+結論：「toast 兩個數字都對不上」= ① before ≠ server 實際（RC2）② after ≠ 列的
+after（RC1）③ 列的 after → 0（RC3）。
+
+### 規格決定（D1–D5）
+
+- **D1（cmp 列 / toast 語義；解 RC1 + RC5；label 格式使用者確認 2026-10-23）**：
+  - cmp 列：**`Summarized {N} messages (~{AAA} → {B} tokens)`**（使用者確認格式：
+    「XXX 條訊息（原本佔約 AAA => 變成 B tokens）」）：**N = drop 數 =
+    `plan.toSummarize.length`**（被 summary 取代的則數；**取代 A4 的顯示數**
+    （整路徑 = toSummarize + kept，06-§3.30）— A4 的理由是「與整路徑顯示一致」，
+    顯示改「summary 事件」語義後理由消失；A4 的 full-path payload 結構不變）；
+    **AAA = `meta.estimatedTokensBefore` = 壓縮前真實 contextUsed**（見 D2、gauge
+    同源、可對 gauge 驗證；含 system head + kept 區，N 則為主體、「~」近似 —
+    精確區域大小 server 端測不到、derived 區域和又被 RC2 clamp 膨脹，整 context
+    是唯一不膨脹又可驗證的數）；**B = `meta.summaryTokens`**（summary 本身大小，
+    見 D3）— 不再從 path re-derive（path 根本測不到 cmp 自身大小；RC3）。
+  - toast `Context compacted: ~{AAA} → ~{kept + B} tokens`：**AAA = 同列 AAA；
+    Y = kept + summary（壓縮後整體 context）** — toast 是「總 context」視角、列
+    是「summary」視角，兩 Y **刻意不同量**；04-ui 明寫（避免「對不上」的讀法，RC1）。
+  - 型別 doc 同步修正（解 RC5）。
+- **D2（before = 真實數；解 RC2 的顯示面）**：`meta.estimatedTokensBefore` =
+  **plan 時點的真實 `contextUsed`**（gauge 自己的數、02-§3.4 觸發已同源：active
+  = `contextStatsStore.contextUsed`；agentic 非 active = 該 flow 最後一 turn 的
+  真實 prompt + predicted）— server 測得值、可對 gauge 驗證。derived 整路徑總和
+  （RC2 膨脹）**不再用於顯示 / saved**，只留給 plan 切點 walk（相對大小仍有
+  意義；膨脹對切點的影響在 02-§3.4 記為已知限制）。
+- **D3（新 meta 欄 `summaryTokens`；解列的 Y + RC4）**：`CompactionMeta` +
+  `summaryTokens?: number` = **建立時 summary 本身大小** =
+  `resolveSummarySize(summary.tokens, content)`（真實 completion tokens；未回報 =
+  bytes/4，見 D4）。列的 Y、recompact / boundary-move 重算、gauge saved 皆讀它。
+  舊 entries（缺欄）fallback 現行 `real ?? bytes/4`（僅列；inspector 不受影響）。
+- **D4（`resolveSummarySize` fallback → bytes/4；解 RC4）**：
+  `tokens ?? round(byteLength/4)` — v4 單位統一（02-§3.4）；02-§4 邊界表行同步。
+- **D5（clamped 0 = 無資料；解 RC3）**：`deriveRealMessageTokens` **不把 clamp
+  後（負 → 0）的段總和寫進 map**（owner 缺欄，而非 0）—「無資料」保持「無資料」：
+  列 / inspector 落回估算（bytes/4），任何表面不再顯示假 `0`。plan 數學不變
+  （`messageSize` 非尾端無真實值 = 0，與現行 clamped 0 同值）。unit
+  `compaction-policy.test.ts:350-365` 同步改為「owner 不在 map」。
+
+### 使用者確認（2026-10-23）
+
+1. **D1 label 格式確認**：使用者給出「XXX 條訊息（原本佔約 AAA => 變成 B tokens）」
+   → N = **drop 數**（`toSummarize.length`；取代 A4 的整路徑顯示數）、AAA =
+   壓縮前真實 contextUsed（D2）、B = summaryTokens（D3）。
+2. **D2 方向確認**：使用者確認 `~203,171` 顯示是錯的（實際整體 context 100–130k
+   tokens；compact request prompt = 105,094）→ before 必須是真實 contextUsed。
+3. **D5 方向確認**：使用者詢問「compact 完當下有數字、後面變 0」的機制（= RC3：
+   當下 = 尾端 bytes/4 fallback；下一 turn 後 = clamped 0 寫進 map 當真實值、
+   `??` 不對 0 fallback）→ clamped 0 = 無資料、不入 map。
+
+### 狀態
+
+- 2026-10-23：根因 RC1–RC5 確認（全對 code 驗證，見上）；規格 D1–D5 定稿。
+- 2026-10-23（使用者確認）：D1 label 格式定案（`Summarized N messages (~AAA → B
+  tokens)`：N = drop 數、取代 A4 顯示數 / AAA = 壓縮前真實 contextUsed / B =
+  summaryTokens）；D2 / D5 方向確認；**未實做**（執行清單 §5k）。
+
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
 > 原則：store 層不感知 compaction（除了觸發+建節點的協調邏輯）；
@@ -3088,6 +3255,36 @@ static async createCompactionMessage(params: {
 - [x] 三者皆 0 → 無限行為（回歸）
 - [x] soft 卡片顯示期間按 Stop 按鈕 → 照舊中止（gate abort → false）
 - [x] 非 active 對話觸發 hard limit → 打開該對話後通知列在
+
+## 5k. N13 執行清單（依序做；每完成一項可請使用者編譯確認）
+
+> N13 規格：§3.34（D1–D5，使用者確認 2026-10-23）。
+
+### A. 核心 policy（純函式）
+
+- [ ] `compaction-policy.ts` D5：`deriveRealMessageTokens` clamped 負段 → 不寫 map（owner 缺欄）；JSDoc 更新（clamped 0 = 無資料、不入 map）
+- [ ] `compaction-policy.ts` D4：`resolveSummarySize` fallback `byteLength` → `round(byteLength/4)`；JSDoc 同步
+- [ ] unit `compaction-policy.test.ts`：clamp 向量（:350-365）改「owner 缺欄」；`resolveSummarySize` 新向量（bytes/4）；（可加）第二次壓縮 fixture 斷言 total = 最後 prompt + 膨脹量
+
+### B. meta + store
+
+- [ ] `types/database.d.ts`：`CompactionMeta` + `summaryTokens?`；`summarizedCount` JSDoc 同步 N13 D1 語義（drop 數 = toSummarize.length、取代 A4 顯示數）
+- [ ] `chat/index.svelte.ts` + `agentic/index.svelte.ts`：cmp 建立時寫 `summaryTokens: resolveSummarySize(summary.tokens, cmp.content)`；`estimatedTokensBefore` 改真實 `contextUsed`（D2：active = `contextStatsStore.contextUsed`、非 active = 最後真實 prompt + predicted、皆缺才 fallback 現行 derived total）
+- [ ] recompact / boundary-move（後移重摘要）重算 `summaryTokens` + `estimatedTokensBefore`
+- [ ] toast 公式不變（已是 kept + summary；X 經 D2 變真實數）— 確認文案
+
+### C. 顯示
+
+- [ ] `ChatMessageCompaction.svelte`：列的 Y = `meta.summaryTokens ?? real ?? bytes/4`（舊 entries fallback）；label 文案依 D1 確認結果
+- [ ] `DialogContextInspector.svelte`：summary row 主欄 = `meta.summaryTokens ?? real ?? est.`（D3；D5 修復順帶消掉假 0）
+- [ ] `ContextGaugePopup.svelte`：saved 公式不變（X 經 D2 已真實）— 確認數字方向
+
+### D. 文檔 + 測試
+
+- [ ] 02-data-model §1.1 / §3.4 / §4、04-ui §1.2 / §3 已同步（本輪）；實做後補實做明細回 §3.34 狀態
+- [ ] client `chat-message-compaction` / `context-inspector` / `context-gauge-compaction` fixtures + 斷言同步
+- [ ] `npm run check` 0 錯 + unit（compaction-policy / summarize / context-builder）+ client（3 suites）全綠
+- [ ] 手動驗收：in-loop 長對話連壓兩次 → toast / 列 / inspector / gauge 數字一致（before = gauge 壓縮前數；列 Y = completion tokens；下一 turn 後不出現 `~0`）
 
 ## 6. 專案慣例 / 陷阱（Phase 1 寫碼前速讀）
 
