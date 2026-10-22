@@ -245,6 +245,28 @@ export function tailStartOf(path: DatabaseMessage[]): number {
 }
 
 /**
+ * The last assistant turn's real context usage (N13 D2): the gauge's formula
+ * applied to stored timings — `prompt_n + cache_n + predicted_n`. null when
+ * the path has no assistant with usable timings (callers fall back to the
+ * plan's derived total).
+ */
+export function lastTurnContextUsed(path: DatabaseMessage[]): number | null {
+	for (let i = path.length - 1; i >= 0; i--) {
+		const message = path[i];
+
+		if (message.role !== MessageRole.ASSISTANT) continue;
+
+		const timings = message.timings;
+
+		if (timings?.prompt_n == null) continue;
+
+		return (timings.prompt_n ?? 0) + (timings.cache_n ?? 0) + (timings.predicted_n ?? 0);
+	}
+
+	return null;
+}
+
+/**
  * The unified per-message size (v4): the real token count when the server
  * data covers it, the bytes/4 estimate for the not-yet-sent tail, and 0
  * otherwise — the system head has no independent value (it is folded into

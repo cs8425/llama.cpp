@@ -33,6 +33,7 @@ import {
 	computeCompactionBudget,
 	computeSummaryMaxTokens,
 	effectiveCompactionPath,
+	lastTurnContextUsed,
 	MIN_SUMMARIZE_TOKENS,
 	planCompaction,
 	planCompactionRecentWindow,
@@ -672,13 +673,30 @@ class AgenticStore {
 
 			if (!summary) return; // the user skipped at the gate — no cmp
 
+			// N13 D2: the real pre-compaction context usage (the gauge's source
+			// for the active conversation, the last assistant turn's real prompt
+			// + predicted otherwise) — the plan's derived total only as last
+			// fallback.
+			const estimatedBefore =
+				(isActive ? contextStatsStore.contextUsed : lastTurnContextUsed(path)) ??
+				plan.estimatedTokensBefore;
+
+			// N13 D3: the summary's own size (actual completion tokens, the
+			// bytes/4 estimate when unreported) — the cmp row's "after".
+			const summaryTokens = resolveSummarySize(
+				summary.tokens,
+				`${SUMMARY_CONTENT_PREFIX} ${summary.content}`
+			);
+
 			const cmp = await DatabaseService.createCompactionMessage({
 				compactionMeta: {
-					estimatedTokensBefore: plan.estimatedTokensBefore,
+					estimatedTokensBefore: estimatedBefore,
 					firstKeptMessageId: plan.firstKeptMessageId,
 					isSplitTurn: plan.isSplitTurn || undefined,
 					model: model || undefined,
-					summarizedCount: plan.toSummarize.length + plan.kept.length
+					// N13 D1: the drop count (the region the summary replaces).
+					summarizedCount: plan.toSummarize.length,
+					summaryTokens
 				},
 				content: `${SUMMARY_CONTENT_PREFIX} ${summary.content}`,
 				convId: conversationId,
@@ -709,11 +727,12 @@ class AgenticStore {
 
 			sessionMessages.splice(0, sessionMessages.length, ...toAgenticMessages(messages));
 
-			// v4: real tokens — the kept region's plan size plus the summary's
-			// own size (actual completion tokens, byte length when unreported).
-			const estimatedAfter = plan.estimatedTokensAfter + resolveSummarySize(summary.tokens, cmp.content);
+			// N13 D1: the toast's after = kept + summary (deliberately distinct
+			// from the cmp row's summary-only figure); the before is the real
+			// pre-compaction usage (D2).
+			const estimatedAfter = plan.estimatedTokensAfter + summaryTokens;
 
-			toast.success(`Context compacted: ~${plan.estimatedTokensBefore} → ~${estimatedAfter} tokens`);
+			toast.success(`Context compacted: ~${estimatedBefore} → ~${estimatedAfter} tokens`);
 		} catch (error) {
 			// Fail-open: no cmp (or cmp without the state updates) — the loop
 			// continues with the old sessionMessages. An abort is the user

@@ -61,10 +61,14 @@
 	let realTokens = $derived(deriveRealMessageTokens(path));
 	let tailStart = $derived(tailStartOf(path));
 
-	// Current size of the entry itself (v4): the real token count when the
+	// The entry's own size (N13 D3): the stored `summaryTokens` (the summary
+	// call's real completion tokens, bytes/4 when the server did not report)
+	// — for older entries without the field, the real token count when the
 	// server data covers it, else the bytes/4 estimate (the entry is usually
 	// the not-yet-sent tail).
 	let summaryTokens = $derived.by(() => {
+		if (meta?.summaryTokens !== undefined) return meta.summaryTokens;
+
 		const real = realTokens.get(message.id);
 
 		return real ?? Math.round(messageBytes(message) / 4);

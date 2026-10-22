@@ -119,14 +119,30 @@ export interface CompactionMeta {
 	 * fail-open (full send).
 	 */
 	firstKeptMessageId?: string;
-	/** number of summarized messages (excluding the system prompt), for UI display */
+	/**
+	 * number of DROPPED messages (excluding the system prompt) — the region the
+	 * summary replaces (`toSummarize.length` at creation; the region before the
+	 * boundary on boundary moves). For UI display (N13 D1: the label's N).
+	 */
 	summarizedCount: number;
 	/** true = split user-message span (the cut landed on an assistant message inside a single span) */
 	isSplitTurn?: boolean;
 	/** model that produced the summary (optional, for UI display) */
 	model?: string;
-	/** estimated prompt size in tokens at summary time, for the UI "how much was saved" display */
+	/**
+	 * The REAL pre-compaction context usage at summary time (N13 D2): the
+	 * gauge's own number for the active conversation (last request's prompt +
+	 * output), the last assistant turn's real prompt + predicted otherwise.
+	 * For the UI "how much was saved" display.
+	 */
 	estimatedTokensBefore?: number;
+	/**
+	 * The summary's own size in tokens (N13 D3): the API's actual completion
+	 * tokens when the server reported them, else the bytes/4 estimate of the
+	 * content (`resolveSummarySize`). For the cmp row's "after" display —
+	 * deliberately distinct from the toast's kept+summary figure.
+	 */
+	summaryTokens?: number;
 }
 
 export interface DatabaseMessage {

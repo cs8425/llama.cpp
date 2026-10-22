@@ -50,6 +50,7 @@
 		apiMessageBytes,
 		buildLlmContext,
 		deriveRealMessageTokens,
+		findLastCompactionEntry,
 		messageSize,
 		SUMMARY_CONTENT_PREFIX,
 		tailStartOf
@@ -168,20 +169,35 @@
 		// system-prompt head — that row gets its own badge instead of "user".
 		const summaryIndex = result.compaction?.boundaryValid ? headLength : -1;
 
+		// N13 D3: the summary row's own size is the stored `summaryTokens`
+		// (the summary call's real completion tokens) — the real-token map and
+		// the bytes/4 estimate are fallbacks for older entries without the
+		// field. Both `size` (the expand-description sum) and `main` use it,
+		// so the row and the totals stay consistent.
+		const summaryMeta = summaryIndex >= 0 ? findLastCompactionEntry(path)?.compactionMeta : undefined;
+
 		return result.messages.map((message, index) => {
 			const sourceId = (message as ContextPayloadMessage).sourceId;
 			const dbIndex = sourceId !== undefined ? (idToIndex.get(sourceId) ?? -1) : -1;
 			const realTokens = sourceId !== undefined ? real.get(sourceId) : undefined;
 			const isTail = dbIndex >= tailStart;
 			const bytes = apiMessageBytes(message);
-			const size = realTokens ?? (isTail ? Math.round(bytes / 4) : 0);
+			const storedSummary = index === summaryIndex ? summaryMeta?.summaryTokens : undefined;
+			const size = storedSummary ?? realTokens ?? (isTail ? Math.round(bytes / 4) : 0);
 
 			return {
 				kind: index === summaryIndex ? 'summary' : message.role,
 				message,
 				text: apiPreviewText(message),
 				size,
-				main: realTokens !== undefined ? formatNumber(realTokens) : isTail ? `est. ${formatNumber(size)}` : '-',
+				main:
+					storedSummary !== undefined
+						? formatNumber(storedSummary)
+						: realTokens !== undefined
+							? formatNumber(realTokens)
+							: isTail
+								? `est. ${formatNumber(size)}`
+								: '-',
 				sub: `${formatFileSize(bytes)} / ~${formatNumber(Math.round(bytes / 4))} est.`
 			};
 		});

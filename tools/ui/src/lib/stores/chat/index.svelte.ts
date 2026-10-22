@@ -26,6 +26,7 @@ import {
 	computeSummaryMaxTokens,
 	deriveRealMessageTokens,
 	effectiveCompactionPath,
+	lastTurnContextUsed,
 	messageSize,
 	MIN_SUMMARIZE_TOKENS,
 	planCompaction,
@@ -669,13 +670,27 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 					return;
 				}
 
+				// N13 D2: the real pre-compaction context usage (the gauge's
+				// source) — the plan's derived total only as last fallback.
+				const estimatedBefore =
+					this.realContextUsedBefore(convId, path) ?? plan.estimatedTokensBefore;
+
+				// N13 D3: the summary's own size (actual completion tokens, the
+				// bytes/4 estimate when unreported) — the cmp row's "after".
+				const summaryTokens = resolveSummarySize(
+					summary.tokens,
+					`${SUMMARY_CONTENT_PREFIX} ${summary.content}`
+				);
+
 				const cmp = await DatabaseService.createCompactionMessage({
 					compactionMeta: {
-						estimatedTokensBefore: plan.estimatedTokensBefore,
+						estimatedTokensBefore: estimatedBefore,
 						firstKeptMessageId: plan.firstKeptMessageId,
 						isSplitTurn: plan.isSplitTurn || undefined,
 						model: model ?? undefined,
-						summarizedCount: plan.toSummarize.length + plan.kept.length
+						// N13 D1: the drop count (the region the summary replaces).
+						summarizedCount: plan.toSummarize.length,
+						summaryTokens
 					},
 					content: `${SUMMARY_CONTENT_PREFIX} ${summary.content}`,
 					convId,
@@ -705,11 +720,12 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 					this.resolveSessionFields(convId)
 				);
 
-				// v4: real tokens — the kept region's plan size plus the summary's
-				// own size (actual completion tokens, byte length when unreported).
-				const estimatedAfter = plan.estimatedTokensAfter + resolveSummarySize(summary.tokens, cmp.content);
+				// N13 D1: the toast's after = kept + summary (deliberately
+				// distinct from the cmp row's summary-only figure); the before is
+				// the real pre-compaction usage (D2).
+				const estimatedAfter = plan.estimatedTokensAfter + summaryTokens;
 
-				toast.success(`Context compacted: ~${plan.estimatedTokensBefore} → ~${estimatedAfter} tokens`);
+				toast.success(`Context compacted: ~${estimatedBefore} → ~${estimatedAfter} tokens`);
 			} catch (error) {
 				// Fail-open: no cmp node was created (or it was created but the
 				// state updates failed) — the conversation keeps its full context.
@@ -928,14 +944,19 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			}
 
 			const model = this.resolveCompactionModel(path);
+			const content = `${SUMMARY_CONTENT_PREFIX} ${summary.content}`;
 			const updates = {
 				compactionMeta: {
 					...baseMeta,
 					...metaUpdates,
-					estimatedTokensBefore: this.pathRealTokens(path),
-					model: model ?? undefined
+					// N13 D2/D3: the re-summarization re-records the real usage and
+					// the new summary's own size.
+					estimatedTokensBefore:
+						this.realContextUsedBefore(convId, path) ?? this.pathRealTokens(path),
+					model: model ?? undefined,
+					summaryTokens: resolveSummarySize(summary.tokens, content)
 				},
-				content: `${SUMMARY_CONTENT_PREFIX} ${summary.content}`
+				content
 			};
 
 			await DatabaseService.updateMessage(cmpId, updates);
@@ -1031,13 +1052,18 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 			}
 
 			const model = this.resolveCompactionModel(path);
+			const content = `${SUMMARY_CONTENT_PREFIX} ${summary.content}`;
 			const updates = {
 				compactionMeta: {
 					...baseMeta,
-					estimatedTokensBefore: this.pathRealTokens(path),
-					model: model ?? undefined
+					// N13 D2/D3: the re-summarization re-records the real usage and
+					// the new summary's own size.
+					estimatedTokensBefore:
+						this.realContextUsedBefore(convId, path) ?? this.pathRealTokens(path),
+					model: model ?? undefined,
+					summaryTokens: resolveSummarySize(summary.tokens, content)
 				},
-				content: `${SUMMARY_CONTENT_PREFIX} ${summary.content}`
+				content
 			};
 
 			await DatabaseService.updateMessage(cmpId, updates);
@@ -1128,6 +1154,20 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 	/** Length of the system-prompt head of a path (the head is never summarized, I1). */
 	private headLengthOf(path: DatabaseMessage[]): number {
 		return path[0]?.role === MessageRole.SYSTEM ? 1 : 0;
+	}
+
+	/**
+	 * N13 D2: the real pre-compaction context usage for `estimatedTokensBefore`
+	 * — the active conversation's gauge number (last request's prompt +
+	 * output), a non-active conversation's last assistant turn's real prompt +
+	 * predicted, null when no real data (callers fall back to a derived total).
+	 */
+	private realContextUsedBefore(convId: string, path: DatabaseMessage[]): number | null {
+		if (conversationsStore.activeConversation?.id === convId) {
+			return contextStatsStore.contextUsed;
+		}
+
+		return lastTurnContextUsed(path);
 	}
 
 	/**

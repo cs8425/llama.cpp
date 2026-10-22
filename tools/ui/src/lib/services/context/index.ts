@@ -20,6 +20,7 @@ export {
 	estimateCompactionSavings,
 	byteLength,
 	evaluateCompactionResult,
+	lastTurnContextUsed,
 	messageBytes,
 	messageSize,
 	MIN_SUMMARIZE_TOKENS,
