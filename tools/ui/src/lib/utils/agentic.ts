@@ -21,13 +21,20 @@ import type {
 	DatabaseMessageExtraImageFile
 } from '$lib/types/database';
 
+/** Coerce a setting value to a number; non-numeric input → `NaN`. */
+function toAgenticNumber(value: unknown): number {
+	if (typeof value === 'number') return value;
+	if (typeof value === 'string') return Number(value);
+	return NaN;
+}
+
 /**
  * Parse the agentic turn-limit setting into a turn count.
- * `NaN` → `fallback`; `<= 0` → unlimited (`Infinity`); `> 0` → rounded.
- * (context-enhance/07 D1)
+ * Non-numeric input (incl. `null`/`undefined`) → `fallback`; `<= 0` →
+ * unlimited (`Infinity`); `> 0` → rounded integer. (context-enhance/07 D1)
  */
 export function parseAgenticTurnLimit(value: unknown, fallback: number): number {
-	const num = Number(value);
+	const num = toAgenticNumber(value);
 
 	if (Number.isNaN(num)) return fallback;
 	if (num <= 0) return Number.POSITIVE_INFINITY;
@@ -45,11 +52,11 @@ const AGENTIC_TIME_LIMIT_UNIT_MULTIPLIERS: Record<string, number> = {
 /**
  * Parse the agentic wall-time limit setting (value + unit) into milliseconds.
  * Unit multipliers `{ s: 1, m: 60, h: 3600 }` (invalid unit → `m`).
- * `NaN` / `<= 0` → `0` (unlimited); `> 0` → `value × multiplier × 1000`.
+ * Non-numeric / `<= 0` → `0` (unlimited); `> 0` → `value × multiplier × 1000`.
  * (context-enhance/07 D2/D4)
  */
 export function parseAgenticTimeLimitMs(value: unknown, unit: unknown): number {
-	const num = Number(value);
+	const num = toAgenticNumber(value);
 	const multiplier =
 		AGENTIC_TIME_LIMIT_UNIT_MULTIPLIERS[String(unit).toLowerCase()] ??
 		AGENTIC_TIME_LIMIT_UNIT_MULTIPLIERS.m;
