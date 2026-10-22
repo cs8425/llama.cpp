@@ -1,6 +1,6 @@
 # 07 · Agentic Loop Guard：turns 無限制語義 + wall-time soft/hard limit
 
-> **狀態（2026-10-19）：Phase A–D 完成並確認**（`npm run check` 0 錯 + unit `agentic-limits`/`agentic-gates` + client `agentic-limits` 全綠）；剩手動驗收（§5 清單，06-status §5j）
+> **狀態（2026-10-19）：完成並確認**（`npm run check` 0 錯 + unit `agentic-limits`/`agentic-gates` + client `agentic-limits` 全綠 + 手動驗收 §5 通過；06-status §3.33/§5j）
 >
 > 相鄰功能：agentic flow 的 loop guard，**不屬於** context compaction 工作流（01–06）；
 > 單獨成文，實做時按本文 §5 執行。
