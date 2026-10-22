@@ -17,6 +17,7 @@ import type { CompactionDecisionRequest } from '$lib/stores/agentic/gates.svelte
 import { contextStatsStore } from '$lib/stores/chat/context-stats.svelte';
 import { chatStore } from '$lib/stores/chat/index.svelte';
 import { conversationsStore } from '$lib/stores/conversations/index.svelte';
+import { settingsStore } from '$lib/stores/settings/index.svelte';
 import type { DatabaseConversation, DatabaseMessage } from '$lib/types';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -159,7 +160,12 @@ describe('ChatMessageCompacting indicator row', () => {
 	it('yields to the cmp row when the tail is a compaction entry', async () => {
 		buildFixture();
 		const cmp = makeMessage({
-			compactionMeta: { estimatedTokensBefore: 1840, firstKeptMessageId: '', summarizedCount: 2 },
+			compactionMeta: {
+				estimatedTokensBefore: 1840,
+				firstKeptMessageId: '',
+				summarizedCount: 2,
+				summaryTokens: 250
+			},
 			content: `${SUMMARY_CONTENT_PREFIX} The user asked to fix a bug.`,
 			role: MessageRole.USER,
 			type: MessageType.COMPACTION
@@ -338,7 +344,7 @@ describe('endCompactionState finalizer', () => {
 
 	it('auto-sends the queued message when the summary call is aborted', async () => {
 		// Real-token fixture (5 user/assistant pairs × 5000) so the recent-window
-		// plan (default keep 20000) finds a cut and the summary call is reached.
+		// plan (keep 20000) finds a cut and the summary call is reached.
 		const messages: DatabaseMessage[] = [
 			makeMessage({ content: 'system', role: MessageRole.SYSTEM, type: MessageType.SYSTEM })
 		];
@@ -359,6 +365,10 @@ describe('endCompactionState finalizer', () => {
 
 		conversationsStore.activeMessages = messages;
 		setActiveConversation(CONV_ID);
+		// The registry default mode is threshold-target (README §5: 2026-10-17
+		// 定稿預設 B); this fixture is built for the recent-window walk, so pin
+		// the mode explicitly — the test targets the finalizer, not mode choice.
+		settingsStore.config.contextCompactionMode = 'recent-window';
 		// The active conversation's n_ctx is read straight off the gauge's
 		// contextTotal (getContextSizeForConversation). Pin the leaf value
 		// directly: spying the upstream modelsStore.activeModelId getter does

@@ -48,7 +48,8 @@ function makeCompaction(overrides: Partial<DatabaseMessage> = {}): DatabaseMessa
 		compactionMeta: {
 			estimatedTokensBefore: 1840,
 			firstKeptMessageId: '',
-			summarizedCount: 3
+			summarizedCount: 3,
+			summaryTokens: 250
 		},
 		role: MessageRole.USER,
 		type: MessageType.COMPACTION,
@@ -80,7 +81,8 @@ function buildFixture(): { cmp: DatabaseMessage; kept: DatabaseMessage } {
 		compactionMeta: {
 			estimatedTokensBefore: 1840,
 			firstKeptMessageId: kept.id,
-			summarizedCount: 3
+			summarizedCount: 3,
+			summaryTokens: 250
 		}
 	});
 	const finalAssistant = makeMessage({ content: 'you are welcome', role: MessageRole.ASSISTANT });
@@ -156,7 +158,9 @@ describe('ChatMessages compaction entry rendering', () => {
 		// 6 display rows: system, user, assistant(+tool group), cmp, user, assistant
 		expect(rowCount()).toBe(6);
 		expect(row.textContent).toContain('Summarized 3 messages');
-		expect(row.textContent).toContain('~1,840');
+		// N13 D3: the row's "after" is the stored summaryTokens (250), not the
+		// bytes/4 estimate of the summary content
+		expect(row.textContent).toContain('~1,840 → ~250 tokens');
 
 		// The entry row is a separate row, not absorbed into the assistant's
 		// agentic group (the tool result text must not leak into it)

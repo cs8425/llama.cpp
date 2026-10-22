@@ -29,7 +29,8 @@
 		compactionMeta: {
 			estimatedTokensBefore: 1840,
 			firstKeptMessageId: 'kept-1',
-			summarizedCount: 3
+			summarizedCount: 3,
+			summaryTokens: 250
 		},
 		content: `${SUMMARY_CONTENT_PREFIX} The user asked to fix a bug in the auth module. The agent read src/auth.ts, found the off-by-one in the token expiry check, and applied a patch. The user confirmed the fix works.`,
 		convId: 'conv-1',
@@ -64,7 +65,8 @@
 			estimatedTokensBefore: 900,
 			firstKeptMessageId: 'asst-2',
 			isSplitTurn: true,
-			summarizedCount: 2
+			summarizedCount: 2,
+			summaryTokens: 180
 		},
 		content: `${SUMMARY_CONTENT_PREFIX} (a) Earlier: the user asked to refactor the module; the agent listed the files. (b) In-progress turn: goal = refactor src/parser.ts; read_file done on parser.ts; next step = edit_file.`,
 		convId: 'conv-1',

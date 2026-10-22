@@ -7,7 +7,7 @@
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
 > [06-status.md](./06-status.md)。
 >
-> **目前停點（2026-10-23）**：**N13 規格定稿 + label 格式使用者確認（compaction token 顯示對不上：toast / cmp 列 / `~0`；根因 RC1–RC5 + 規格 D1–D5；label = `Summarized N messages (~AAA → B tokens)`：N = drop 數 / AAA = 壓縮前真實 contextUsed / B = summaryTokens；未實做、進行中；06-status §3.34 / §5k）**；手動驗收通過 2026-10-23：N12.3 + N11/N11.4 + N10 + N8；下一步 = N13 實做（§5k）→ 剩餘手動驗收（N7 5 項 + 5.8）→ N9（規格定稿、未實做）
+> **目前停點（2026-10-23）**：**N13 規格定稿 + label 格式使用者確認（compaction token 顯示對不上：toast / cmp 列 / `~0`；根因 RC1–RC5 + 規格 D1–D5；label = `Summarized N messages (~AAA → B tokens)`：N = drop 數 / AAA = 壓縮前真實 contextUsed / B = summaryTokens；Batch A–C 實做（A+B check 通過、C 顯示待 check）、Batch D 文檔 + 測試實做、待全量 check + 手動驗收；06-status §3.34 / §5k）**；手動驗收通過 2026-10-23：N12.3 + N11/N11.4 + N10 + N8；下一步 = N13 全量 check + 手動驗收（§5k）→ 剩餘手動驗收（N7 5 項 + 5.8）→ N9（規格定稿、未實做）
 > （N12：打開 inspector 卡 `Building payload…` = 三個 display 消費端對
 > tool-call-only assistant 的 `content === undefined`（刻意 wire shape、N11
 > byte-identical 要求）未容忍；修 = total function（視為空 / 0 bytes）+ JSDoc，

@@ -55,7 +55,8 @@ function makeCompaction(overrides: Partial<DatabaseMessage> = {}): DatabaseMessa
 		compactionMeta: {
 			estimatedTokensBefore: 1840,
 			firstKeptMessageId: '',
-			summarizedCount: 3
+			summarizedCount: 3,
+			summaryTokens: 250
 		},
 		role: MessageRole.USER,
 		type: MessageType.COMPACTION,
@@ -91,7 +92,8 @@ function buildCompactedFixture(): {
 		compactionMeta: {
 			estimatedTokensBefore: 1840,
 			firstKeptMessageId: kept.id,
-			summarizedCount: 3
+			summarizedCount: 3,
+			summaryTokens: 250
 		}
 	});
 	const finalAssistant = makeMessage({
@@ -252,9 +254,10 @@ describe('DialogContextInspector (read-only, Phase 1)', () => {
 		expect(text).toContain('(tool_calls)');
 
 		// v4 per-row columns: main = real tokens (system '-', the segment
-		// total, predicted_n), sub = bytes / bytes÷4 estimate
+		// total, predicted_n), sub = bytes / bytes÷4 estimate. The summary
+		// row's main is the stored summaryTokens (N13 D3), not a byte estimate.
 		expect(tokenCell(payloadRowButtons()[0])).toBe('- (16 Bytes / ~4 est.)');
-		expect(tokenCell(payloadRowButtons()[1])).toBe('- (132 Bytes / ~33 est.)');
+		expect(tokenCell(payloadRowButtons()[1])).toBe('250 (132 Bytes / ~33 est.)');
 		expect(tokenCell(payloadRowButtons()[2])).toBe('1,500 (19 Bytes / ~5 est.)');
 		expect(tokenCell(payloadRowButtons()[3])).toBe('100 (15 Bytes / ~4 est.)');
 

@@ -530,17 +530,17 @@ describe('summarizeWithRetry', () => {
 	});
 
 	it('retries up to maxAttempts and accepts the result when there is no gate (fail-open)', async () => {
-		mockSummary('x'.repeat(6000)); // 6000 > 5000 (B: keepTarget 50% of 10000)
+		mockSummary('x'.repeat(24000)); // 24000 bytes / 4 = 6000 tokens (N13 D4) > 5000 (B: keepTarget 50% of 10000)
 		const { plan, planPath } = makePlan();
 
 		const result = await summarizeWithRetry(planPath, plan, null, undefined, baseRetryOptions({ maxAttempts: 3 }));
 
-		expect(result?.content).toBe('x'.repeat(6000));
+		expect(result?.content).toBe('x'.repeat(24000));
 		expect(vi.mocked(ChatService.sendMessage)).toHaveBeenCalledTimes(3);
 	});
 
 	it('accepts the over-target summary when the gate says use', async () => {
-		mockSummary('x'.repeat(6000));
+		mockSummary('x'.repeat(24000));
 		const gate: CompactionSummaryGate = { requestDecision: vi.fn().mockResolvedValue('use') };
 		const { plan, planPath } = makePlan();
 
@@ -552,7 +552,7 @@ describe('summarizeWithRetry', () => {
 			baseRetryOptions({ gate, maxAttempts: 1 })
 		);
 
-		expect(result?.content).toBe('x'.repeat(6000));
+		expect(result?.content).toBe('x'.repeat(24000));
 		expect(gate.requestDecision).toHaveBeenCalledWith({
 			attempts: 1,
 			mode: 'threshold-target',
@@ -563,7 +563,7 @@ describe('summarizeWithRetry', () => {
 	});
 
 	it('returns null (no entry) when the gate says skip', async () => {
-		mockSummary('x'.repeat(6000));
+		mockSummary('x'.repeat(24000));
 		const gate: CompactionSummaryGate = { requestDecision: vi.fn().mockResolvedValue('skip') };
 		const { plan, planPath } = makePlan();
 
@@ -584,7 +584,7 @@ describe('summarizeWithRetry', () => {
 		vi.mocked(ChatService.sendMessage).mockImplementation(
 			async (_messages: unknown, options?: SettingsChatServiceOptions) => {
 				calls++;
-				const content = calls === 1 ? 'x'.repeat(6000) : 'short now';
+				const content = calls === 1 ? 'x'.repeat(24000) : 'short now';
 
 				options?.onComplete?.(content, undefined, undefined);
 				return content;
@@ -612,7 +612,7 @@ describe('summarizeWithRetry', () => {
 		vi.mocked(ChatService.sendMessage).mockImplementation(
 			async (_messages: unknown, options?: SettingsChatServiceOptions) => {
 				calls++;
-				const content = calls < 3 ? 'x'.repeat(6000) : 'fits';
+				const content = calls < 3 ? 'x'.repeat(24000) : 'fits';
 
 				options?.onComplete?.(content, undefined, undefined);
 				return content;
@@ -635,7 +635,7 @@ describe('summarizeWithRetry', () => {
 	});
 
 	it('prices the kept region into the check in mode A (summary + kept ≤ window − keep)', async () => {
-		mockSummary('s'); // 1 byte
+		mockSummary('ssss'); // 4 bytes / 4 = 1 token (N13 D4: the fallback is bytes/4, not raw bytes)
 		const gate: CompactionSummaryGate = { requestDecision: vi.fn().mockResolvedValue('use') };
 		const { plan, planPath } = makeBigKeptPlan();
 
@@ -651,7 +651,7 @@ describe('summarizeWithRetry', () => {
 			baseRetryOptions({ compactionMode: 'recent-window', gate, maxAttempts: 1 })
 		);
 
-		expect(result?.content).toBe('s');
+		expect(result?.content).toBe('ssss');
 		expect(gate.requestDecision).toHaveBeenCalledWith({
 			attempts: 1,
 			mode: 'recent-window',

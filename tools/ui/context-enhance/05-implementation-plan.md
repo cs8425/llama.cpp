@@ -56,7 +56,7 @@
 ✅ 驗收:長對話(或測試用低 threshold)自動壓縮發生一次且只發生一次;
 編輯 summary 後下一輪 payload 即變;Expand 後 context 完整還原。
 
-### 雙 mode — recent-window(A,預設)+ threshold-target(B = v3 + N6)(規格定稿 2026-10-17;✅ 完成並確認 2026-10-17)
+### 雙 mode — recent-window(A)+ threshold-target(B = v3 + N6,預設)(規格定稿 2026-10-17;✅ 完成並確認 2026-10-17)
 
 > 背景:自動壓縮從未觸發(262.14K/262.14K 案例)——根因是舊 budget 公式
 > (summary max 70% × 1.5 = 105% n_ctx 的 reserve)把 keepBudget 壓死在 10% floor,

@@ -67,7 +67,8 @@ function buildCompactedFixture(): void {
 		compactionMeta: {
 			estimatedTokensBefore: 1840,
 			firstKeptMessageId: kept.id,
-			summarizedCount: 3
+			summarizedCount: 3,
+			summaryTokens: 250
 		},
 		content: `${SUMMARY_CONTENT_PREFIX} The user asked to fix a bug; the agent read the file and applied a patch.`,
 		role: MessageRole.USER,

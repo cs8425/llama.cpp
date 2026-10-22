@@ -171,7 +171,8 @@ Split user-message span (one span exceeds budget):
 
 ### 3.3 選點演算法(雙 mode;A = recent-window / B = threshold-target)
 
-兩種可選 mode(`contextCompactionMode`,2026-10-17 使用者定稿,**預設 = A**)。
+兩種可選 mode(`contextCompactionMode`,2026-10-17 使用者定稿,**預設 = B**;
+初版規格預設 A,同日定稿翻為 B,見 README §5)。
 共用:合法切點(I4)、安全下限(I5、minSummarizeTokens)、計數規則(§3.4);
 差異:觸發公式(§6)、budget/停止規則、成功判定式(§6)。
 
