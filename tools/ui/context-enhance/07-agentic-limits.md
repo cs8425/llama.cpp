@@ -1,6 +1,6 @@
 # 07 · Agentic Loop Guard：turns 無限制語義 + wall-time soft/hard limit
 
-> **狀態（2026-10-19）：規格定稿、未實做**
+> **狀態（2026-10-19）：Phase A–D 完成並確認**（`npm run check` 0 錯 + unit `agentic-limits`/`agentic-gates` + client `agentic-limits` 全綠）；剩手動驗收（§5 清單，06-status §5j）
 >
 > 相鄰功能：agentic flow 的 loop guard，**不屬於** context compaction 工作流（01–06）；
 > 單獨成文，實做時按本文 §5 執行。
@@ -229,7 +229,7 @@ pattern = `ChatMessageCompacting.svelte`）：
 | 多次觸發 | 每次 hard stop 覆蓋該 conv 的 notice（`SvelteMap` 單值）；新 flow 啟動即清 |
 | Resume 時的 preEncode | `continueAsNextAgenticTurn` 頂端已有 `cancelPreEncode`；若舊 preEncode 已完成 → 新 flow 首 turn cache miss（自我修正、不影響正確性） |
 
-## 5. 實做規劃（未實做）
+## 5. 實做規劃（已完成，Phase A–D；實做明細見 06-status §3.33/§5j）
 
 ### Phase A — settings / types / 解析（無行為改變）
 
