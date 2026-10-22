@@ -146,7 +146,9 @@ function estimateContentPartBytes(part: ApiChatMessageContentPart): number {
  *
  * An assistant without usable timings is skipped (its own value and the
  * segments around it are simply absent). A negative segment total — e.g. the
- * prompt shrank after an in-loop compaction — is clamped to 0.
+ * prompt shrank after an in-loop compaction — is NO data (N13 D5): the
+ * segment's owner stays absent from the map, so consumers fall back to the
+ * bytes/4 estimate instead of a fake 0.
  */
 export function deriveRealMessageTokens(path: DatabaseMessage[]): Map<string, number> {
 	const real = new Map<string, number>();
@@ -194,13 +196,13 @@ export function deriveRealMessageTokens(path: DatabaseMessage[]): Map<string, nu
 		if (k + 1 >= measured.length) continue;
 
 		const b = measured[k + 1];
-		const segmentTotal = Math.max(
-			0,
-			b.prompt + b.cache - (a.prompt + a.cache) - a.predicted
-		);
+		const segmentTotal = b.prompt + b.cache - (a.prompt + a.cache) - a.predicted;
 		const owner = lastNonAssistantId(path, a.index, b.index, false);
 
-		if (owner !== undefined) real.set(owner, segmentTotal);
+		// N13 D5: a negative segment total is NO data — the owner stays absent
+		// from the map so consumers fall back to the bytes/4 estimate (a
+		// clamped 0 would masquerade as a real value).
+		if (owner !== undefined && segmentTotal > 0) real.set(owner, segmentTotal);
 	}
 
 	return real;
@@ -713,13 +715,14 @@ export function evaluateCompactionResult(
 }
 
 /**
- * Resolves the summary's size for the success check: the API's actual
- * completion tokens when reported, else the UTF-8 byte length of the
- * content (02-data-model §4: no API number → byte count — the summary's own
- * size, distinct from per-message accounting).
+ * Resolves the summary's size for the success check and `summaryTokens`
+ * (02-data-model §4): the API's actual completion tokens when reported, else
+ * the bytes/4 estimate of the content (N13 D4: v4 units — the raw byte length
+ * would be ~4× off). The summary's own size, distinct from per-message
+ * accounting.
  */
 export function resolveSummarySize(tokens: number | null, content: string): number {
-	return tokens ?? byteLength(content);
+	return tokens ?? Math.round(byteLength(content) / 4);
 }
 
 /**

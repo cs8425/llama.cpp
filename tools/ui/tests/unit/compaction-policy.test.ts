@@ -347,7 +347,7 @@ describe('deriveRealMessageTokens', () => {
 		).toBe(0);
 	});
 
-	it('clamps a negative segment total to 0 (the prompt shrank after an in-loop compaction)', () => {
+	it('treats a negative segment total as NO data — the owner stays absent (N13 D5; the prompt shrank after an in-loop compaction)', () => {
 		const path = [
 			message('u1', MessageRole.USER, 'q1'),
 			assistantTimed('a1', 'a1', 5000, 100),
@@ -359,8 +359,8 @@ describe('deriveRealMessageTokens', () => {
 
 		expect(real.get('u1')).toBe(5000);
 		expect(real.get('a1')).toBe(100);
-		// (1000 − 5000) − 100 < 0 → 0
-		expect(real.get('u2')).toBe(0);
+		// (1000 − 5000) − 100 < 0 → no data (owner absent, NOT a clamped 0)
+		expect(real.has('u2')).toBe(false);
 		expect(real.get('a2')).toBe(50);
 	});
 });
@@ -1127,8 +1127,11 @@ describe('resolveSummarySize', () => {
 		expect(resolveSummarySize(123, 'x'.repeat(999))).toBe(123);
 	});
 
-	it('falls back to the UTF-8 byte length when the server did not report', () => {
-		expect(resolveSummarySize(null, '你好')).toBe(6);
+	it('falls back to the bytes/4 estimate when the server did not report (N13 D4)', () => {
+		// 6 bytes / 4 = 1.5 → 2
+		expect(resolveSummarySize(null, '你好')).toBe(2);
+		expect(resolveSummarySize(null, 'x'.repeat(400))).toBe(100);
+		expect(resolveSummarySize(null, '')).toBe(0);
 	});
 
 	it('treats a reported 0 as a real value', () => {

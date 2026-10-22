@@ -3,34 +3,45 @@
 > 給「下一個繼續實做的 session」讀。規劃細節在 01–05，本檔只記錄
 > **做到哪裡、做過的決策、接下來怎麼做**。
 
-> **恢復點（最新，2026-10-23）**：**N13 compaction token 顯示（toast / cmp 列 / `~0`）根因確認 + 規格 D1–D5 定稿 + label 格式使用者確認（N = drop 數 / AAA = 壓縮前真實 contextUsed / B = summaryTokens；未實做；§3.34 / §5k）**；此前 = N12 Context Inspector 凍結 ✅ 完成並確認（source + 測試 + `npm run check` + unit + client 全綠）；下一步 = N13 實做（§5k）→ 手動驗收批（N12.3 + N11/N11.4 + N10 + N8 + N7 + 5.8，可一併）→ N9（規格定稿、未實做）
+> **恢復點（最新，2026-10-23）**：**N13 compaction token 顯示（toast / cmp 列 / `~0`）根因確認 + 規格 D1–D5 定稿 + label 格式使用者確認（N = drop 數 / AAA = 壓縮前真實 contextUsed / B = summaryTokens；未實做；§3.34 / §5k）**；此前 = N12 Context Inspector 凍結 ✅ 完成並確認（source + 測試 + `npm run check` + unit + client 全綠）；手動驗收通過 2026-10-23：N12.3 + N11/N11.4 + N10 + N8；下一步 = N13 實做（§5k，進行中）→ 剩餘手動驗收（N7 5 項 + 5.8）→ N9（規格定稿、未實做）
 > （N12：三 display 消費端對 tool-call-only assistant 的 `content === undefined`
 > （刻意 wire shape、N11 byte-identical 要求）total function（視為空 / 0 bytes）+
 > `ApiChatMessageData.content` JSDoc；**wire shape 零改動**；unit 1 向量 + client
 > 1 回歸已加並全綠；明細 + 執行清單：§3.32 / §5i）。
 > （N11.4 已完成 2026-10-19：compact request session 欄位 `tools` / thinking
 > kwargs + `preEncode` 同類修；source + 測試 + `npm run check` + unit 全綠，
-> 手動驗收未做，明細 §3.31 / §5h）。
+> 手動驗收通過並確認 2026-10-23（併入 N11），明細 §3.31 / §5h）。
 >
 > **待辦（依序）**：
-> 1. **手動驗收批（未做、可一併驗）**：
->    N12.3（agentic 對話含 tool calls → 開 inspector 不卡 `Building payload`、
->    展開 tool-call-only 列 + Copy JSON 不炸、普通對話無回歸；§5i）
+> 1. **N13 — compaction token 顯示（規格定稿 + label 格式使用者確認 2026-10-23、未實做、進行中；§3.34 / §5k）**：
+>    toast / cmp 列 / inspector / gauge 的 token 數字互不相干、且對不上 server 真實值：
+>    RC1 toast after（kept+summary）≠ 列 after（summary only）；RC2 clamped-segment
+>    膨脹 → 「before」≈ 2× 實際 prompt；RC3 clamped 0 入 map → in-loop 下一 turn 後
+>    cmp 列 / inspector 顯示假 `0`；RC4 `resolveSummarySize` fallback = raw bytes
+>    （v3 殘留、違反 v4 bytes/4 單位，潛伏）；RC5 `summarizedCount` = 整路徑（A4）
+>    但文案 / 型別 doc 讀成「被 summarize 的數」。規格 D1–D5（顯示語義統一 +
+>    新 meta 欄 `summaryTokens` + before 改真實 `contextUsed` + fallback bytes/4 +
+>    clamped 0 = 無資料、不入 map）；label 格式使用者確認 2026-10-23
+>    （`Summarized N messages (~AAA → B tokens)`：N = drop 數、取代 A4 顯示數；
+>    AAA = 壓縮前真實 contextUsed；B = summaryTokens）。
+> 2. **剩餘手動驗收（可一併驗）**：
+>    ✅ 通過 2026-10-23：N12.3（agentic 對話含 tool calls → 開 inspector，
+>    不卡 `Building payload`、展開 tool-call-only 列 + Copy JSON 不炸、普通對話
+>    無回歸；§5i）
 >    + N11/N11.4（MCP screenshot → 連壓兩次 + F5 → compact request 與後續 turns
->    的 `cache_n` 皆高命中；N11.4 修後 compact request `cache_n` ≈ `prompt_n` 非 0
->    + 壓縮後下一 turn 高命中；另重跑既有 5 支 client compaction suite（§5g））
+>    的 `cache_n` 皆高命中；§5g/§5h）
 >    + N10（agentic loop 連壓兩次 → F5 → summary 都在、匯出匯入同、既有已損對話
->    migration 後恢復）+ N8（agentic loop 連壓兩次：第二次 summary 請求 =
->    `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑）
->    + N7 5 項（05-§3 #8–#12）+ Phase 1 5.8（§4 清單；A/B mode 行為 + v4 真實
+>    migration 後恢復；§5f）+ N8（agentic loop 連壓兩次：第二次 summary 請求 =
+>    `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑；§5d）
+>    剩：N7 5 項（05-§3 #8–#12）+ Phase 1 5.8（§4 清單；A/B mode 行為 + v4 真實
 >    token 顯示可一併驗）。
-> 2. **N9 — F5 / refresh 韌性（規格定稿 2026-10-18、未實做；§3.28 / 05-N9 / §5e）**：
+> 3. **N9 — F5 / refresh 韌性（規格定稿 2026-10-18、未實做；§3.28 / 05-N9 / §5e）**：
 >    in-loop compaction 的 cmp + currNode 是兩次獨立 IDB 寫（非原子）→ 兩寫之間 F5
 >    （或 `updateCurrentNode` 拋錯）→ cmp orphan（在 DB、不在 path、不可見）→
 >    reload 後全量送出 → overflow；非永久損毀（無資料遺失、可恢復）。規格 =
 >    原子 commit（N9.1）+ 載入收編 orphan（N9.2）+ 可選送出前 overflow guard
 >    （N9.3）+ fail-open 語義入 02-§4（N9.4）。
-> 3. **N13 — compaction token 顯示（規格定稿 2026-10-23、未實做；§3.34 / §5k）**：
+> 1. **N13 — compaction token 顯示（規格定稿 + label 格式使用者確認 2026-10-23、未實做、進行中；§3.34 / §5k）**：
 >    toast / cmp 列 / inspector / gauge 的 token 數字互不相干、且對不上 server 真實值：
 >    RC1 toast after（kept+summary）≠ 列 after（summary only）；RC2 clamped-segment
 >    膨脹 → 「before」≈ 2× 實際 prompt；RC3 clamped 0 入 map → in-loop 下一 turn 後
@@ -43,7 +54,7 @@
  >    AAA = 壓縮前真實 contextUsed；B = summaryTokens）。
 > 4. Phase 3 可選後續（05-§1）。
 >
-> **此前里程碑（皆完成並確認）**：N12（2026-10-19，§3.32/§5i，inspector 凍結修：三 display 消費端 total function + JSDoc、wire shape 零改動；check + unit + client 全綠；手動驗收未做）→ N11.4（2026-10-19，§3.31/§4，session 欄位層 `tools` / thinking kwargs + preEncode；check + unit 全綠）→ N11（2026-10-18，§3.30/§4，messages 陣列層；手動驗收未做）→ N10（2026-10-18，§3.29/§4）→ N8（2026-10-18，§3.27/§4）→ N7（2026-10-04，§2u/§3.26）→ v4 真實
+> **此前里程碑（皆完成並確認）**：N12（2026-10-19，§3.32/§5i，inspector 凍結修：三 display 消費端 total function + JSDoc、wire shape 零改動；check + unit + client 全綠；N12.3 手動驗收通過 2026-10-23）→ N11.4（2026-10-19，§3.31/§4，session 欄位層 `tools` / thinking kwargs + preEncode；check + unit 全綠）→ N11（2026-10-18，§3.30/§4，messages 陣列層；手動驗收通過 2026-10-23）→ N10（2026-10-18，§3.29/§4）→ N8（2026-10-18，§3.27/§4）→ N7（2026-10-04，§2u/§3.26）→ v4 真實
 > token 計數（2026-10-17，
 > §3.24/§3.25）→ 雙 mode 共用+A+B（2026-10-17，§3.22/§3.23）→
 > N6 空 kept（2026-10-17，§3.21）→ N1–N5（2026-07-22，§3.13–§3.19）→
@@ -59,13 +70,13 @@
 | Phase 3 — 可選後續 | ⬜ |
 | v4 — 真實 token 計數（§3.24/§3.25） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` 82/82 / `context-builder` / `summarize` + client `context-inspector` / `chat-message-compaction` / `context-gauge-compaction` / `compaction-decision-card` / `settings-registry-invariants` 全綠；第一輪 9 失敗已修、3 根因全在測試檔，見 §3.25 / 檔首恢復點；05-v4 清單已全勾） |
 | N7 — 壓縮進行中：輸入 queue + in-chat 指標列（Stop）（§3.26/§2u） | ✅ **完成並確認**（2026-10-04：四輪跑測 8 支失敗全在測試檔已修、來源碼零改動；使用者重跑 `chat-message-compaction` 11/11 + check + 4 回歸檔全綠；queue 不 block + 指標列 + per-conv `compactingConvId` + sendMessage guard + finalizer 自動送 + client 11 支；手動驗收 #8–#12 未做） |
-| N8 — 第二次壓縮：plan 改在 effective path（bug 修正；§3.27） | ✅ **完成並確認**（2026-10-18：N8.1–N8.3（3 來源檔 + 3 unit 檔）；第一輪 2 失敗全在測試檔已修（期望值筆誤、來源碼零改動）；使用者重跑 `npm run check` + unit 3 支 + client 5 支 compaction suite 全綠；手動驗收未做（§4 清單）；執行清單 05-N8 / §5d） |
+| N8 — 第二次壓縮：plan 改在 effective path（bug 修正；§3.27） | ✅ **完成並確認**（2026-10-18：N8.1–N8.3（3 來源檔 + 3 unit 檔）；第一輪 2 失敗全在測試檔已修（期望值筆誤、來源碼零改動）；使用者重跑 `npm run check` + unit 3 支 + client 5 支 compaction suite 全綠；N8 手動驗收通過並確認 2026-10-23；執行清單 05-N8 / §5d） |
 | N9 — F5 / refresh 韌性：in-loop compaction 兩寫非原子（§3.28） | ⬜ **規格定稿、未實做**（2026-10-18：問題已對 code 驗證——`createCompactionMessage`（單一 IDB transaction）與 `updateCurrentNode`（獨立 IDB 寫）非原子 → 兩寫之間 F5 / `updateCurrentNode` 拋錯 → cmp orphan（在 DB、不在 path、不可見）→ reload 後全量送出 → overflow；非永久損毀（無資料遺失、手動 compact 可恢復）。規格 = 原子 commit（N9.1）+ 載入收編 orphan（N9.2）+ 可選送出前 overflow guard（N9.3）+ fail-open 語義入 02-§4（N9.4）；執行清單 05-N9 / §5e） |
-| N10 — in-loop compaction 的 cmp 被接成 sibling（系統性 bug；§3.29） | ✅ **完成並確認**（2026-10-18：N10.1 根因修（`onCompaction` callback + `lastCreatedInFlow` 推進）+ N10.2 已損樹修復（`findCompactionGraftFixes` 純函式 + `applyCompactionGraftFixes` IDB transaction + 啟動 migration `compaction-graft-fix-v1` + `loadConversation` 防禦層）+ N10.3 unit 5 向量（`tests/unit/branching.test.ts`）；`npm run check` + unit + 既有 5 支 client compaction suite 全綠；剩手動驗收（§4 清單）；執行清單 05-N10 / §5f） |
-| N11 — compact request 前綴一致性：tool result 附件被丟（N11.1）+ full-path summary（N11.2 = A4，§3.30） | ✅ **完成並確認**（2026-10-18：N11.1——轉換的 `extra → parts` 抽成 `ChatService.buildExtraContentParts`（固定序 / images 一律 cap / 無 gating）、tool+extra 不再 early-return 丟附件、in-flow 調同一 builder（順手修不 cap + 順序改 user input 路徑）、`toAgenticMessages` TOOL 分支直通、序列化對齊（assistant + tool_calls + 空 content → 省略 content 欄位）、清理 5 個 unused imports；`normalizeMessagesForApi` / `resolveOutgoingMessages` / `buildLlmContext` / `preEncode` / `sendMessage` / vision filter 全未動（D1：無 model 參數、無新 gating）；N11.2（A4）——`summarizeMessages` / `summarizeWithRetry` 收 `planPath`、prefix-stable payload = `buildLlmContext(planPath).messages` + instruction（刪自組裝）、transcript = `toSummarize + kept`、兩呼叫點傳 `planPath`（re-summarize = `effectiveCompactionPath(path)`）+ `summarizedCount = toSummarize + kept`（`chat:871` 不改）；N11.3——`tests/unit/summarize.test.ts` 依決定 B 修好（補 `planPath` + mock `convertDbMessageToApiChatMessageData` + payload assertions = `buildLlmContext(planPath).messages` + instruction）+ 新 `tests/unit/chat-conversion.test.ts`（真 ChatService、stores / cap mock：`buildExtraContentParts` 固定序 + cap / 轉換矩陣 / 空 content 三態 / in-flow ≡ DB rebuild byte-identity / 合成 fixture compact request = 最後 payload byte-prefix + instruction）；`npm run check` 0 錯 + unit `summarize` 28/28 / `chat-conversion` / `context-builder` 全綠（第一輪 4 type + 6 runtime 全在 `summarize.test.ts` 測試檔 2 處 desync、已修、來源碼零改動）；手動驗收未做（MCP screenshot → 連壓兩次 + F5 → `cache_n` 高命中，§4 清單）；執行清單 §5g） |
-| N11.4 — compact request session 欄位一致性：`tools` / thinking kwargs 未帶 → cache 完全失效（N11 後續；§3.31） | ✅ **完成並確認**（2026-10-19：compact request body 缺 agentic 主 payload 每 turn 都帶的 `tools`（`agentic:817`）→ chat template 把 tool definitions 渲染進 prompt 開頭 → 渲染 prompt 從 token 0 分岔 → KV cache 100% miss（session 最大 request 冷算）。N11 只保證 messages 陣列層一致性、session 欄位從未 thread 進壓縮路徑；次級分岔 = `enableThinking` / `reasoningEffort`（有設定時 agentic turn 帶 `chat_template_kwargs`、compact request 永不帶）；`preEncode`（`chat.service.ts:924–969`）同根因（`chat:697` / `chat:1834` 預熱與下一 agentic turn 不符）。實做：`SummarizeOptions` thread `tools` + thinking kwargs（prefix-stable only；in-loop 直接用 loop 的 `tools` 100% 精確；chat store `resolveSessionFields` 決定性重算、mirror `agentic:372–388` / `getApiOptions:422–428`）+ `preEncode` 加參（決定性：有 enabled tools 即每 turn 皆 agentic、無預熱歧義）+ 新 `agenticStore.resolveEnabledToolsForConversation`（放 agentic store 避免 tools store 循環 import）；5 source + 2 test 檔（summarize 3 新向量 + chat-conversion fixture 升級到 request body 層 3 用例）、加性參數、無新設定 / 無新 meta；`npm run check` + unit `summarize`（28→31）/ `chat-conversion`（fixture 升級 request body 層 +3 用例）/ `context-builder` / `compaction-policy` + 既有 5 支 client compaction suite 全綠（第一輪 7 型別錯 + 1 執行失敗全在測試端 / helper 型別標註、已修、來源邏輯零改動，見 §3.31 狀態）；**N11 手動驗收已可進行**（N11.4 已先完成）；執行清單 §5h） |
+| N10 — in-loop compaction 的 cmp 被接成 sibling（系統性 bug；§3.29） | ✅ **完成並確認**（2026-10-18：N10.1 根因修（`onCompaction` callback + `lastCreatedInFlow` 推進）+ N10.2 已損樹修復（`findCompactionGraftFixes` 純函式 + `applyCompactionGraftFixes` IDB transaction + 啟動 migration `compaction-graft-fix-v1` + `loadConversation` 防禦層）+ N10.3 unit 5 向量（`tests/unit/branching.test.ts`）；`npm run check` + unit + 既有 5 支 client compaction suite 全綠；N10 手動驗收通過並確認 2026-10-23；執行清單 05-N10 / §5f） |
+| N11 — compact request 前綴一致性：tool result 附件被丟（N11.1）+ full-path summary（N11.2 = A4，§3.30） | ✅ **完成並確認**（2026-10-18：N11.1——轉換的 `extra → parts` 抽成 `ChatService.buildExtraContentParts`（固定序 / images 一律 cap / 無 gating）、tool+extra 不再 early-return 丟附件、in-flow 調同一 builder（順手修不 cap + 順序改 user input 路徑）、`toAgenticMessages` TOOL 分支直通、序列化對齊（assistant + tool_calls + 空 content → 省略 content 欄位）、清理 5 個 unused imports；`normalizeMessagesForApi` / `resolveOutgoingMessages` / `buildLlmContext` / `preEncode` / `sendMessage` / vision filter 全未動（D1：無 model 參數、無新 gating）；N11.2（A4）——`summarizeMessages` / `summarizeWithRetry` 收 `planPath`、prefix-stable payload = `buildLlmContext(planPath).messages` + instruction（刪自組裝）、transcript = `toSummarize + kept`、兩呼叫點傳 `planPath`（re-summarize = `effectiveCompactionPath(path)`）+ `summarizedCount = toSummarize + kept`（`chat:871` 不改）；N11.3——`tests/unit/summarize.test.ts` 依決定 B 修好（補 `planPath` + mock `convertDbMessageToApiChatMessageData` + payload assertions = `buildLlmContext(planPath).messages` + instruction）+ 新 `tests/unit/chat-conversion.test.ts`（真 ChatService、stores / cap mock：`buildExtraContentParts` 固定序 + cap / 轉換矩陣 / 空 content 三態 / in-flow ≡ DB rebuild byte-identity / 合成 fixture compact request = 最後 payload byte-prefix + instruction）；`npm run check` 0 錯 + unit `summarize` 28/28 / `chat-conversion` / `context-builder` 全綠（第一輪 4 type + 6 runtime 全在 `summarize.test.ts` 測試檔 2 處 desync、已修、來源碼零改動）；手動驗收通過並確認 2026-10-23（MCP screenshot → 連壓兩次 + F5 → `cache_n` 高命中，含 N11.4）；執行清單 §5g） |
+| N11.4 — compact request session 欄位一致性：`tools` / thinking kwargs 未帶 → cache 完全失效（N11 後續；§3.31） | ✅ **完成並確認**（2026-10-19：compact request body 缺 agentic 主 payload 每 turn 都帶的 `tools`（`agentic:817`）→ chat template 把 tool definitions 渲染進 prompt 開頭 → 渲染 prompt 從 token 0 分岔 → KV cache 100% miss（session 最大 request 冷算）。N11 只保證 messages 陣列層一致性、session 欄位從未 thread 進壓縮路徑；次級分岔 = `enableThinking` / `reasoningEffort`（有設定時 agentic turn 帶 `chat_template_kwargs`、compact request 永不帶）；`preEncode`（`chat.service.ts:924–969`）同根因（`chat:697` / `chat:1834` 預熱與下一 agentic turn 不符）。實做：`SummarizeOptions` thread `tools` + thinking kwargs（prefix-stable only；in-loop 直接用 loop 的 `tools` 100% 精確；chat store `resolveSessionFields` 決定性重算、mirror `agentic:372–388` / `getApiOptions:422–428`）+ `preEncode` 加參（決定性：有 enabled tools 即每 turn 皆 agentic、無預熱歧義）+ 新 `agenticStore.resolveEnabledToolsForConversation`（放 agentic store 避免 tools store 循環 import）；5 source + 2 test 檔（summarize 3 新向量 + chat-conversion fixture 升級到 request body 層 3 用例）、加性參數、無新設定 / 無新 meta；`npm run check` + unit `summarize`（28→31）/ `chat-conversion`（fixture 升級 request body 層 +3 用例）/ `context-builder` / `compaction-policy` + 既有 5 支 client compaction suite 全綠（第一輪 7 型別錯 + 1 執行失敗全在測試端 / helper 型別標註、已修、來源邏輯零改動，見 §3.31 狀態）；手動驗收通過並確認 2026-10-23（併入 N11：`cache_n` 高命中）；執行清單 §5h） |
 | N13 — compaction token 顯示：toast / cmp 列 / `~0`（根因 + 規格 2026-10-23；未實做） | ⬜ **規格定稿、未實做**（2026-10-23：使用者報案（in-loop agentic、151 則路徑：compact request 實際 prompt 105,094 / completion 7,808，顯示 `~203,171`；toast 的 after ≠ cmp 列的 after；下一 request 後列的 after → `~0`）。五根因全對 code 確認：RC1 toast after（kept+summary）與列 after（summary only）是兩個量（v4 決策、規格未定義）；RC2 `deriveRealMessageTokens` clamped-segment 膨脹 → 整路徑 derived total ≈ 最後 prompt + Σ 先前壓縮縮水（203,171 ≈ 105,094 + ~98k）；RC3 clamped 0 寫進 map 當真實值 → in-loop 下一 turn cmp 成段 owner → 列 / inspector 顯示假 `0`（`??` 不對 0 fallback）；RC4 `resolveSummarySize` fallback = raw byte 數（v3 殘留、違反 v4 bytes/4 單位，潛伏）；RC5 `summarizedCount` = 整路徑（A4）但型別 doc / 文案讀成「被 summarize 的數」。規格 D1–D5：顯示語義統一（列 Y = 新 meta 欄 `summaryTokens`；toast Y = kept+summary、刻意不同）+ before = 真實 `contextUsed`（D2）+ `summaryTokens` 欄（D3）+ fallback bytes/4（D4）+ clamped 0 = 無資料、不入 map（D5）；D1 label 格式使用者確認 2026-10-23（N = drop 數、取代 A4 顯示數 / AAA = 壓縮前真實 contextUsed / B = summaryTokens）；明細 §3.34；執行清單 §5k） |
-| N12 — Context Inspector 凍結：`content: undefined`（tool-call-only assistant）display/estimation 未容忍（bug；§3.32） | ✅ **完成並確認**（2026-10-19：`apiMessageBytes` 加 `undefined` 分支（0 bytes）+ doc comment；`contentText` 加 nullish 守衛；`sanitizePayload` 加 `content == null` pass-through；`ApiChatMessageData.content` JSDoc（runtime 可省略）；unit `compaction-policy` 新向量（`content: undefined` cast → 80 bytes = tool_calls JSON only）+ client `context-inspector` 新「未 compact」fixture（5 列）+ 4 斷言（render / preview / 展開 / Copy JSON 無 content key）；**wire shape 零改動**（`undefined`→`''` 會加 `"content": ""` key → KV cache prefix 斷）；使用者跑 `npm run check` 0 錯 + unit `compaction-policy` + client `context-inspector` 全綠；剩 N12.3 手動驗收（§4 清單）；執行清單 §5i） |
+| N12 — Context Inspector 凍結：`content: undefined`（tool-call-only assistant）display/estimation 未容忍（bug；§3.32） | ✅ **完成並確認**（2026-10-19：`apiMessageBytes` 加 `undefined` 分支（0 bytes）+ doc comment；`contentText` 加 nullish 守衛；`sanitizePayload` 加 `content == null` pass-through；`ApiChatMessageData.content` JSDoc（runtime 可省略）；unit `compaction-policy` 新向量（`content: undefined` cast → 80 bytes = tool_calls JSON only）+ client `context-inspector` 新「未 compact」fixture（5 列）+ 4 斷言（render / preview / 展開 / Copy JSON 無 content key）；**wire shape 零改動**（`undefined`→`''` 會加 `"content": ""` key → KV cache prefix 斷）；使用者跑 `npm run check` 0 錯 + unit `compaction-policy` + client `context-inspector` 全綠；N12.3 手動驗收通過並確認 2026-10-23；執行清單 §5i） |
 | 07 — Agentic Loop Guard：turns 無限制語義 + wall-time soft/hard limit（§3.33） | ✅ **完成並確認**（2026-10-19：獨立於 01–06 compaction，07 單獨成文。Phase A settings/types/解析（4 key + `parseAgenticTurnLimit`/`parseAgenticTimeLimitMs` + `getConfig` 走 helper）+ Phase B 行為（`gates` continue reason `turns`/`softTime` + `hardLimitNotices` + loop 3 順序邊界 gate + hard `setTimeout` 包 LLM call + 兩處 hard-stop 設 notice + `resumeAgenticFlowFromTail` + `continueAsNextAgenticTurn` 公開）+ Phase C UI（continue 卡片 2 文案 D10 + 新 `ChatMessageAgenticLimitNotice` 常駐通知列、Resume/Dismiss、loading 時 Resume disabled）+ Phase D 測試（unit `agentic-limits`/`agentic-gates` + client `agentic-limits`）皆經使用者 `npm run check` 0 錯 + unit + client 全綠 + 手動驗收（07 §5 / §5j）通過確認） |
 | 雙 mode 壓縮 — recent-window（A，預設）+ threshold-target（B = v3+N6）（§3.22/§3.23） | ✅ **完成並確認**（2026-10-17：`npm run check` + unit `compaction-policy` / `summarize` / `context-builder` + client `settings-registry-invariants` / `compaction-decision-card`（9/9）/ `context-inspector`（14/14）/ `chat-message-compaction` / `context-gauge-compaction` 全綠；第一輪 2 支 client 失敗已修，見 §4；05-雙 mode 清單已全勾） |
 | N6 — split 切允許空 kept（§3.21） | ✅ 完成並確認（2026-10-17：check + unit `compaction-policy` / `context-builder` + client 回歸 4 支全綠；05-N6 清單已勾） |
@@ -1768,7 +1779,7 @@ child）**抓不到**此案例（這裡 cmp 是路徑中間節點的 sibling）�
 
 ### 狀態
 
-- ✅ **完成並確認（2026-10-18）**：N10.1 根因修（`onCompaction` callback + `lastCreatedInFlow` 推進）+ N10.2 已損樹修復（`findCompactionGraftFixes` 純函式 + `applyCompactionGraftFixes` IDB transaction + 啟動 migration `compaction-graft-fix-v1` + `loadConversation` 防禦層）+ N10.3 unit 5 向量（`tests/unit/branching.test.ts`）；`npm run check` + unit + 既有 5 支 client compaction suite（`chat-message-compaction` / `context-inspector` / `context-gauge-compaction` / `compaction-decision-card` / `chat-message-compacting`）全綠。剩手動驗收（使用者原始場景：agentic loop 連壓兩次 → F5 / 匯出匯入 summary 都在 + 既有已損對話 migration 後恢復；§4 清單）。
+- ✅ **完成並確認（2026-10-18）**：N10.1 根因修（`onCompaction` callback + `lastCreatedInFlow` 推進）+ N10.2 已損樹修復（`findCompactionGraftFixes` 純函式 + `applyCompactionGraftFixes` IDB transaction + 啟動 migration `compaction-graft-fix-v1` + `loadConversation` 防禦層）+ N10.3 unit 5 向量（`tests/unit/branching.test.ts`）；`npm run check` + unit + 既有 5 支 client compaction suite（`chat-message-compaction` / `context-inspector` / `context-gauge-compaction` / `compaction-decision-card` / `chat-message-compacting`）全綠。手動驗收通過並確認 2026-10-23（使用者原始場景：agentic loop 連壓兩次 → F5 / 匯出匯入 summary 都在 + 既有已損對話 migration 後恢復）。
 
 ## 3.30 N11: compact request 前綴一致性 — tool result 附件被丟 + mode B 切點 cache 亲和性（問題驗證 + 規劃 + 實做 2026-10-18；source + 測試完成並確認）
 
@@ -2027,10 +2038,10 @@ N11.1 修掉「reload 後第一 turn 斷前綴」的症狀，但 N9 的 orphan c
     6 runtime 失敗全在 `tests/unit/summarize.test.ts` 測試檔 2 處 desync（①
     `makePlanWithHead` 的 `planPath` 誤 spread 單則 `kept` → `...plan.kept`；② 3 處
     options 傳到第 4 參 `signal` 位 → 補 `undefined`）、已修、來源碼零改動。
-- ⏸ **剩**：手動驗收（MCP screenshot flow → 連壓兩次 + F5 → server `cache_n`
-  高命中；可與 N10/N8/N7/5.8 一併驗，§4 清單）+ 重跑既有 5 支 client compaction
-  suite（§5g 未勾項）。~~驗收前必須先完成 N11.4~~（✅ N11.4 已完成 2026-10-19、
-  check + unit 全綠，§3.31）→ 驗收現可進行。
+- ✅ **完成並確認（2026-10-23）**：source + 測試全綠（上）；手動驗收通過（MCP
+  screenshot flow → 連壓兩次 + F5 → server `cache_n` 高命中，含 N11.4）；
+  剩：重跑既有 5 支 client compaction suite（§5g 未勾項）。~~驗收前必須先完成
+  N11.4~~（✅ N11.4 已完成 2026-10-19、check + unit 全綠，§3.31）。
 
 ## 3.31 N11.4: compact request session 欄位一致性 — `tools` / thinking kwargs 未帶（問題確認 + 修正方案定案 + 實做 2026-10-19；✅ 完成並確認）
 
@@ -2255,12 +2266,13 @@ prompt 文字 / over-target 機制 / transcript mode / 無新設定 / 無新 met
   `context-builder` / `summarize` + client 5 支 compaction suite
   （`chat-message-compaction` / `context-inspector` /
   `context-gauge-compaction` / `compaction-decision-card` /
-  `chat-message-compacting`）全綠；05-N8 清單已勾（手動驗收未做）。
+  `chat-message-compacting`）全綠；05-N8 清單已勾（手動驗收通過並確認 2026-10-23：
+  agentic loop 連壓兩次 → 第二次 summary 請求形狀正確 + loop 正常續跑）。
 - **N10 ✅（完成並確認，2026-10-18）**：`npm run check` + unit `branching`
   （`findCompactionGraftFixes` 5 向量）+ 既有 5 支 client compaction suite
   （`chat-message-compaction` / `context-inspector` /
   `context-gauge-compaction` / `compaction-decision-card` /
-  `chat-message-compacting`）零改動全綠；05-N10 / §5f 清單已勾（手動驗收未做：
+  `chat-message-compacting`）零改動全綠；05-N10 / §5f 清單已勾（手動驗收通過並確認 2026-10-23：
   agentic loop 連壓兩次 → F5 / 匯出匯入 summary 都在 + 既有已損對話 migration
   後恢復）。
 - **N11.4 ✅（完成並確認，2026-10-19）**：`npm run check` + unit `summarize`
@@ -2270,14 +2282,15 @@ prompt 文字 / over-target 機制 / transcript mode / 無新設定 / 無新 met
   `context-gauge-compaction` / `compaction-decision-card` /
   `chat-message-compacting`）全綠（第一輪 7 型別錯 + 1 執行失敗全在測試端 /
   helper 型別標註，已修、來源邏輯零改動，見 §3.31 狀態）；05-N11.4 / §5h 清單
-  N11.4.1 + N11.4.2 已勾。手動驗收未做（併入 N11：MCP screenshot → 連壓兩次 +
-  F5 → compact request `cache_n` ≈ `prompt_n` 高命中 + 壓縮後下一 turn 高命中
-  （post-compaction preEncode 修後生效）+ 無 tools 對話壓縮行為回歸）。
+  N11.4.1 + N11.4.2 已勾。手動驗收通過並確認 2026-10-23（併入 N11：MCP screenshot → 連壓兩次 +
+  F5 → compact request `cache_n` 高命中 + 壓縮後下一 turn 高命中）。
+  > N11 本體手動驗收同批通過（MCP screenshot flow → 連壓兩次 + F5 →
+  > server `cache_n` 高命中；§3.30 狀態）。
 - **N12 ✅（完成並確認，2026-10-19）**：`npm run check` 0 錯 + unit
   `compaction-policy`（新向量：tool-call-only assistant `content: undefined`
   cast → 80 bytes = tool_calls JSON only）+ client `context-inspector`（新
   「未 compact」fixture 5 列 + 4 斷言；既有回歸）全綠；§5i 清單 N12.1 +
-  N12.2 已勾。手動驗收未做（N12.3：agentic 對話開 inspector 不卡
+  N12.2 已勾。N12.3 手動驗收通過並確認 2026-10-23（agentic 對話開 inspector 不卡
   `Building payload` + 展開 tool-call-only 列 / Copy JSON 不炸 + 普通對話
   無回歸）。
 - **Phase 1 5.8 手動驗收（未做；可與 v4 一併驗）**：
@@ -2288,7 +2301,7 @@ prompt 文字 / over-target 機制 / transcript mode / 無新設定 / 無新 met
   > Eye 按鈕 / 快捷鍵 / gauge 列皆已落地）；A/B mode 行為 + v4 真實
   > token 顯示可一併驗。
 
-## 3.32 N12: Context Inspector 凍結 — `content: undefined` 未被 display/estimation 容忍（完成 2026-10-19；手動驗收未做）
+## 3.32 N12: Context Inspector 凍結 — `content: undefined` 未被 display/estimation 容忍（完成 2026-10-19；N12.3 手動驗收通過並確認 2026-10-23）
 
 ### 症狀（使用者回報 2026-10-19）
 
@@ -2419,7 +2432,7 @@ in-flow push（`agentic:942`）/ `buildLlmContext` / `normalizeMessagesForApi`
   `compaction-policy` 新向量 80 bytes + client `context-inspector` 新「未 compact」
   fixture 5 列 + 4 斷言）已實做。
 - 2026-10-19（晚）：使用者跑 `npm run check` 0 錯 + unit `compaction-policy` +
-  client `context-inspector` 全綠；**N12 完成**（剩 N12.3 手動驗收，§5i）。
+  client `context-inspector` 全綠；**N12 完成**（N12.3 手動驗收通過並確認 2026-10-23，§5i）。
 
 ## 3.33 07 Agentic Loop Guard：turns 無限制語義 + wall-time soft/hard limit（07 規格定稿 2026-10-19；Phase A–D 完成並確認）
 
@@ -2468,7 +2481,7 @@ in-flow push（`agentic:942`）/ `buildLlmContext` / `normalizeMessagesForApi`
 - Phase A/B/C：已實做並經使用者逐段確認（`npm run check` 全綠）。
 - Phase D（本節）：unit + client 測試 + 文檔已加；使用者跑 `npm run check` 0 錯 + unit（agentic-limits 12 / agentic-gates 10）+ client（agentic-limits）全綠 + 手動驗收（07 §5 / §5j）通過確認。**07 全部完成。**
 
-## 3.34 N13: compaction token 顯示對不上 — toast / cmp 列 / `~0`（根因確認 + 規格 2026-10-23；未實做）
+## 3.34 N13: compaction token 顯示對不上 — toast / cmp 列 / `~0`（根因確認 + 規格 2026-10-23；Batch A 實做 2026-10-23、待 check）
 
 > 觸發：使用者報案（2026-10-23，in-loop agentic 真實對話、路徑 151 則）。compact
 > request 回應 `prompt_tokens = 105,094`（`cache_n 104,946 + prompt_n 148`）、
@@ -2621,7 +2634,18 @@ after（RC1）③ 列的 after → 0（RC3）。
 - 2026-10-23：根因 RC1–RC5 確認（全對 code 驗證，見上）；規格 D1–D5 定稿。
 - 2026-10-23（使用者確認）：D1 label 格式定案（`Summarized N messages (~AAA → B
   tokens)`：N = drop 數、取代 A4 顯示數 / AAA = 壓縮前真實 contextUsed / B =
-  summaryTokens）；D2 / D5 方向確認；**未實做**（執行清單 §5k）。
+  summaryTokens）；D2 / D5 方向確認。
+- 2026-10-23（Batch A 實做，純 policy + unit、待使用者 check）：
+  - D5：`deriveRealMessageTokens` 負段不再 clamp 0 寫入 map——owner 缺欄（消費者
+    fallback bytes/4，不再假 0）；JSDoc 同步。plan 計算不變（負段 owner 不在 tail，
+    `messageSize` 對非 tail 缺欄訊息本來就回 0）。
+  - D4：`resolveSummarySize` fallback `byteLength` → `round(byteLength/4)`（v4 單位）；
+    JSDoc 同步（兼供 `summaryTokens` 使用）。3 個消費端（`summarize:375` 過目標檢查 /
+    `chat:710` / `agentic:714` toast after）只在 server 未報 completion tokens 時走
+    fallback，單位修準、無行為分岔。
+  - unit：clamp 向量改「owner 缺欄」（`has('u2') === false`）；`resolveSummarySize`
+    fallback 向量改 bytes/4（+ 空字串 / 400 bytes 向量）。「可加」第二次壓縮 fixture
+    略過（膨脹量 = prompt_n + cache_n 雙計、非 clamp 造成，鎖定它會固化 RC2 行為）。
 
 ## 5. Phase 1 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -2990,7 +3014,7 @@ static async createCompactionMessage(params: {
       （`chat-message-compaction` / `context-inspector` /
       `context-gauge-compaction` / `compaction-decision-card` /
       `chat-message-compacting`）
-- [ ] 手動驗收（使用者原始場景）：agentic loop 連壓兩次 → 第二次 summary 請求
+- [x] 手動驗收（使用者原始場景）✅ 通過 2026-10-23：agentic loop 連壓兩次 → 第二次 summary 請求
       = `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑；toast / gauge
       token 數字與 effective context 一致
 
@@ -3062,11 +3086,11 @@ static async createCompactionMessage(params: {
 ### N10.3 回歸 + 驗收
 - [x] `npm run check` + unit `branching`（`findCompactionGraftFixes` 5 向量）+ 既有
       5 支 client compaction suite 零改動全綠（2026-10-18 確認）
-- [ ] 核心回歸（手動）：in-loop compaction 後下一則 assistant 訊息
+- [x] 核心回歸（手動）✅ 2026-10-23：in-loop compaction 後下一則 assistant 訊息
       `parent === cmp.id`（DB 樹 == 平陣列）
-- [ ] 手動驗收（使用者原始場景）：agentic loop 連壓兩次正常停下 → F5 → summary
+- [x] 手動驗收（使用者原始場景）✅ 通過 2026-10-23：agentic loop 連壓兩次正常停下 → F5 → summary
       都在、inspector = 壓縮後 context；匯出 → 匯入 → 同；session 可繼續
-- [ ] 既有已損對話：啟動 migration 後開啟 → summary 回到路徑上、可繼續
+- [x] 既有已損對話 ✅ 2026-10-23：啟動 migration 後開啟 → summary 回到路徑上、可繼續
 
 ## 5g. N11 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -3126,9 +3150,9 @@ static async createCompactionMessage(params: {
       → `tests/unit/chat-conversion.test.ts`
 - [x] `npm run check` + unit（`summarize` 28/28 / `chat-conversion` /
        `context-builder`）全綠（2026-10-18 使用者確認）
-- [ ] 既有 5 支 client compaction suite 重跑回歸（本輪未重跑）
-- [ ] 手動驗收：MCP screenshot flow → 連壓兩次 + F5 → `cache_n` 高命中（gauge）
-      （⚠️ 須先完成 N11.4，§5h）
+- [x] 既有 5 支 client compaction suite 重跑回歸 ✅（N11.4 輪 2026-10-19 重跑全綠）
+- [x] 手動驗收 ✅ 通過 2026-10-23：MCP screenshot flow → 連壓兩次 + F5 → `cache_n` 高命中（gauge）
+      （N11.4 已先完成，§5h）
 
 ## 5h. N11.4 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -3168,11 +3192,11 @@ static async createCompactionMessage(params: {
       `thinking_budget_tokens` 一致）
 - [x] `npm run check` 0 錯 + unit + 既有 5 支 client compaction suite 全綠
 
-### N11.4.3 驗收（使用者做；併入 N11 驗收、必須先於其完成）
-- [ ] MCP screenshot agentic flow → 自動壓縮 → compact request `cache_n` ≈
+### N11.4.3 驗收（使用者做；併入 N11 驗收、必須先於其完成）✅ 通過 2026-10-23
+- [x] MCP screenshot agentic flow → 自動壓縮 → compact request `cache_n` ≈
       `prompt_n`（高命中、非 0）
-- [ ] 壓縮後下一 turn `cache_n` 高命中（post-compaction preEncode 修後生效）
-- [ ] 普通（無 tools）對話壓縮 → 行為與現行完全一致（回歸）
+- [x] 壓縮後下一 turn `cache_n` 高命中（post-compaction preEncode 修後生效）
+- [x] 普通（無 tools）對話壓縮 → 行為與現行完全一致（回歸）
 
 ## 5i. N12 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -3205,11 +3229,11 @@ static async createCompactionMessage(params: {
 - [x] `npm run check` 0 錯 + unit `compaction-policy` + client
       `context-inspector` 全綠（**使用者跑，2026-10-19 全綠**）
 
-### N12.3 驗收（使用者做）
-- [ ] agentic 對話（含 tool calls）→ 開 inspector → 列正常顯示（不卡
+### N12.3 驗收（使用者做）✅ 通過 2026-10-23
+- [x] agentic 對話（含 tool calls）→ 開 inspector → 列正常顯示（不卡
       Building payload）
-- [ ] 展開 tool-call-only 列 + Copy JSON → 不炸
-- [ ] 普通（無 tools）對話 inspector → 無回歸
+- [x] 展開 tool-call-only 列 + Copy JSON → 不炸
+- [x] 普通（無 tools）對話 inspector → 無回歸
 
 ## 5j. 07 Agentic Loop Guard 執行清單（依序做；每完成一項可請使用者編譯確認）
 
@@ -3262,9 +3286,9 @@ static async createCompactionMessage(params: {
 
 ### A. 核心 policy（純函式）
 
-- [ ] `compaction-policy.ts` D5：`deriveRealMessageTokens` clamped 負段 → 不寫 map（owner 缺欄）；JSDoc 更新（clamped 0 = 無資料、不入 map）
-- [ ] `compaction-policy.ts` D4：`resolveSummarySize` fallback `byteLength` → `round(byteLength/4)`；JSDoc 同步
-- [ ] unit `compaction-policy.test.ts`：clamp 向量（:350-365）改「owner 缺欄」；`resolveSummarySize` 新向量（bytes/4）；（可加）第二次壓縮 fixture 斷言 total = 最後 prompt + 膨脹量
+- [x] `compaction-policy.ts` D5：`deriveRealMessageTokens` clamped 負段 → 不寫 map（owner 缺欄）；JSDoc 更新（clamped 0 = 無資料、不入 map）
+- [x] `compaction-policy.ts` D4：`resolveSummarySize` fallback `byteLength` → `round(byteLength/4)`；JSDoc 同步
+- [x] unit `compaction-policy.test.ts`：clamp 向量（:350-365）改「owner 缺欄」；`resolveSummarySize` 新向量（bytes/4）；（可加）第二次壓縮 fixture 略過（膨脹源 = prompt+cache 雙計、非 clamp，不固化）
 
 ### B. meta + store
 

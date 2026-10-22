@@ -7,20 +7,20 @@
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
 > [06-status.md](./06-status.md)。
 >
-> **目前停點（2026-10-23）**：**N13 規格定稿 + label 格式使用者確認（compaction token 顯示對不上：toast / cmp 列 / `~0`；根因 RC1–RC5 + 規格 D1–D5；label = `Summarized N messages (~AAA → B tokens)`：N = drop 數 / AAA = 壓縮前真實 contextUsed / B = summaryTokens；未實做；06-status §3.34 / §5k）**；下一步 = N13 實做（§5k）→ 手動驗收批（N12.3 + N11/N11.4 + N10 + N8 + N7 + 5.8，可一併）→ N9（規格定稿、未實做）
+> **目前停點（2026-10-23）**：**N13 規格定稿 + label 格式使用者確認（compaction token 顯示對不上：toast / cmp 列 / `~0`；根因 RC1–RC5 + 規格 D1–D5；label = `Summarized N messages (~AAA → B tokens)`：N = drop 數 / AAA = 壓縮前真實 contextUsed / B = summaryTokens；未實做、進行中；06-status §3.34 / §5k）**；手動驗收通過 2026-10-23：N12.3 + N11/N11.4 + N10 + N8；下一步 = N13 實做（§5k）→ 剩餘手動驗收（N7 5 項 + 5.8）→ N9（規格定稿、未實做）
 > （N12：打開 inspector 卡 `Building payload…` = 三個 display 消費端對
 > tool-call-only assistant 的 `content === undefined`（刻意 wire shape、N11
 > byte-identical 要求）未容忍；修 = total function（視為空 / 0 bytes）+ JSDoc，
 > **wire shape 不動**；明細 + 執行清單：06-status §3.32 / §5i）
 > （N11.4 已完成 2026-10-19：compact request session 欄位 `tools` / thinking
 > kwargs + `preEncode` 同類修；source + 測試 + `npm run check` + unit 全綠，
-> 明細見 06-status §3.31 / §5h；手動驗收未做、見待辦）
+> 明細見 06-status §3.31 / §5h；手動驗收通過並確認 2026-10-23（併入 N11））
 > （N11 已完成 2026-10-18：N11.1 P0 tool result 附件（MCP screenshot base64）+
 > N11.2 = A4 full-path summary（compact request =
 > `buildLlmContext(effectivePath).messages` + instruction）+ N11.3 測試全綠，
 > 明細見 06-status §3.30 / §5g）
-> **待辦（依序）**：N13（規格定稿 + label 格式使用者確認、未實做；06-status §3.34 / §5k）→ 手動驗收批（N12.3 + N11/N11.4 + N10 + N8 + N7 + 5.8，
-> 可一併；N11.4 已先完成、驗收應看到高 `cache_n`）→ N9（規格定稿、未實做）。
+> **待辦（依序）**：N13（規格定稿 + label 格式使用者確認、未實做、進行中；06-status §3.34 / §5k）→ 剩餘手動驗收（N7 5 項 + 5.8，
+> 可一併；N12.3 + N11/N11.4 + N10 + N8 已通過 2026-10-23）→ N9（規格定稿、未實做）。
 > 本目錄兩份抓包 `before-trigger.json` / `compact-requset.json` 只作根因文檔證據（修後 wire 形狀刻意
 > 改變、不適用當 byte-prefix oracle；回歸測試用合成 fixture）。
 >
@@ -40,20 +40,15 @@
 >
 > **剩（依序）**：
 > 1. **N13 compaction token 顯示對不上**（06-status §3.34 / §5k；規格定稿 +
->    label 格式使用者確認 2026-10-23、未實做：`Summarized N messages (~AAA → B
+>    label 格式使用者確認 2026-10-23、未實做、進行中：`Summarized N messages (~AAA → B
 >    tokens)`，N = drop 數 / AAA = 壓縮前真實 contextUsed / B = summaryTokens）。
-> 2. **手動驗收（未做、可一併驗）**：N12.3（agentic 對話開 inspector 不卡
->    `Building payload` + 展開 tool-call-only 列 / Copy JSON 不炸 + 普通對話無
->    回歸；06-status §5i）
->    + N11 + N11.4（MCP screenshot →
->    連壓兩次 + F5 → compact request 與後續 turns 的 `cache_n`
->    皆高命中；N11.4 已先完成、驗收應看到高命中）
->    + N10（agentic loop 連壓兩次後 F5 → summary 都在、
->    匯出匯入同、既有已損對話 migration 後恢復）
->    + N8（agentic loop 連壓兩次：第二次 summary
->    請求 = `[system, 舊summary, 新訊息, instruction]`、loop 正常續跑）+ N7 5 項
->    （05-§3 #8–#12）+ Phase 1 5.8（06-status §4 清單；A/B mode 行為 + v4 真實
->    token 顯示可一併驗）。
+> 2. **剩餘手動驗收（可一併驗）**：✅ 已通過 2026-10-23：N12.3（agentic 對話開
+>    inspector 不卡 `Building payload` + 展開 tool-call-only 列 / Copy JSON 不炸 +
+>    普通對話無回歸；§5i）+ N11/N11.4（MCP screenshot → 連壓兩次 + F5 → `cache_n`
+>    高命中；§5g/§5h）+ N10（連壓兩次後 F5 → summary 都在、匯出匯入同、既有已損
+>    對話 migration 後恢復；§5f）+ N8（連壓兩次：第二次 summary 請求形狀正確、loop
+>    正常續跑；§5d）。剩：N7 5 項（05-§3 #8–#12）+ Phase 1 5.8（06-status §4
+>    清單；A/B mode 行為 + v4 真實 token 顯示可一併驗）。
 > 3. **N9 F5 / refresh 韌性**（06-status §3.28 / 05-N9 / §5e；規格定稿、未實做）。
 > 4. Phase 3 可選後續（兩段式 summary / per-conversation 覆蓋 / 合併重摘要
 >    提示 / summary 獨立 model / endpoint / gauge savings 顯示，見 05-§1；
@@ -61,12 +56,12 @@
 >
 > **已完成並確認**（明細與決策見 06-status.md）：N12（Context Inspector 凍結修：
 > 三 display 消費端對 `content === undefined` total function + JSDoc、wire shape
-> 零改動；check + unit + client 全綠 2026-10-19；手動驗收未做）→ N11.4（compact request session
+> 零改動；check + unit + client 全綠 2026-10-19；N12.3 手動驗收通過 2026-10-23）→ N11.4（compact request session
 > 欄位一致性：`tools` / thinking kwargs thread 進壓縮路徑 + `preEncode` 同類修；
-> check + unit 全綠 2026-10-19）→ N11（compact request 前綴一致性：tool result
-> 附件與 user input 同路徑 + full-path summary A4；messages 陣列層）→ N10（in-loop cmp sibling 系統性
-> bug：`onCompaction` 推進 flow 接掛點 + 已損樹 migration）→ N8（第二次壓縮：plan 改在
-> effective path）→ N7（壓縮進行中：queue +
+> check + unit 全綠 2026-10-19；手動驗收通過 2026-10-23、併入 N11）→ N11（compact request 前綴一致性：tool result
+> 附件與 user input 同路徑 + full-path summary A4；messages 陣列層；手動驗收通過 2026-10-23）→ N10（in-loop cmp sibling 系統性
+> bug：`onCompaction` 推進 flow 接掛點 + 已損樹 migration；手動驗收通過 2026-10-23）→ N8（第二次壓縮：plan 改在
+> effective path；手動驗收通過 2026-10-23）→ N7（壓縮進行中：queue +
 > in-chat 指標列 + Stop）→ v4 真實 token 計數 → 雙 mode（共用 + A + B，
 > default B）→ N6（split 切允許空 kept）→ N1–N5（summary 上限 n_ctx × % /
 > keep target 設定 / Stop 鍵 / prefix-stable default / `contextSummaryMode`）
