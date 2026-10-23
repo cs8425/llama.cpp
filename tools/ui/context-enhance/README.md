@@ -7,7 +7,7 @@
 > 本文件集是**設計分析與實施規劃**；實做進度與決策記錄見
 > [06-status.md](./06-status.md)。
 >
-> **目前停點（2026-10-23）**：**N13 規格定稿 + label 格式使用者確認（compaction token 顯示對不上：toast / cmp 列 / `~0`；根因 RC1–RC5 + 規格 D1–D5；label = `Summarized N messages (~AAA → B tokens)`：N = drop 數 / AAA = 壓縮前真實 contextUsed / B = summaryTokens；Batch A–C 實做（A+B check 通過、C 顯示待 check）、Batch D 文檔 + 測試實做、待全量 check + 手動驗收；06-status §3.34 / §5k）**；手動驗收通過 2026-10-23：N12.3 + N11/N11.4 + N10 + N8；下一步 = N13 全量 check + 手動驗收（§5k）→ 剩餘手動驗收（N7 5 項 + 5.8）→ N9（規格定稿、未實做）
+> **目前停點（2026-10-23）**：**N13 compaction token 顯示對不上（toast / cmp 列 / `~0`）實做完成（根因 RC1–RC5 + 規格 D1–D5 + label 格式使用者確認；Batch A–D）+ `npm run check` + unit + client 全綠；剩手動驗收；06-status §3.34 / §5k**；手動驗收通過 2026-10-23：N12.3 + N11/N11.4 + N10 + N8；下一步 = N13 手動驗收（§5k）→ 剩餘手動驗收（N7 5 項 + 5.8）→ N9（規格定稿、未實做）
 > （N12：打開 inspector 卡 `Building payload…` = 三個 display 消費端對
 > tool-call-only assistant 的 `content === undefined`（刻意 wire shape、N11
 > byte-identical 要求）未容忍；修 = total function（視為空 / 0 bytes）+ JSDoc，
@@ -19,7 +19,7 @@
 > N11.2 = A4 full-path summary（compact request =
 > `buildLlmContext(effectivePath).messages` + instruction）+ N11.3 測試全綠，
 > 明細見 06-status §3.30 / §5g）
-> **待辦（依序）**：N13（規格定稿 + label 格式使用者確認、未實做、進行中；06-status §3.34 / §5k）→ 剩餘手動驗收（N7 5 項 + 5.8，
+> **待辦（依序）**：N13 手動驗收（實做完成 + check / unit / client 全綠；06-status §3.34 / §5k）→ 剩餘手動驗收（N7 5 項 + 5.8，
 > 可一併；N12.3 + N11/N11.4 + N10 + N8 已通過 2026-10-23）→ N9（規格定稿、未實做）。
 > 本目錄兩份抓包 `before-trigger.json` / `compact-requset.json` 只作根因文檔證據（修後 wire 形狀刻意
 > 改變、不適用當 byte-prefix oracle；回歸測試用合成 fixture）。
@@ -39,8 +39,8 @@
 >   overflow guard，見 06-status §3.28 / 05-N9。
 >
 > **剩（依序）**：
-> 1. **N13 compaction token 顯示對不上**（06-status §3.34 / §5k；規格定稿 +
->    label 格式使用者確認 2026-10-23、未實做、進行中：`Summarized N messages (~AAA → B
+> 1. **N13 compaction token 顯示對上手動驗收**（06-status §3.34 / §5k；實做完成 +
+>    check / unit / client 全綠 2026-10-23：`Summarized N messages (~AAA → B
 >    tokens)`，N = drop 數 / AAA = 壓縮前真實 contextUsed / B = summaryTokens）。
 > 2. **剩餘手動驗收（可一併驗）**：✅ 已通過 2026-10-23：N12.3（agentic 對話開
 >    inspector 不卡 `Building payload` + 展開 tool-call-only 列 / Copy JSON 不炸 +
